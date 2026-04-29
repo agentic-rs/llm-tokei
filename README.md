@@ -100,24 +100,26 @@ Two cost columns are reported:
 - `cache_w` is cache-write tokens (billed separately at write rates).
 - `total = input + output + reasoning + cache_w` (cache_read isn't double-counted).
 
-### Regenerating prices.json
+### Refreshing models.dev data
 
 ```sh
 cargo run --example fetch_prices
+cargo build --release
 ```
 
-Downloads `https://models.dev/api.json`, builds the model rate table, then
-updates `data/models.dev.csv` and writes `data/prices.json`.
+`fetch_prices` only downloads `https://models.dev/api.json` and updates
+`data/models.dev.csv`. `build.rs` generates the embedded `prices.json` under
+Cargo's `OUT_DIR` during `cargo build` by merging `models.dev.csv` with the
+hand-curated inputs. `data/prices.json` is not checked in.
 
 Hand-curated inputs:
 - `data/models.json` — canonical model names, official provider, aliases.
 - `data/providers.json` — provider/model `included` and `multiplier` metadata.
 - `data/prices.override.csv` — rate overrides/additions with the same columns as `models.dev.csv`.
 
-Edit those inputs, never `prices.json` directly. If models.dev reports all token
-cost fields as `0` for a provider/model, the generator treats that row as
-`included` and omits it from `prices` so base cost can fall back to the official
-provider's rate.
+If models.dev reports all token cost fields as `0` for a provider/model, the
+build generator treats that row as `included` and omits it from `prices` so base
+cost can fall back to the official provider's rate.
 
 `--pricing path.json` merges into the bundled table at runtime (entries you
 supply win).

@@ -93,7 +93,7 @@ pub struct PricingTable {
     prices: BTreeMap<(String, String), Price>,
 }
 
-const BUNDLED: &str = include_str!("../data/prices.json");
+const BUNDLED: &str = include_str!(concat!(env!("OUT_DIR"), "/prices.json"));
 
 impl PricingTable {
     pub fn load_bundled() -> Self {
