@@ -43,7 +43,7 @@ llm-tokei --group-by project --format json
 | `--group-by source,model,provider,project,date,session` | Comma list, ordered |
 | `--date-bucket day\|week\|month` | Date bucketing |
 | `--format table\|json` | Output format |
-| `--sort total\|input\|output\|cost\|date\|turns` | Sort key (desc; `--asc` to invert) |
+| `--sort total\|input\|output\|cost\|cost-base\|date\|turns` | Sort key (desc; `--asc` to invert). `cost` = multiplied. |
 | `--limit <N>` | Truncate rows |
 | `--no-cost` | Hide cost column |
 | `--pricing path.json` | Merge custom prices into bundled table |
@@ -52,9 +52,37 @@ llm-tokei --group-by project --format json
 
 ## Pricing
 
-Costs are derived from `data/prices.json` (USD per 1M tokens, keyed by
-`provider/model` or just `model`). OpenCode's own embedded `cost` field is
-used when present. Provide `--pricing <file.json>` to extend or override.
+`data/prices.json` is split into two halves:
+
+```jsonc
+{
+  "providers": {
+    "github-copilot": {
+      "multiplier": 1.0,                              // default for all models
+      "models": {
+        "claude-opus-4.7": { "multiplier": 10.0 },    // model-specific override
+        "gpt-5":           { "multiplier": 0.0 }
+      }
+    }
+  },
+  "models": {
+    "claude-opus-4.7": { "input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75 },
+    "gpt-5":           { "input": 1.25, "output": 10, "cache_read": 0.125, "cache_write": 0 },
+    "github-copilot/gpt-5": { "input": 0, "output": 0, "cache_read": 0, "cache_write": 0 }
+    // provider-prefixed key only needed when the price differs from the plain entry
+  }
+}
+```
+
+Lookup order:
+- **Base price**: `models["provider/model"]` → `models["model"]` → `-`
+- **Multiplier**: `providers[provider].models[model].multiplier` → `providers[provider].multiplier` → `1.0`
+
+Two cost columns are reported:
+- **`cost($)`** — base USD from token rates only.
+- **`cost×mult($)`** — base × multiplier (e.g. Copilot premium-request weighting).
+
+`--pricing path.json` merges into the bundled table (entries you supply win).
 
 ## Notes
 

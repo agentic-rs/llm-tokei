@@ -248,9 +248,13 @@ fn parse_rollout(path: &std::path::Path) -> Result<Option<UsageRecord>> {
         .or(session_ts)
         .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
 
-    // input_tokens in Codex usage is the *non-cached* input;
-    // cached_input_tokens is the cache-read portion. Codex CLI does not
-    // surface cache writes, so cache_write stays 0.
+    // Codex's `input_tokens` is the *total* prompt tokens (cached + uncached).
+    // `cached_input_tokens` is the cached subset. Subtract so `input` is the
+    // uncached portion only — matching OpenCode semantics.
+    let uncached_input = usage
+        .input_tokens
+        .saturating_sub(usage.cached_input_tokens);
+
     Ok(Some(UsageRecord {
         source: Source::Codex,
         session_id: sid,
@@ -260,7 +264,7 @@ fn parse_rollout(path: &std::path::Path) -> Result<Option<UsageRecord>> {
         provider,
         model,
         ts,
-        input: usage.input_tokens,
+        input: uncached_input,
         output: usage.output_tokens,
         reasoning: usage.reasoning_output_tokens,
         cache_read: usage.cached_input_tokens,

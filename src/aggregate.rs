@@ -51,7 +51,8 @@ pub struct Aggregate {
     pub total: u64,
     pub turns: u64,
     pub cost_embedded: f64,
-    pub cost_estimated: f64,
+    pub cost_base: f64,
+    pub cost_multiplied: f64,
     pub first_ts: Option<DateTime<Utc>>,
     pub last_ts: Option<DateTime<Utc>>,
 }
@@ -148,7 +149,8 @@ pub fn aggregate(
             total: 0,
             turns: 0,
             cost_embedded: 0.0,
-            cost_estimated: 0.0,
+            cost_base: 0.0,
+            cost_multiplied: 0.0,
             first_ts: None,
             last_ts: None,
         });
@@ -162,8 +164,9 @@ pub fn aggregate(
         if let Some(c) = r.cost_embedded {
             agg.cost_embedded += c;
         }
-        if let Some(c) = pricing.cost_for(r) {
-            agg.cost_estimated += c;
+        if let Some((base, mult)) = pricing.cost_for(r) {
+            agg.cost_base += base;
+            agg.cost_multiplied += mult;
         }
         agg.first_ts = Some(match agg.first_ts {
             Some(t) if t < r.ts => t,
@@ -183,6 +186,7 @@ pub enum SortKey {
     Input,
     Output,
     Cost,
+    CostBase,
     Date,
     Turns,
 }
@@ -193,7 +197,8 @@ impl SortKey {
             "total" => SortKey::Total,
             "input" => SortKey::Input,
             "output" => SortKey::Output,
-            "cost" => SortKey::Cost,
+            "cost" | "cost-multiplied" | "cost_multiplied" => SortKey::Cost,
+            "cost-base" | "cost_base" | "base" => SortKey::CostBase,
             "date" | "time" => SortKey::Date,
             "turns" => SortKey::Turns,
             _ => return None,
@@ -208,9 +213,12 @@ pub fn sort_aggs(aggs: &mut [Aggregate], key: SortKey, descending: bool) {
             SortKey::Input => a.input.cmp(&b.input),
             SortKey::Output => a.output.cmp(&b.output),
             SortKey::Cost => a
-                .cost_estimated
-                .max(a.cost_embedded)
-                .partial_cmp(&b.cost_estimated.max(b.cost_embedded))
+                .cost_multiplied
+                .partial_cmp(&b.cost_multiplied)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            SortKey::CostBase => a
+                .cost_base
+                .partial_cmp(&b.cost_base)
                 .unwrap_or(std::cmp::Ordering::Equal),
             SortKey::Date => a.last_ts.cmp(&b.last_ts),
             SortKey::Turns => a.turns.cmp(&b.turns),

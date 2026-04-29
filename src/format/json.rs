@@ -12,7 +12,8 @@ struct JsonRow<'a> {
     total: u64,
     turns: u64,
     cost_embedded: f64,
-    cost_estimated: f64,
+    cost_base: f64,
+    cost_multiplied: f64,
     first_ts: Option<&'a chrono::DateTime<chrono::Utc>>,
     last_ts: Option<&'a chrono::DateTime<chrono::Utc>>,
 }
@@ -38,7 +39,8 @@ pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim]) -> String {
                 total: a.total,
                 turns: a.turns,
                 cost_embedded: a.cost_embedded,
-                cost_estimated: a.cost_estimated,
+                cost_base: a.cost_base,
+                cost_multiplied: a.cost_multiplied,
                 first_ts: a.first_ts.as_ref(),
                 last_ts: a.last_ts.as_ref(),
             }

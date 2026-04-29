@@ -23,12 +23,13 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     }
     if opts.show_cost {
         header.push(header_cell("cost($)", opts.use_color));
+        header.push(header_cell("cost×mult($)", opts.use_color));
     }
     table.set_header(header);
 
     let (mut tot_in, mut tot_out, mut tot_re, mut tot_cr, mut tot_cw, mut tot_tot, mut tot_t) =
         (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
-    let mut tot_cost = 0.0_f64;
+    let (mut tot_base, mut tot_mult) = (0.0_f64, 0.0_f64);
 
     for a in aggs {
         let mut row: Vec<Cell> = a.keys.iter().map(|k| Cell::new(k)).collect();
@@ -40,9 +41,10 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
         row.push(num_cell(a.total));
         row.push(num_cell(a.turns));
         if opts.show_cost {
-            let c = if a.cost_embedded > 0.0 { a.cost_embedded } else { a.cost_estimated };
-            row.push(cost_cell(c));
-            tot_cost += c;
+            row.push(cost_cell(a.cost_base));
+            row.push(cost_cell(a.cost_multiplied));
+            tot_base += a.cost_base;
+            tot_mult += a.cost_multiplied;
         }
         table.add_row(row);
         tot_in += a.input;
@@ -66,7 +68,8 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
         row.push(num_cell_bold(tot_tot, opts.use_color));
         row.push(num_cell_bold(tot_t, opts.use_color));
         if opts.show_cost {
-            row.push(cost_cell_bold(tot_cost, opts.use_color));
+            row.push(cost_cell_bold(tot_base, opts.use_color));
+            row.push(cost_cell_bold(tot_mult, opts.use_color));
         }
         table.add_row(row);
     }
