@@ -1,0 +1,18 @@
+{
+  "github-copilot": {
+    "included": true,
+    "models": {
+      "claude-opus-4.7":        { "multiplier": 10.0 },
+      "claude-opus-4.5":        { "multiplier": 10.0 },
+      "claude-sonnet-4.6":      { "multiplier": 1.0 },
+      "claude-sonnet-4.5":      { "multiplier": 1.0 },
+      "claude-haiku-4.5":       { "multiplier": 0.33 },
+      "gpt-5":                  { "multiplier": 0.0 },
+      "gpt-5-mini":             { "multiplier": 0.0 },
+      "gpt-5.5":                { "multiplier": 1.0 },
+      "gpt-5.3-codex":          { "multiplier": 1.0 },
+      "gemini-3.1-pro-preview": { "multiplier": 1.0 },
+      "glm-5.1":                { "multiplier": 1.0 }
+    }
+  }
+}

@@ -52,37 +52,75 @@ llm-tokei --group-by project --format json
 
 ## Pricing
 
-`data/prices.json` is split into two halves:
+The bundled `data/prices.json` is **generated** from [models.dev](https://models.dev),
+`data/models.json`, `data/providers.json`, and `data/prices.override.csv`.
+Schema:
 
 ```jsonc
 {
   "providers": {
     "github-copilot": {
-      "multiplier": 1.0,                              // default for all models
+      "included": true,                                 // default for all models in this provider
       "models": {
-        "claude-opus-4.7": { "multiplier": 10.0 },    // model-specific override
-        "gpt-5":           { "multiplier": 0.0 }
+        "claude-opus-4.7": { "multiplier": 10.0, "included": false },
+        "gpt-5":           { "multiplier": 0.0 }       // inherits included=true
       }
     }
   },
   "models": {
-    "claude-opus-4.7": { "input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75 },
-    "gpt-5":           { "input": 1.25, "output": 10, "cache_read": 0.125, "cache_write": 0 },
-    "github-copilot/gpt-5": { "input": 0, "output": 0, "cache_read": 0, "cache_write": 0 }
-    // provider-prefixed key only needed when the price differs from the plain entry
-  }
+    "claude-opus-4.7": { "provider": "anthropic", "aliases": ["claude-opus-4-7"] },
+    "gpt-5":           { "provider": "openai", "aliases": ["openai/gpt-5"] }
+  },
+  "prices": [
+    { "provider": "anthropic", "model": "claude-opus-4.7", "name": "claude-opus-4-7",
+      "input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75 },
+    { "provider": "openai", "model": "gpt-5", "input": 1.25, "output": 10, "cache_read": 0.125 }
+  ]
 }
 ```
 
-Lookup order:
-- **Base price**: `models["provider/model"]` → `models["model"]` → `-`
-- **Multiplier**: `providers[provider].models[model].multiplier` → `providers[provider].multiplier` → `1.0`
+Defaults / lookup order:
+- Model IDs are canonicalized through `models[*].aliases` before grouping or pricing.
+- **Base price**: exact `(provider, canonical_model)` row in `prices`, then the model's official provider row from `models[model].provider`, then no cost.
+- **Multiplier**: `providers[P].models[M].multiplier` → `providers[P].multiplier` → `1.0`.
+  Omitted on write when equal to the default `1.0` for providers (always emitted for models).
+- **Included**: `providers[P].models[M].included` → `providers[P].included` → `false`.
+  Omitted on write when equal to its default. When `included == true` the
+  multiplied cost is forced to `$0` (covered by a subscription / plan), but the
+  base cost is still computed using the official-provider price when available.
 
 Two cost columns are reported:
-- **`cost($)`** — base USD from token rates only.
-- **`cost×mult($)`** — base × multiplier (e.g. Copilot premium-request weighting).
+- **`cost($)`** — base USD from token rates only (always shown).
+- **`cost×mult($)`** — base × multiplier, or `0` if `included`.
 
-`--pricing path.json` merges into the bundled table (entries you supply win).
+### Token semantics
+
+- `input` is the **full prompt total** (cached + uncached).
+- `cache_r` is the cached portion of `input` (a subset, not additional).
+- `cache_w` is cache-write tokens (billed separately at write rates).
+- `total = input + output + reasoning + cache_w` (cache_read isn't double-counted).
+
+### Regenerating prices.json
+
+```sh
+cargo run --example fetch_prices
+```
+
+Downloads `https://models.dev/api.json`, builds the model rate table, then
+updates `data/models.dev.csv` and writes `data/prices.json`.
+
+Hand-curated inputs:
+- `data/models.json` — canonical model names, official provider, aliases.
+- `data/providers.json` — provider/model `included` and `multiplier` metadata.
+- `data/prices.override.csv` — rate overrides/additions with the same columns as `models.dev.csv`.
+
+Edit those inputs, never `prices.json` directly. If models.dev reports all token
+cost fields as `0` for a provider/model, the generator treats that row as
+`included` and omits it from `prices` so base cost can fall back to the official
+provider's rate.
+
+`--pricing path.json` merges into the bundled table at runtime (entries you
+supply win).
 
 ## Notes
 

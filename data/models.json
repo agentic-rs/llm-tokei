@@ -1,0 +1,126 @@
+{
+  "claude-opus-4.7": {
+    "provider": "anthropic",
+    "aliases": [
+      "claude-opus-4-7",
+      "claude-opus-4-7-20251101",
+      "claude-opus-4-7@20251101",
+      "claude-opus-4.7-thinking",
+      "claude-opus-4-7-thinking",
+      "anthropic/claude-opus-4-7"
+    ]
+  },
+  "claude-opus-4.5": {
+    "provider": "anthropic",
+    "aliases": [
+      "claude-opus-4-5",
+      "claude-opus-4-5-20251101",
+      "claude-opus-4-5@20251101",
+      "claude-opus-4-5-20251101-thinking",
+      "claude-opus-4-5-20251101:thinking",
+      "anthropic/claude-opus-4-5"
+    ]
+  },
+  "claude-opus-4.6": {
+    "provider": "anthropic",
+    "aliases": [
+      "claude-opus-4-6",
+      "claude-opus-4-6-fast",
+      "claude-opus-4-6-think",
+      "claude-opus-4-6-thinking",
+      "claude-opus-4-6@default"
+    ]
+  },
+  "claude-sonnet-4.6": {
+    "provider": "anthropic",
+    "aliases": [
+      "claude-sonnet-4-6",
+      "claude-sonnet-4-6-20251101",
+      "claude-sonnet-4-6@20251101",
+      "anthropic/claude-sonnet-4-6"
+    ]
+  },
+  "claude-sonnet-4.5": {
+    "provider": "anthropic",
+    "aliases": [
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-5-20250929",
+      "claude-sonnet-4-5@20250929",
+      "anthropic/claude-sonnet-4-5"
+    ]
+  },
+  "claude-haiku-4.5": {
+    "provider": "anthropic",
+    "aliases": [
+      "claude-haiku-4-5",
+      "claude-haiku-4-5-20251001",
+      "claude-haiku-4-5@20251001",
+      "anthropic/claude-haiku-4-5"
+    ]
+  },
+  "gpt-5": {
+    "provider": "openai",
+    "aliases": [
+      "openai/gpt-5",
+      "gpt-5-2025-08-07"
+    ]
+  },
+  "gpt-5-mini": {
+    "provider": "openai",
+    "aliases": [
+      "openai/gpt-5-mini",
+      "gpt-5-mini-2025-08-07"
+    ]
+  },
+  "gpt-5.3-codex": {
+    "provider": "openai",
+    "aliases": [
+      "openai/gpt-5.3-codex",
+      "gpt-5-3-codex",
+      "gpt-5-codex"
+    ]
+  },
+  "gpt-5.4": {
+    "provider": "openai",
+    "aliases": [
+      "openai/gpt-5.4",
+      "gpt-5-4"
+    ]
+  },
+  "gpt-5.4-mini": {
+    "provider": "openai",
+    "aliases": [
+      "openai/gpt-5.4-mini",
+      "gpt-5-4-mini"
+    ]
+  },
+  "gpt-5.5": {
+    "provider": "openai",
+    "aliases": [
+      "openai/gpt-5.5",
+      "gpt-5-5"
+    ]
+  },
+  "o4-mini": {
+    "provider": "openai",
+    "aliases": [
+      "openai/o4-mini",
+      "o4-mini-2025-04-16"
+    ]
+  },
+  "gemini-3.1-pro-preview": {
+    "provider": "google",
+    "aliases": [
+      "google/gemini-3.1-pro-preview",
+      "gemini-3-1-pro-preview",
+      "gemini-3.1-pro"
+    ]
+  },
+  "glm-5.1": {
+    "provider": "zai",
+    "aliases": [
+      "zai/glm-5.1",
+      "glm-5-1"
+    ]
+  }
+}

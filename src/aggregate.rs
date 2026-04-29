@@ -66,7 +66,7 @@ pub struct Filters {
 }
 
 impl Filters {
-    pub fn matches(&self, r: &UsageRecord) -> bool {
+    pub fn matches(&self, r: &UsageRecord, pricing: &PricingTable) -> bool {
         if let Some(s) = self.since {
             if r.ts < s {
                 return false;
@@ -78,7 +78,8 @@ impl Filters {
             }
         }
         if let Some(g) = &self.model_glob {
-            if !r.model.as_deref().is_some_and(|m| g.matches(m)) {
+            let canonical = pricing.canonical_model(r.provider.as_deref(), r.model.as_deref());
+            if !r.model.as_deref().is_some_and(|m| g.matches(m)) && !g.matches(&canonical) {
                 return false;
             }
         }
@@ -96,11 +97,16 @@ impl Filters {
     }
 }
 
-pub fn key_for(r: &UsageRecord, dims: &[GroupDim], date_bucket_unit: &str) -> Vec<String> {
+pub fn key_for(
+    r: &UsageRecord,
+    dims: &[GroupDim],
+    date_bucket_unit: &str,
+    pricing: &PricingTable,
+) -> Vec<String> {
     dims.iter()
         .map(|d| match d {
             GroupDim::Source => r.source.as_str().to_string(),
-            GroupDim::Model => r.model.clone().unwrap_or_else(|| "-".into()),
+            GroupDim::Model => pricing.canonical_model(r.provider.as_deref(), r.model.as_deref()),
             GroupDim::Provider => r.provider.clone().unwrap_or_else(|| "-".into()),
             GroupDim::Project => r
                 .project_name
@@ -137,8 +143,8 @@ pub fn aggregate(
     pricing: &PricingTable,
 ) -> Vec<Aggregate> {
     let mut map: BTreeMap<Vec<String>, Aggregate> = BTreeMap::new();
-    for r in records.iter().filter(|r| filters.matches(r)) {
-        let key = key_for(r, dims, date_bucket_unit);
+    for r in records.iter().filter(|r| filters.matches(r, pricing)) {
+        let key = key_for(r, dims, date_bucket_unit, pricing);
         let agg = map.entry(key.clone()).or_insert_with(|| Aggregate {
             keys: key,
             input: 0,

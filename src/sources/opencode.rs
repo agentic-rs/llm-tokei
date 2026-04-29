@@ -166,7 +166,10 @@ impl UsageSource for OpenCodeSource {
                 provider: parsed.provider_id,
                 model: parsed.model_id,
                 ts,
-                input: tokens.input,
+                // OpenCode reports `tokens.input` as uncached only and
+                // `tokens.cache.read` as the cached portion. Combine so
+                // `input` is the full prompt total (matching Codex semantics).
+                input: tokens.input.saturating_add(cache.read),
                 output: tokens.output,
                 reasoning: tokens.reasoning,
                 cache_read: cache.read,
