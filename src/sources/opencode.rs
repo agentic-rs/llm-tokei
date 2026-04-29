@@ -198,8 +198,7 @@ fn load_session_meta(conn: &Connection) -> Result<HashMap<String, SessionMeta>> 
     }
 
     let mut out = HashMap::new();
-    let mut stmt =
-        conn.prepare("SELECT id, project_id, directory, title FROM session")?;
+    let mut stmt = conn.prepare("SELECT id, project_id, directory, title FROM session")?;
     let iter = stmt.query_map([], |row| {
         let id: String = row.get(0)?;
         let project_id: Option<String> = row.get(1)?;
@@ -208,10 +207,7 @@ fn load_session_meta(conn: &Connection) -> Result<HashMap<String, SessionMeta>> 
         Ok((id, project_id, directory, title))
     })?;
     for r in iter.flatten() {
-        let project_name = r
-            .1
-            .as_ref()
-            .and_then(|pid| projects.get(pid).cloned());
+        let project_name = r.1.as_ref().and_then(|pid| projects.get(pid).cloned());
         out.insert(
             r.0,
             SessionMeta {
@@ -228,7 +224,9 @@ fn load_session_meta(conn: &Connection) -> Result<HashMap<String, SessionMeta>> 
 fn ms_to_dt(ms: i64) -> DateTime<Utc> {
     let secs = ms.div_euclid(1000);
     let nanos = (ms.rem_euclid(1000) * 1_000_000) as u32;
-    Utc.timestamp_opt(secs, nanos).single().unwrap_or_else(Utc::now)
+    Utc.timestamp_opt(secs, nanos)
+        .single()
+        .unwrap_or_else(Utc::now)
 }
 
 #[allow(dead_code)]

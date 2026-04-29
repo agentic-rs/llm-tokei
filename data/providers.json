@@ -1,4 +1,10 @@
 {
+  "anthropic": {
+    "source": true
+  },
+  "google": {
+    "source": true
+  },
   "github-copilot": {
     "included": true,
     "models": {
@@ -14,5 +20,11 @@
       "gemini-3.1-pro-preview": { "multiplier": 1.0 },
       "glm-5.1":                { "multiplier": 1.0 }
     }
+  },
+  "openai": {
+    "source": true
+  },
+  "zai": {
+    "source": true
   }
 }

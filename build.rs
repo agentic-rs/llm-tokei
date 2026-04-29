@@ -24,6 +24,8 @@ struct ProviderEntry {
     multiplier: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     included: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<bool>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     models: BTreeMap<String, ModelOverride>,
 }
@@ -78,7 +80,12 @@ fn main() -> Result<()> {
     let models_dev_csv_path = data.join("models.dev.csv");
     let override_csv_path = data.join("prices.override.csv");
 
-    for path in [&models_path, &providers_path, &models_dev_csv_path, &override_csv_path] {
+    for path in [
+        &models_path,
+        &providers_path,
+        &models_dev_csv_path,
+        &override_csv_path,
+    ] {
         println!("cargo:rerun-if-changed={}", path.display());
     }
 
@@ -154,7 +161,11 @@ fn read_csv(path: &Path, aliases: &BTreeMap<String, String>) -> Result<Vec<CsvRo
     for result in rdr.deserialize() {
         let mut row: CsvRow = result.with_context(|| format!("parsing {}", path.display()))?;
         row.provider = norm(&row.provider);
-        row.name = norm(if row.name.is_empty() { &row.model } else { &row.name });
+        row.name = norm(if row.name.is_empty() {
+            &row.model
+        } else {
+            &row.name
+        });
         row.model = resolve_alias(aliases, &row.provider, &norm(&row.model));
         rows.push(row);
     }
@@ -164,7 +175,10 @@ fn read_csv(path: &Path, aliases: &BTreeMap<String, String>) -> Result<Vec<CsvRo
 fn merge_rows(base: Vec<CsvRow>, overrides: Vec<CsvRow>) -> Vec<CsvRow> {
     let mut out: BTreeMap<(String, String, String), CsvRow> = BTreeMap::new();
     for row in base {
-        out.insert((row.provider.clone(), row.model.clone(), row.name.clone()), row);
+        out.insert(
+            (row.provider.clone(), row.model.clone(), row.name.clone()),
+            row,
+        );
     }
     for row in overrides {
         let key = (row.provider.clone(), row.model.clone(), row.name.clone());
@@ -176,23 +190,42 @@ fn merge_rows(base: Vec<CsvRow>, overrides: Vec<CsvRow>) -> Vec<CsvRow> {
 }
 
 fn overlay_csv_row(base: &mut CsvRow, over: &CsvRow) {
-    if over.input_cost.is_some() { base.input_cost = over.input_cost; }
-    if over.output_cost.is_some() { base.output_cost = over.output_cost; }
-    if over.reasoning_cost.is_some() { base.reasoning_cost = over.reasoning_cost; }
-    if over.cache_read_cost.is_some() { base.cache_read_cost = over.cache_read_cost; }
-    if over.cache_write_cost.is_some() { base.cache_write_cost = over.cache_write_cost; }
-    if over.audio_input_cost.is_some() { base.audio_input_cost = over.audio_input_cost; }
-    if over.audio_output_cost.is_some() { base.audio_output_cost = over.audio_output_cost; }
+    if over.input_cost.is_some() {
+        base.input_cost = over.input_cost;
+    }
+    if over.output_cost.is_some() {
+        base.output_cost = over.output_cost;
+    }
+    if over.reasoning_cost.is_some() {
+        base.reasoning_cost = over.reasoning_cost;
+    }
+    if over.cache_read_cost.is_some() {
+        base.cache_read_cost = over.cache_read_cost;
+    }
+    if over.cache_write_cost.is_some() {
+        base.cache_write_cost = over.cache_write_cost;
+    }
+    if over.audio_input_cost.is_some() {
+        base.audio_input_cost = over.audio_input_cost;
+    }
+    if over.audio_output_cost.is_some() {
+        base.audio_output_cost = over.audio_output_cost;
+    }
 }
 
-fn read_providers(path: &Path, aliases: &BTreeMap<String, String>) -> Result<BTreeMap<String, ProviderEntry>> {
+fn read_providers(
+    path: &Path,
+    aliases: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, ProviderEntry>> {
     let s = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let raw: BTreeMap<String, ProviderEntry> =
         serde_json::from_str(&s).with_context(|| format!("parsing {}", path.display()))?;
     let mut out = BTreeMap::new();
     for (provider, entry) in raw {
         let provider = norm(&provider);
-        let dst = out.entry(provider.clone()).or_insert_with(ProviderEntry::default);
+        let dst = out
+            .entry(provider.clone())
+            .or_insert_with(ProviderEntry::default);
         dst.multiplier = entry.multiplier;
         dst.included = entry.included;
         for (model, mo) in entry.models {
@@ -211,14 +244,21 @@ fn infer_providers(rows: &[CsvRow]) -> BTreeMap<String, ProviderEntry> {
         .collect();
     let mut by_provider: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for row in rows {
-        by_provider.entry(row.provider.clone()).or_default().insert(row.model.clone());
+        by_provider
+            .entry(row.provider.clone())
+            .or_default()
+            .insert(row.model.clone());
     }
 
     let mut providers = BTreeMap::new();
     for (provider, models) in by_provider {
         let all_included = models.len() >= 2
-            && models.iter().all(|m| included_pairs.contains(&(provider.clone(), m.clone())));
-        let entry = providers.entry(provider.clone()).or_insert_with(ProviderEntry::default);
+            && models
+                .iter()
+                .all(|m| included_pairs.contains(&(provider.clone(), m.clone())));
+        let entry = providers
+            .entry(provider.clone())
+            .or_insert_with(ProviderEntry::default);
         if all_included {
             entry.included = Some(true);
         } else {
@@ -232,7 +272,10 @@ fn infer_providers(rows: &[CsvRow]) -> BTreeMap<String, ProviderEntry> {
     providers
 }
 
-fn merge_providers(dst: &mut BTreeMap<String, ProviderEntry>, src: BTreeMap<String, ProviderEntry>) {
+fn merge_providers(
+    dst: &mut BTreeMap<String, ProviderEntry>,
+    src: BTreeMap<String, ProviderEntry>,
+) {
     for (provider, src_entry) in src {
         let dst_entry = dst.entry(provider).or_default();
         if src_entry.multiplier.is_some() {
@@ -240,6 +283,9 @@ fn merge_providers(dst: &mut BTreeMap<String, ProviderEntry>, src: BTreeMap<Stri
         }
         if src_entry.included.is_some() {
             dst_entry.included = src_entry.included;
+        }
+        if src_entry.source.is_some() {
+            dst_entry.source = src_entry.source;
         }
         for (model, src_model) in src_entry.models {
             let dst_model = dst_entry.models.entry(model).or_default();
@@ -261,6 +307,9 @@ fn normalize_providers(providers: &mut BTreeMap<String, ProviderEntry>) {
         if entry.included == Some(false) {
             entry.included = None;
         }
+        if entry.source == Some(false) {
+            entry.source = None;
+        }
         let provider_included = entry.included.unwrap_or(false);
         entry.models.retain(|_, mo| {
             if mo.included == Some(provider_included) {
@@ -269,7 +318,9 @@ fn normalize_providers(providers: &mut BTreeMap<String, ProviderEntry>) {
             mo.multiplier.is_some() || mo.included.is_some()
         });
     }
-    providers.retain(|_, e| e.multiplier.is_some() || e.included.is_some() || !e.models.is_empty());
+    providers.retain(|_, e| {
+        e.multiplier.is_some() || e.included.is_some() || e.source.is_some() || !e.models.is_empty()
+    });
 }
 
 fn build_prices(rows: &[CsvRow], providers: &BTreeMap<String, ProviderEntry>) -> Vec<PriceRow> {
@@ -312,7 +363,9 @@ fn prefer_price(new: &PriceRow, old: &PriceRow) -> bool {
 }
 
 fn included_for(providers: &BTreeMap<String, ProviderEntry>, provider: &str, model: &str) -> bool {
-    let Some(entry) = providers.get(provider) else { return false; };
+    let Some(entry) = providers.get(provider) else {
+        return false;
+    };
     entry
         .models
         .get(model)
@@ -321,7 +374,13 @@ fn included_for(providers: &BTreeMap<String, ProviderEntry>, provider: &str, mod
 }
 
 fn zero_signal(row: &CsvRow) -> bool {
-    let costs = [row.input_cost, row.output_cost, row.reasoning_cost, row.cache_read_cost, row.cache_write_cost];
+    let costs = [
+        row.input_cost,
+        row.output_cost,
+        row.reasoning_cost,
+        row.cache_read_cost,
+        row.cache_write_cost,
+    ];
     costs.iter().any(Option::is_some) && costs.iter().all(|v| v.unwrap_or(0.0) == 0.0)
 }
 
@@ -366,7 +425,10 @@ fn format_pricing_file(file: &PricingFile) -> Result<String> {
 
 fn indent_json(s: &str, spaces: usize) -> String {
     let pad = " ".repeat(spaces);
-    s.lines().map(|line| format!("{pad}{line}")).collect::<Vec<_>>().join("\n")
+    s.lines()
+        .map(|line| format!("{pad}{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn norm(s: &str) -> String {

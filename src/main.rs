@@ -30,10 +30,7 @@ fn main() -> Result<()> {
     let mut all: Vec<UsageRecord> = Vec::new();
 
     if want.iter().any(|s| s == "codex") {
-        let path = args
-            .codex_dir
-            .clone()
-            .or_else(CodexSource::default_path);
+        let path = args.codex_dir.clone().or_else(CodexSource::default_path);
         if let Some(p) = path {
             let src = CodexSource::new(p);
             match src.collect() {

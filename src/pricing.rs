@@ -165,17 +165,16 @@ impl PricingTable {
     }
 
     pub fn canonical_model(&self, provider: Option<&str>, model: Option<&str>) -> String {
-        let Some(model) = model else { return "-".into(); };
+        let Some(model) = model else {
+            return "-".into();
+        };
         let model = norm(model);
         if let Some(provider) = provider {
             if let Some(canonical) = self.aliases.get(&format!("{}/{}", norm(provider), model)) {
                 return canonical.clone();
             }
         }
-        self.aliases
-            .get(&model)
-            .cloned()
-            .unwrap_or(model)
+        self.aliases.get(&model).cloned().unwrap_or(model)
     }
 
     pub fn lookup_base(&self, provider: Option<&str>, model: Option<&str>) -> Option<&Price> {

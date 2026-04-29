@@ -17,7 +17,13 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
         .map(|d| header_cell(d.label(), opts.use_color))
         .collect();
     for h in [
-        "input", "output", "reasoning", "cache_r", "cache_w", "total", "turns",
+        "input",
+        "output",
+        "reasoning",
+        "cache_r",
+        "cache_w",
+        "total",
+        "turns",
     ] {
         header.push(header_cell(h, opts.use_color));
     }
@@ -58,7 +64,13 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
 
     if aggs.len() > 1 {
         let mut row: Vec<Cell> = (0..dims.len())
-            .map(|i| if i == 0 { bold_cell("TOTAL", opts.use_color) } else { Cell::new("") })
+            .map(|i| {
+                if i == 0 {
+                    bold_cell("TOTAL", opts.use_color)
+                } else {
+                    Cell::new("")
+                }
+            })
             .collect();
         row.push(num_cell_bold(tot_in, opts.use_color));
         row.push(num_cell_bold(tot_out, opts.use_color));
@@ -95,22 +107,46 @@ fn num_cell(n: u64) -> Cell {
 }
 fn num_cell_bold(n: u64, color: bool) -> Cell {
     let c = Cell::new(fmt_int(n)).set_alignment(CellAlignment::Right);
-    if color { c.fg(Color::Yellow) } else { c }
+    if color {
+        c.fg(Color::Yellow)
+    } else {
+        c
+    }
 }
 fn cost_cell(v: f64) -> Cell {
-    let s = if v == 0.0 { "-".to_string() } else { format!("{:.4}", v) };
+    let s = if v == 0.0 {
+        "-".to_string()
+    } else {
+        format!("{:.4}", v)
+    };
     Cell::new(s).set_alignment(CellAlignment::Right)
 }
 fn cost_cell_bold(v: f64, color: bool) -> Cell {
-    let s = if v == 0.0 { "-".to_string() } else { format!("{:.4}", v) };
+    let s = if v == 0.0 {
+        "-".to_string()
+    } else {
+        format!("{:.4}", v)
+    };
     let c = Cell::new(s).set_alignment(CellAlignment::Right);
-    if color { c.fg(Color::Yellow) } else { c }
+    if color {
+        c.fg(Color::Yellow)
+    } else {
+        c
+    }
 }
 fn header_cell(s: &str, color: bool) -> Cell {
     let c = Cell::new(s);
-    if color { c.fg(Color::Cyan) } else { c }
+    if color {
+        c.fg(Color::Cyan)
+    } else {
+        c
+    }
 }
 fn bold_cell(s: &str, color: bool) -> Cell {
     let c = Cell::new(s);
-    if color { c.fg(Color::Yellow) } else { c }
+    if color {
+        c.fg(Color::Yellow)
+    } else {
+        c
+    }
 }

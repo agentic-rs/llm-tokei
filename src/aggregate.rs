@@ -229,6 +229,10 @@ pub fn sort_aggs(aggs: &mut [Aggregate], key: SortKey, descending: bool) {
             SortKey::Date => a.last_ts.cmp(&b.last_ts),
             SortKey::Turns => a.turns.cmp(&b.turns),
         };
-        if descending { ord.reverse() } else { ord }
+        if descending {
+            ord.reverse()
+        } else {
+            ord
+        }
     });
 }

@@ -190,15 +190,11 @@ fn parse_rollout(path: &std::path::Path) -> Result<Option<UsageRecord>> {
                     if inner_kind == Some("token_count") {
                         let info = payload.get("info").unwrap_or(payload);
                         if let Some(total) = info.get("total_token_usage") {
-                            if let Ok(t) =
-                                serde_json::from_value::<TokenUsage>(total.clone())
-                            {
+                            if let Ok(t) = serde_json::from_value::<TokenUsage>(total.clone()) {
                                 last_total = Some(t);
                             }
                         } else if let Some(last) = info.get("last_token_usage") {
-                            if let Ok(t) =
-                                serde_json::from_value::<TokenUsage>(last.clone())
-                            {
+                            if let Ok(t) = serde_json::from_value::<TokenUsage>(last.clone()) {
                                 let acc = summed.get_or_insert_with(TokenUsage::default);
                                 acc.input_tokens += t.input_tokens;
                                 acc.cached_input_tokens += t.cached_input_tokens;
