@@ -62,7 +62,8 @@ struct PriceRow {
 struct CsvRow {
     provider: String,
     model: String,
-    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
     input_cost: Option<f64>,
     output_cost: Option<f64>,
     reasoning_cost: Option<f64>,
@@ -161,12 +162,8 @@ fn read_csv(path: &Path, aliases: &BTreeMap<String, String>) -> Result<Vec<CsvRo
     for result in rdr.deserialize() {
         let mut row: CsvRow = result.with_context(|| format!("parsing {}", path.display()))?;
         row.provider = norm(&row.provider);
-        row.name = norm(if row.name.is_empty() {
-            &row.model
-        } else {
-            &row.name
-        });
         row.model = resolve_alias(aliases, &row.provider, &norm(&row.model));
+        row.name = Some(norm(row.name.as_deref().unwrap_or(&row.model)));
         rows.push(row);
     }
     Ok(rows)
@@ -175,13 +172,12 @@ fn read_csv(path: &Path, aliases: &BTreeMap<String, String>) -> Result<Vec<CsvRo
 fn merge_rows(base: Vec<CsvRow>, overrides: Vec<CsvRow>) -> Vec<CsvRow> {
     let mut out: BTreeMap<(String, String, String), CsvRow> = BTreeMap::new();
     for row in base {
-        out.insert(
-            (row.provider.clone(), row.model.clone(), row.name.clone()),
-            row,
-        );
+        let name = row.name.clone().unwrap_or_else(|| row.model.clone());
+        out.insert((row.provider.clone(), row.model.clone(), name), row);
     }
     for row in overrides {
-        let key = (row.provider.clone(), row.model.clone(), row.name.clone());
+        let name = row.name.clone().unwrap_or_else(|| row.model.clone());
+        let key = (row.provider.clone(), row.model.clone(), name);
         out.entry(key)
             .and_modify(|base| overlay_csv_row(base, &row))
             .or_insert(row);
@@ -228,6 +224,7 @@ fn read_providers(
             .or_insert_with(ProviderEntry::default);
         dst.multiplier = entry.multiplier;
         dst.included = entry.included;
+        dst.source = entry.source;
         for (model, mo) in entry.models {
             let model = resolve_alias(aliases, &provider, &norm(&model));
             dst.models.insert(model, mo);
@@ -330,7 +327,10 @@ fn build_prices(rows: &[CsvRow], providers: &BTreeMap<String, ProviderEntry>) ->
         .map(|row| PriceRow {
             provider: row.provider.clone(),
             model: row.model.clone(),
-            name: (row.name != row.model).then(|| row.name.clone()),
+            name: row
+                .name
+                .as_ref()
+                .and_then(|name| (name != &row.model).then(|| name.clone())),
             input: row.input_cost.unwrap_or(0.0),
             output: row.output_cost.unwrap_or(0.0),
             reasoning: row.reasoning_cost,
@@ -339,27 +339,6 @@ fn build_prices(rows: &[CsvRow], providers: &BTreeMap<String, ProviderEntry>) ->
         })
         .filter(|row| !price_is_zero(row))
         .collect()
-}
-
-fn dedupe_prices(rows: Vec<PriceRow>) -> Vec<PriceRow> {
-    let mut out: BTreeMap<(String, String), PriceRow> = BTreeMap::new();
-    for row in rows {
-        let key = (row.provider.clone(), row.model.clone());
-        out.entry(key)
-            .and_modify(|existing| {
-                if prefer_price(&row, existing) {
-                    *existing = row.clone();
-                }
-            })
-            .or_insert(row);
-    }
-    out.into_values().collect()
-}
-
-fn prefer_price(new: &PriceRow, old: &PriceRow) -> bool {
-    let new_name_matches = new.name.as_deref().is_none_or(|n| n == new.model);
-    let old_name_matches = old.name.as_deref().is_none_or(|n| n == old.model);
-    new_name_matches && !old_name_matches
 }
 
 fn included_for(providers: &BTreeMap<String, ProviderEntry>, provider: &str, model: &str) -> bool {
@@ -437,4 +416,24 @@ fn norm(s: &str) -> String {
 
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
+}
+fn dedupe_prices(rows: Vec<PriceRow>) -> Vec<PriceRow> {
+    let mut out: BTreeMap<(String, String), PriceRow> = BTreeMap::new();
+    for row in rows {
+        let key = (row.provider.clone(), row.model.clone());
+        out.entry(key)
+            .and_modify(|existing| {
+                if prefer_price(&row, existing) {
+                    *existing = row.clone();
+                }
+            })
+            .or_insert(row);
+    }
+    out.into_values().collect()
+}
+
+fn prefer_price(new: &PriceRow, old: &PriceRow) -> bool {
+    let new_name_matches = new.name.as_deref().is_none_or(|n| n == new.model);
+    let old_name_matches = old.name.as_deref().is_none_or(|n| n == old.model);
+    new_name_matches && !old_name_matches
 }

@@ -71,6 +71,8 @@ pub struct ProviderEntry {
     pub multiplier: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub included: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<bool>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub models: BTreeMap<String, ModelOverride>,
 }
@@ -135,6 +137,9 @@ impl PricingTable {
             }
             if v.included.is_some() {
                 entry.included = v.included;
+            }
+            if v.source.is_some() {
+                entry.source = v.source;
             }
             for (model, mv) in models {
                 let slot = entry.models.entry(model).or_default();
