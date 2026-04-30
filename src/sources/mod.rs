@@ -8,6 +8,6 @@ pub mod opencode;
 
 #[allow(dead_code)]
 pub trait UsageSource {
-    fn name(&self) -> &'static str;
-    fn collect(&self) -> Result<Vec<UsageRecord>>;
+  fn name(&self) -> &'static str;
+  fn collect(&self) -> Result<Vec<UsageRecord>>;
 }
