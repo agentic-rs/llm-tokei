@@ -282,8 +282,8 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Usag
   }
 
   // ~4 chars per token, round up.
-  let input = (input_chars + 3) / 4;
-  let output = (output_chars + 3) / 4;
+  let input = input_chars.div_ceil(4);
+  let output = output_chars.div_ceil(4);
 
   let ts = latest_ts_ms
     .map(ms_to_dt)

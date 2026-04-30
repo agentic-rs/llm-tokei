@@ -85,10 +85,8 @@ impl UsageSource for CodexSource {
       if !name.ends_with(".jsonl") {
         continue;
       }
-      if let Ok(rec) = parse_rollout(path) {
-        if let Some(r) = rec {
-          out.push(r);
-        }
+      if let Ok(Some(rec)) = parse_rollout(path) {
+        out.push(rec);
       }
     }
     Ok(out)
@@ -201,12 +199,10 @@ fn parse_rollout(path: &std::path::Path) -> Result<Option<UsageRecord>> {
           }
         }
       }
-      Some("response_item") => {
-        if model.is_none() {
-          if let Some(payload) = &parsed.payload {
-            if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
-              model = Some(m.to_string());
-            }
+      Some("response_item") if model.is_none() => {
+        if let Some(payload) = &parsed.payload {
+          if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
+            model = Some(m.to_string());
           }
         }
       }
