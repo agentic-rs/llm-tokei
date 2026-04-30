@@ -61,3 +61,24 @@ pub fn date_bucket(ts: DateTime<Utc>, unit: &str) -> String {
         _ => ts.format("%Y-%m-%d").to_string(),
     }
 }
+
+pub fn start_of_today() -> DateTime<Utc> {
+    let now = Utc::now();
+    now.date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc()
+}
+
+pub fn start_of_month() -> DateTime<Utc> {
+    let now = Utc::now();
+    NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc()
+}
+
+pub fn last_7d() -> DateTime<Utc> {
+    Utc::now() - Duration::days(7)
+}

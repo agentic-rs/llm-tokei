@@ -1,5 +1,4 @@
 use crate::aggregate::{Aggregate, GroupDim};
-use comfy_table::{presets::UTF8_FULL, Cell, CellAlignment, Color, ContentArrangement, Table};
 
 pub struct TableOpts {
     pub show_cost: bool,
@@ -7,52 +6,40 @@ pub struct TableOpts {
 }
 
 pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> String {
-    let mut table = Table::new();
-    table
-        .load_preset(UTF8_FULL)
-        .set_content_arrangement(ContentArrangement::Dynamic);
-
-    let mut header: Vec<Cell> = dims
-        .iter()
-        .map(|d| header_cell(d.label(), opts.use_color))
-        .collect();
-    for h in [
-        "input",
-        "output",
-        "reasoning",
-        "cache_r",
-        "cache_w",
-        "total",
-        "turns",
-    ] {
-        header.push(header_cell(h, opts.use_color));
-    }
+    let mut headers: Vec<Col> = dims.iter().map(|d| Col::text(d.label())).collect();
+    headers.push(Col::num("input"));
+    headers.push(Col::num("output"));
+    headers.push(Col::num("reasoning"));
+    headers.push(Col::num("cache_r"));
+    headers.push(Col::num("cache_w"));
+    headers.push(Col::num("total"));
+    headers.push(Col::num("turns"));
     if opts.show_cost {
-        header.push(header_cell("cost($)", opts.use_color));
-        header.push(header_cell("cost×mult($)", opts.use_color));
+        headers.push(Col::num("cost($)"));
+        headers.push(Col::num("cost_mult($)"));
     }
-    table.set_header(header);
 
     let (mut tot_in, mut tot_out, mut tot_re, mut tot_cr, mut tot_cw, mut tot_tot, mut tot_t) =
         (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let (mut tot_base, mut tot_mult) = (0.0_f64, 0.0_f64);
 
+    let mut rows: Vec<Vec<Col>> = Vec::new();
     for a in aggs {
-        let mut row: Vec<Cell> = a.keys.iter().map(|k| Cell::new(k)).collect();
-        row.push(num_cell(a.input));
-        row.push(num_cell(a.output));
-        row.push(num_cell(a.reasoning));
-        row.push(num_cell(a.cache_read));
-        row.push(num_cell(a.cache_write));
-        row.push(num_cell(a.total));
-        row.push(num_cell(a.turns));
+        let mut row: Vec<Col> = a.keys.iter().map(|k| Col::text(k)).collect();
+        row.push(Col::num(&fmt_int(a.input)));
+        row.push(Col::num(&fmt_int(a.output)));
+        row.push(Col::num(&fmt_int(a.reasoning)));
+        row.push(Col::num(&fmt_int(a.cache_read)));
+        row.push(Col::num(&fmt_int(a.cache_write)));
+        row.push(Col::num(&fmt_int(a.total)));
+        row.push(Col::num(&fmt_int(a.turns)));
         if opts.show_cost {
-            row.push(cost_cell(a.cost_base));
-            row.push(cost_cell(a.cost_multiplied));
+            row.push(Col::num(&fmt_cost(a.cost_base)));
+            row.push(Col::num(&fmt_cost(a.cost_multiplied)));
             tot_base += a.cost_base;
             tot_mult += a.cost_multiplied;
         }
-        table.add_row(row);
+        rows.push(row);
         tot_in += a.input;
         tot_out += a.output;
         tot_re += a.reasoning;
@@ -62,31 +49,122 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
         tot_t += a.turns;
     }
 
+    let mut widths = vec![0usize; headers.len()];
+    for (i, h) in headers.iter().enumerate() {
+        widths[i] = widths[i].max(h.text.len());
+    }
+    for row in &rows {
+        for (i, c) in row.iter().enumerate() {
+            widths[i] = widths[i].max(c.text.len());
+        }
+    }
+
+    let mut out = String::new();
+
+    let header_line = format_row(&headers, &widths);
+    let sep = separator(&widths);
+    let style = if opts.use_color {
+        Style::Header
+    } else {
+        Style::Plain
+    };
+    out.push_str(&colorize(&header_line, style));
+    out.push('\n');
+    out.push_str(&sep);
+    out.push('\n');
+
+    for row in &rows {
+        out.push_str(&format_row(row, &widths));
+        out.push('\n');
+    }
+
     if aggs.len() > 1 {
-        let mut row: Vec<Cell> = (0..dims.len())
+        out.push_str(&sep);
+        out.push('\n');
+
+        let mut total_row: Vec<Col> = (0..dims.len())
             .map(|i| {
                 if i == 0 {
-                    bold_cell("TOTAL", opts.use_color)
+                    Col::text("TOTAL")
                 } else {
-                    Cell::new("")
+                    Col::text("")
                 }
             })
             .collect();
-        row.push(num_cell_bold(tot_in, opts.use_color));
-        row.push(num_cell_bold(tot_out, opts.use_color));
-        row.push(num_cell_bold(tot_re, opts.use_color));
-        row.push(num_cell_bold(tot_cr, opts.use_color));
-        row.push(num_cell_bold(tot_cw, opts.use_color));
-        row.push(num_cell_bold(tot_tot, opts.use_color));
-        row.push(num_cell_bold(tot_t, opts.use_color));
+        total_row.push(Col::num(&fmt_int(tot_in)));
+        total_row.push(Col::num(&fmt_int(tot_out)));
+        total_row.push(Col::num(&fmt_int(tot_re)));
+        total_row.push(Col::num(&fmt_int(tot_cr)));
+        total_row.push(Col::num(&fmt_int(tot_cw)));
+        total_row.push(Col::num(&fmt_int(tot_tot)));
+        total_row.push(Col::num(&fmt_int(tot_t)));
         if opts.show_cost {
-            row.push(cost_cell_bold(tot_base, opts.use_color));
-            row.push(cost_cell_bold(tot_mult, opts.use_color));
+            total_row.push(Col::num(&fmt_cost(tot_base)));
+            total_row.push(Col::num(&fmt_cost(tot_mult)));
         }
-        table.add_row(row);
+
+        let total_style = if opts.use_color {
+            Style::Total
+        } else {
+            Style::Plain
+        };
+        out.push_str(&colorize(&format_row(&total_row, &widths), total_style));
+        out.push('\n');
     }
 
-    table.to_string()
+    out
+}
+
+struct Col {
+    text: String,
+    right: bool,
+}
+
+impl Col {
+    fn text(s: &str) -> Self {
+        Self {
+            text: s.to_string(),
+            right: false,
+        }
+    }
+    fn num(s: &str) -> Self {
+        Self {
+            text: s.to_string(),
+            right: true,
+        }
+    }
+}
+
+enum Style {
+    Plain,
+    Header,
+    Total,
+}
+
+fn colorize(line: &str, style: Style) -> String {
+    match style {
+        Style::Plain => line.to_string(),
+        Style::Header => format!("\x1b[36m{}\x1b[0m", line),
+        Style::Total => format!("\x1b[33m{}\x1b[0m", line),
+    }
+}
+
+fn format_row(cols: &[Col], widths: &[usize]) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(cols.len());
+    for (i, c) in cols.iter().enumerate() {
+        let w = widths[i];
+        if c.right {
+            parts.push(format!("{:>width$}", c.text, width = w));
+        } else {
+            parts.push(format!("{:<width$}", c.text, width = w));
+        }
+    }
+    parts.join("  ")
+}
+
+fn separator(widths: &[usize]) -> String {
+    let total: usize = widths.iter().sum::<usize>() + 2 * (widths.len().saturating_sub(1));
+    "\u{2500}".repeat(total)
 }
 
 fn fmt_int(n: u64) -> String {
@@ -102,51 +180,10 @@ fn fmt_int(n: u64) -> String {
     out
 }
 
-fn num_cell(n: u64) -> Cell {
-    Cell::new(fmt_int(n)).set_alignment(CellAlignment::Right)
-}
-fn num_cell_bold(n: u64, color: bool) -> Cell {
-    let c = Cell::new(fmt_int(n)).set_alignment(CellAlignment::Right);
-    if color {
-        c.fg(Color::Yellow)
-    } else {
-        c
-    }
-}
-fn cost_cell(v: f64) -> Cell {
-    let s = if v == 0.0 {
+fn fmt_cost(v: f64) -> String {
+    if v == 0.0 {
         "-".to_string()
     } else {
         format!("{:.4}", v)
-    };
-    Cell::new(s).set_alignment(CellAlignment::Right)
-}
-fn cost_cell_bold(v: f64, color: bool) -> Cell {
-    let s = if v == 0.0 {
-        "-".to_string()
-    } else {
-        format!("{:.4}", v)
-    };
-    let c = Cell::new(s).set_alignment(CellAlignment::Right);
-    if color {
-        c.fg(Color::Yellow)
-    } else {
-        c
-    }
-}
-fn header_cell(s: &str, color: bool) -> Cell {
-    let c = Cell::new(s);
-    if color {
-        c.fg(Color::Cyan)
-    } else {
-        c
-    }
-}
-fn bold_cell(s: &str, color: bool) -> Cell {
-    let c = Cell::new(s);
-    if color {
-        c.fg(Color::Yellow)
-    } else {
-        c
     }
 }

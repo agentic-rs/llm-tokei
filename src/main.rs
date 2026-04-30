@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
-use crate::cli::{Args, Format};
+use crate::cli::{Args, Format, Period};
 use crate::format::{json::render_json, table::render_table};
 use crate::model::UsageRecord;
 use crate::pricing::PricingTable;
@@ -117,12 +117,20 @@ fn main() -> Result<()> {
     }
 
     // Filters.
+    let period_since = match args.period {
+        Some(Period::Today) => Some(crate::time::start_of_today()),
+        Some(Period::Week) => Some(crate::time::last_7d()),
+        Some(Period::Month) => Some(crate::time::start_of_month()),
+        None => None,
+    };
+
     let since = args
         .since
         .as_deref()
         .map(time::parse_when)
         .transpose()
-        .context("parsing --since")?;
+        .context("parsing --since")?
+        .or(period_since);
     let until = args
         .until
         .as_deref()

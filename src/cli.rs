@@ -24,6 +24,14 @@ impl DateBucket {
     }
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum Period {
+    Today,
+    #[value(name = "7d")]
+    Week,
+    Month,
+}
+
 /// Token usage stats for Codex and OpenCode sessions.
 #[derive(Debug, Parser)]
 #[command(name = "llm-tokei", version, about)]
@@ -48,6 +56,10 @@ pub struct Args {
     /// Repeatable; if unset, all known defaults are scanned.
     #[arg(long)]
     pub copilot_dir: Option<Vec<PathBuf>>,
+
+    /// Shortcut: filter to a recent time window (today / 7d / month).
+    #[arg(long, value_enum)]
+    pub period: Option<Period>,
 
     /// Filter: include records on/after this time (e.g. 7d, 24h, 2025-04-01, RFC3339).
     #[arg(long)]
