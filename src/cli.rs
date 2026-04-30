@@ -28,7 +28,7 @@ impl DateBucket {
 #[derive(Debug, Parser)]
 #[command(name = "llm-tokei", version, about)]
 pub struct Args {
-    /// Comma-separated source list: codex,opencode (default: all).
+    /// Comma-separated source list: codex,opencode,claude,copilot (default: all).
     #[arg(long, value_delimiter = ',')]
     pub source: Option<Vec<String>>,
 
@@ -39,6 +39,15 @@ pub struct Args {
     /// Override OpenCode database path (default: ~/.local/share/opencode/opencode.db).
     #[arg(long)]
     pub opencode_db: Option<PathBuf>,
+
+    /// Override Claude Code projects root (default: $CLAUDE_HOME/projects or ~/.claude/projects).
+    #[arg(long)]
+    pub claude_dir: Option<PathBuf>,
+
+    /// Override Copilot Chat workspaceStorage root (default: VS Code / Insiders / VSCodium / Cursor user dirs).
+    /// Repeatable; if unset, all known defaults are scanned.
+    #[arg(long)]
+    pub copilot_dir: Option<Vec<PathBuf>>,
 
     /// Filter: include records on/after this time (e.g. 7d, 24h, 2025-04-01, RFC3339).
     #[arg(long)]

@@ -7,6 +7,9 @@ with optional cost estimates.
 **Supported sources (v1):**
 - **OpenAI Codex CLI** — `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
 - **OpenCode** — `~/.local/share/opencode/opencode.db` (SQLite)
+- **Claude Code** — `~/.claude/projects/<encoded-cwd>/<session>.jsonl`
+- **GitHub Copilot Chat** (VS Code / Insiders / VSCodium / Cursor) —
+  `…/User/workspaceStorage/<workspace-id>/chatSessions/<session>.jsonl`
 
 ## Install
 
@@ -35,9 +38,11 @@ llm-tokei --group-by project --format json
 
 | Flag | Description |
 |------|-------------|
-| `--source codex,opencode` | Subset of sources to scan |
+| `--source codex,opencode,claude,copilot` | Subset of sources to scan |
 | `--codex-dir <path>` | Override `~/.codex/sessions` |
 | `--opencode-db <path>` | Override `~/.local/share/opencode/opencode.db` |
+| `--claude-dir <path>` | Override `$CLAUDE_HOME/projects` (or `~/.claude/projects`) |
+| `--copilot-dir <path>` | Override VS Code `workspaceStorage` root (repeatable) |
 | `--since <when>` / `--until <when>` | RFC3339, `YYYY-MM-DD`, or relative (`7d`, `24h`, `2w`, `1mo`) |
 | `--model <glob>` / `--provider <glob>` / `--cwd <glob>` | Filters |
 | `--group-by source,model,provider,project,date,session` | Comma list, ordered |
@@ -131,11 +136,19 @@ supply win).
   `last_token_usage` deltas if the totals are absent.
 - OpenCode token totals are per-assistant-message and aggregated per session.
 - The OpenCode DB is opened read-only; safe to run while OpenCode is active.
+- Claude Code: `input` is summed across assistant turns as
+  `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`
+  (matching the cached+uncached convention used by the other sources);
+  `cache_w` corresponds to `cache_creation`.
+- GitHub Copilot Chat: chat session files don't persist per-turn input/output
+  token counts. `input` and `output` are **estimates** derived from the
+  rendered prompt and response text length (~4 chars/token); `reasoning` is
+  exact when the model emits `thinking.tokens`. Treat Copilot rows as
+  approximate. Default discovery walks Code, Code - Insiders, VSCodium and
+  Cursor user directories on Linux/macOS/Windows.
 
 ## Roadmap
 
-- Claude Code (`~/.claude/projects/**/*.jsonl`) source
-- GitHub Copilot CLI source
 - `--watch` live mode
 - CSV / Markdown renderers
 - Per-turn detail view

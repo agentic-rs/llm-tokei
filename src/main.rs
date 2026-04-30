@@ -14,7 +14,10 @@ use crate::cli::{Args, Format};
 use crate::format::{json::render_json, table::render_table};
 use crate::model::UsageRecord;
 use crate::pricing::PricingTable;
-use crate::sources::{codex::CodexSource, opencode::OpenCodeSource, UsageSource};
+use crate::sources::{
+    claude::ClaudeSource, codex::CodexSource, copilot::CopilotSource, opencode::OpenCodeSource,
+    UsageSource,
+};
 
 fn main() -> Result<()> {
     let args = Args::parse();
@@ -25,7 +28,14 @@ fn main() -> Result<()> {
         .source
         .as_ref()
         .map(|v| v.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>())
-        .unwrap_or_else(|| vec!["codex".into(), "opencode".into()]);
+        .unwrap_or_else(|| {
+            vec![
+                "codex".into(),
+                "opencode".into(),
+                "claude".into(),
+                "copilot".into(),
+            ]
+        });
 
     let mut all: Vec<UsageRecord> = Vec::new();
 
@@ -61,6 +71,46 @@ fn main() -> Result<()> {
                     all.append(&mut v);
                 }
                 Err(e) if args.verbose => eprintln!("opencode: error: {e:#}"),
+                Err(_) => {}
+            }
+        }
+    }
+
+    if want.iter().any(|s| s == "claude") {
+        let path = args.claude_dir.clone().or_else(ClaudeSource::default_path);
+        if let Some(p) = path {
+            let src = ClaudeSource::new(p);
+            match src.collect() {
+                Ok(mut v) => {
+                    if args.verbose {
+                        eprintln!("claude: {} session record(s)", v.len());
+                    }
+                    all.append(&mut v);
+                }
+                Err(e) if args.verbose => eprintln!("claude: error: {e:#}"),
+                Err(_) => {}
+            }
+        }
+    }
+
+    if want.iter().any(|s| s == "copilot") {
+        let roots = args
+            .copilot_dir
+            .clone()
+            .unwrap_or_else(CopilotSource::default_paths);
+        if !roots.is_empty() {
+            let src = CopilotSource::new(roots);
+            match src.collect() {
+                Ok(mut v) => {
+                    if args.verbose {
+                        eprintln!(
+                            "copilot: {} session record(s) (input/output are estimates from rendered text length)",
+                            v.len()
+                        );
+                    }
+                    all.append(&mut v);
+                }
+                Err(e) if args.verbose => eprintln!("copilot: error: {e:#}"),
                 Err(_) => {}
             }
         }

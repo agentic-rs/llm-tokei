@@ -1,7 +1,9 @@
 use crate::model::UsageRecord;
 use anyhow::Result;
 
+pub mod claude;
 pub mod codex;
+pub mod copilot;
 pub mod opencode;
 
 #[allow(dead_code)]
