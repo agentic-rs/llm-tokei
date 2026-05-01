@@ -221,14 +221,16 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Usag
   let mut input_chars: u64 = 0;
   let mut output_chars: u64 = 0;
   let mut reasoning: u64 = 0;
-  let mut turns: u64 = 0;
+  let mut round_count: u64 = 0;
+  let mut turn_count: u64 = 0;
 
   if let Some(requests) = state.get("requests").and_then(|v| v.as_array()) {
     for req in requests {
       if !req.is_object() {
         continue;
       }
-      turns += 1;
+      round_count += 1;
+      turn_count += 1;
       if let Some(ts) = req.get("timestamp").and_then(|v| v.as_i64()) {
         latest_ts_ms = Some(latest_ts_ms.map(|x| x.max(ts)).unwrap_or(ts));
       }
@@ -258,6 +260,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Usag
         .pointer("/result/metadata/toolCallRounds")
         .and_then(|v| v.as_array())
       {
+        turn_count += rounds.len() as u64;
         for round in rounds {
           if let Some(t) = round.pointer("/thinking/tokens").and_then(|v| v.as_u64()) {
             reasoning = reasoning.saturating_add(t);
@@ -277,7 +280,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Usag
     }
   }
 
-  if turns == 0 {
+  if round_count == 0 {
     return Ok(None);
   }
 
@@ -305,6 +308,8 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Usag
     reasoning,
     cache_read: 0,
     cache_write: 0,
+    rounds: round_count,
+    turns: turn_count,
     cost_embedded: None,
   }))
 }

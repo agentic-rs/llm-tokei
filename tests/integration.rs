@@ -31,21 +31,23 @@ fn codex_fixture_parses_last_total() {
   assert_eq!(arr.len(), 1);
   let row = &arr[0];
   // `input` is the full prompt total (cached + uncached).
-  assert_eq!(row["input"], 200);
-  assert_eq!(row["output"], 90);
-  assert_eq!(row["reasoning"], 20);
-  assert_eq!(row["cache_read"], 80);
+  assert_eq!(row["input"], 500);
+  assert_eq!(row["output"], 220);
+  assert_eq!(row["reasoning"], 50);
+  assert_eq!(row["cache_read"], 200);
   // total = input + output + reasoning + cache_write (cache_read is already in input).
-  assert_eq!(row["total"], 310);
-  assert_eq!(row["turns"], 1);
+  assert_eq!(row["total"], 770);
+  assert_eq!(row["turns"], 4);
+  assert_eq!(row["rounds"], 2);
+  assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["model"], "gpt-5");
   assert_eq!(row["keys"]["source"], "codex");
   // gpt-5 base price: input 1.25 + output 10 + cache_read 0.125 (per 1M).
-  // Billing uses uncached_input = 200 - 80 = 120.
-  // 120*1.25 + 90*10 + 20*10 (reasoning falls back to output) + 80*0.125
-  //   = 150 + 900 + 200 + 10 = 1260 → / 1e6 = 0.00126
+  // Billing uses uncached_input = 500 - 200 = 300.
+  // 300*1.25 + 220*10 + 50*10 (reasoning falls back to output) + 200*0.125
+  //   = 375 + 2200 + 500 + 25 = 3100 → / 1e6 = 0.003100
   let base = row["cost_base"].as_f64().unwrap();
-  assert!((base - 0.00126).abs() < 1e-9, "got {base}");
+  assert!((base - 0.003100).abs() < 1e-9, "got {base}");
   // openai provider has no multiplier override → defaults to 1.0.
   let mult = row["cost_multiplied"].as_f64().unwrap();
   assert!((mult - base).abs() < 1e-9);
@@ -85,6 +87,9 @@ fn claude_fixture_parses_usage() {
   assert_eq!(row["cache_read"], 250);
   assert_eq!(row["cache_write"], 37);
   assert_eq!(row["total"], 444);
+  assert_eq!(row["turns"], 2);
+  assert_eq!(row["rounds"], 1);
+  assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["model"], "claude-sonnet-4.5");
   assert_eq!(row["keys"]["source"], "claude");
 }
@@ -111,16 +116,19 @@ fn copilot_fixture_estimates_and_thinking() {
   let arr = v.as_array().unwrap();
   assert_eq!(arr.len(), 1);
   let row = &arr[0];
-  // input chars  = "Please refactor the auth module" (31) + "workspace=myrepo  " (18) = 49
-  //   → ceil(49/4) = 13 tokens
-  // output chars = "Sure, here is the refactor plan." (32) + tool args "{\"path\":\"a\"}" (12) + tool resp "ok" (2) = 46
-  //   → ceil(46/4) = 12 tokens
+  // input chars  = "Please refactor the auth module" (31) + "workspace=myrepo  " (18)
+  //              + "Thanks!" (7) = 56 → ceil(56/4) = 14 tokens
+  // output chars = "Sure, here is the refactor plan." (32) + tool args "{\"path\":\"a\"}" (12)
+  //              + tool resp "ok" (2) + "Done!" (5) = 51 → ceil(51/4) = 13 tokens
   // reasoning = 17 (exact, from thinking.tokens)
-  assert_eq!(row["input"], 13);
-  assert_eq!(row["output"], 12);
+  assert_eq!(row["input"], 14);
+  assert_eq!(row["output"], 13);
   assert_eq!(row["reasoning"], 17);
   assert_eq!(row["cache_read"], 0);
   assert_eq!(row["cache_write"], 0);
+  assert_eq!(row["turns"], 3);
+  assert_eq!(row["rounds"], 2);
+  assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["source"], "copilot");
   assert_eq!(row["keys"]["model"], "claude-sonnet-4.5");
   let project = row["keys"]["project"].as_str().unwrap();

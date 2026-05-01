@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 pub struct OpenCodeSource {
@@ -37,6 +37,8 @@ impl OpenCodeSource {
 struct AssistantMessage {
   #[serde(default)]
   role: Option<String>,
+  #[serde(default, rename = "parentID")]
+  parent_id: Option<String>,
   #[serde(default)]
   tokens: Option<TokensField>,
   #[serde(default)]
@@ -125,6 +127,7 @@ impl UsageSource for OpenCodeSource {
     })?;
 
     let mut records = Vec::new();
+    let mut seen_parent_ids: HashSet<String> = HashSet::new();
     for r in rows {
       let (session_id, time_created, data) = match r {
         Ok(v) => v,
@@ -157,6 +160,12 @@ impl UsageSource for OpenCodeSource {
         .and_then(|p| p.cwd.clone())
         .or(meta.directory.clone());
 
+      let is_new_round = parsed
+        .parent_id
+        .as_deref()
+        .is_none_or(|pid| seen_parent_ids.insert(pid.to_string()));
+      let rounds = if is_new_round { 1 } else { 0 };
+
       records.push(UsageRecord {
         source: Source::OpenCode,
         session_id,
@@ -174,6 +183,8 @@ impl UsageSource for OpenCodeSource {
         reasoning: tokens.reasoning,
         cache_read: cache.read,
         cache_write: cache.write,
+        rounds,
+        turns: 1,
         cost_embedded: parsed.cost.filter(|c| *c > 0.0),
       });
     }

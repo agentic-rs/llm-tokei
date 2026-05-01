@@ -14,13 +14,15 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   headers.push(Col::num("cache_w"));
   headers.push(Col::num("total"));
   headers.push(Col::num("turns"));
+  headers.push(Col::num("rounds"));
+  headers.push(Col::num("sessions"));
   if opts.show_cost {
     headers.push(Col::num("cost($)"));
     headers.push(Col::num("cost_mult($)"));
   }
 
-  let (mut tot_in, mut tot_out, mut tot_re, mut tot_cr, mut tot_cw, mut tot_tot, mut tot_t) =
-    (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+  let (mut tot_in, mut tot_out, mut tot_re, mut tot_cr, mut tot_cw, mut tot_tot, mut tot_t, mut tot_r, mut tot_s) =
+    (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
   let (mut tot_base, mut tot_mult) = (0.0_f64, 0.0_f64);
 
   let mut rows: Vec<Vec<Col>> = Vec::new();
@@ -33,6 +35,8 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     row.push(Col::num(&fmt_int(a.cache_write)));
     row.push(Col::num(&fmt_int(a.total)));
     row.push(Col::num(&fmt_int(a.turns)));
+    row.push(Col::num(&fmt_int(a.rounds)));
+    row.push(Col::num(&fmt_int(a.sessions)));
     if opts.show_cost {
       row.push(Col::num(&fmt_cost(a.cost_base)));
       row.push(Col::num(&fmt_cost(a.cost_multiplied)));
@@ -47,6 +51,8 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     tot_cw += a.cache_write;
     tot_tot += a.total;
     tot_t += a.turns;
+    tot_r += a.rounds;
+    tot_s += a.sessions;
   }
 
   let mut total_row: Vec<Col> = (0..dims.len())
@@ -59,6 +65,8 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   total_row.push(Col::num(&fmt_int(tot_cw)));
   total_row.push(Col::num(&fmt_int(tot_tot)));
   total_row.push(Col::num(&fmt_int(tot_t)));
+  total_row.push(Col::num(&fmt_int(tot_r)));
+  total_row.push(Col::num(&fmt_int(tot_s)));
   if opts.show_cost {
     total_row.push(Col::num(&fmt_cost(tot_base)));
     total_row.push(Col::num(&fmt_cost(tot_mult)));

@@ -42,9 +42,14 @@ struct Line {
 #[derive(Debug, Deserialize)]
 struct MessageObj {
   #[serde(default)]
+  #[allow(dead_code)]
+  role: Option<String>,
+  #[serde(default)]
   model: Option<String>,
   #[serde(default)]
   usage: Option<Usage>,
+  #[serde(default)]
+  content: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -118,6 +123,7 @@ fn parse_session(path: &Path) -> Result<Option<UsageRecord>> {
   let mut cache_read: u64 = 0;
   let mut cache_write: u64 = 0;
   let mut assistant_rows: u64 = 0;
+  let mut user_rounds: u64 = 0;
 
   for line in reader.lines() {
     let line = match line {
@@ -149,6 +155,16 @@ fn parse_session(path: &Path) -> Result<Option<UsageRecord>> {
     if cwd.is_none() {
       if let Some(c) = parsed.cwd {
         cwd = Some(c);
+      }
+    }
+
+    if parsed.kind.as_deref() == Some("user") {
+      if let Some(msg) = &parsed.message {
+        if !is_tool_result(&msg.content) {
+          user_rounds += 1;
+        }
+      } else {
+        user_rounds += 1;
       }
     }
 
@@ -217,8 +233,25 @@ fn parse_session(path: &Path) -> Result<Option<UsageRecord>> {
     reasoning: 0,
     cache_read,
     cache_write,
+    rounds: if user_rounds > 0 { user_rounds } else { 1 },
+    turns: assistant_rows,
     cost_embedded: None,
   }))
+}
+
+/// Returns true if the message content is a tool-result injection
+/// (i.e. not a human-authored prompt).
+fn is_tool_result(content: &Option<serde_json::Value>) -> bool {
+  match content {
+    None => false,
+    Some(serde_json::Value::Array(arr)) => arr.iter().any(|item| {
+      item
+        .get("type")
+        .and_then(|v| v.as_str())
+        .is_some_and(|t| t == "tool_result" || t == "tool_use")
+    }),
+    _ => false,
+  }
 }
 
 /// Claude encodes the project directory as the absolute path with `/` and other

@@ -3,7 +3,7 @@ use crate::pricing::PricingTable;
 use crate::time::date_bucket;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupDim {
@@ -50,6 +50,8 @@ pub struct Aggregate {
   pub cache_write: u64,
   pub total: u64,
   pub turns: u64,
+  pub rounds: u64,
+  pub sessions: u64,
   pub cost_embedded: f64,
   pub cost_base: f64,
   pub cost_multiplied: f64,
@@ -139,10 +141,11 @@ pub fn aggregate(
   pricing: &PricingTable,
 ) -> Vec<Aggregate> {
   let mut map: BTreeMap<Vec<String>, Aggregate> = BTreeMap::new();
+  let mut session_sets: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
   for r in records.iter().filter(|r| filters.matches(r, pricing)) {
     let key = key_for(r, dims, date_bucket_unit, pricing);
     let agg = map.entry(key.clone()).or_insert_with(|| Aggregate {
-      keys: key,
+      keys: key.clone(),
       input: 0,
       output: 0,
       reasoning: 0,
@@ -150,19 +153,25 @@ pub fn aggregate(
       cache_write: 0,
       total: 0,
       turns: 0,
+      rounds: 0,
+      sessions: 0,
       cost_embedded: 0.0,
       cost_base: 0.0,
       cost_multiplied: 0.0,
       first_ts: None,
       last_ts: None,
     });
+    let sess_set = session_sets.entry(key).or_default();
+    sess_set.insert(r.session_id.clone());
+
     agg.input += r.input;
     agg.output += r.output;
     agg.reasoning += r.reasoning;
     agg.cache_read += r.cache_read;
     agg.cache_write += r.cache_write;
     agg.total += r.total();
-    agg.turns += 1;
+    agg.turns += r.turns;
+    agg.rounds += r.rounds;
     if let Some(c) = r.cost_embedded {
       agg.cost_embedded += c;
     }
@@ -178,6 +187,11 @@ pub fn aggregate(
       Some(t) if t > r.ts => t,
       _ => r.ts,
     });
+  }
+  for (key, agg) in map.iter_mut() {
+    if let Some(set) = session_sets.get(key) {
+      agg.sessions = set.len() as u64;
+    }
   }
   map.into_values().collect()
 }

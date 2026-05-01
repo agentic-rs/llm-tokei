@@ -105,6 +105,8 @@ fn parse_rollout(path: &std::path::Path) -> Result<Option<UsageRecord>> {
   let mut last_total: Option<TokenUsage> = None;
   let mut summed: Option<TokenUsage> = None; // fallback if only deltas exist
   let mut last_ts: Option<DateTime<Utc>> = None;
+  let mut round_count: u64 = 0;
+  let mut turn_count: u64 = 0;
 
   for line in reader.lines() {
     let line = match line {
@@ -173,6 +175,7 @@ fn parse_rollout(path: &std::path::Path) -> Result<Option<UsageRecord>> {
         if let Some(payload) = &parsed.payload {
           let inner_kind = payload.get("type").and_then(|v| v.as_str());
           if inner_kind == Some("token_count") {
+            turn_count += 1;
             let info = payload.get("info").unwrap_or(payload);
             if let Some(total) = info.get("total_token_usage") {
               if let Ok(t) = serde_json::from_value::<TokenUsage>(total.clone()) {
@@ -192,6 +195,7 @@ fn parse_rollout(path: &std::path::Path) -> Result<Option<UsageRecord>> {
         }
       }
       Some("turn_context") => {
+        round_count += 1;
         if let Some(payload) = &parsed.payload {
           if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
             // prefer the latest turn_context model
@@ -245,6 +249,8 @@ fn parse_rollout(path: &std::path::Path) -> Result<Option<UsageRecord>> {
     reasoning: usage.reasoning_output_tokens,
     cache_read: usage.cached_input_tokens,
     cache_write: 0,
+    rounds: if round_count > 0 { round_count } else { 1 },
+    turns: if turn_count > 0 { turn_count } else { 1 },
     cost_embedded: None,
   }))
 }
