@@ -49,12 +49,34 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     tot_t += a.turns;
   }
 
+  let mut total_row: Vec<Col> = (0..dims.len())
+    .map(|i| if i == 0 { Col::text("TOTAL") } else { Col::text("") })
+    .collect();
+  total_row.push(Col::num(&fmt_int(tot_in)));
+  total_row.push(Col::num(&fmt_int(tot_out)));
+  total_row.push(Col::num(&fmt_int(tot_re)));
+  total_row.push(Col::num(&fmt_int(tot_cr)));
+  total_row.push(Col::num(&fmt_int(tot_cw)));
+  total_row.push(Col::num(&fmt_int(tot_tot)));
+  total_row.push(Col::num(&fmt_int(tot_t)));
+  if opts.show_cost {
+    total_row.push(Col::num(&fmt_cost(tot_base)));
+    total_row.push(Col::num(&fmt_cost(tot_mult)));
+  }
+
+  let show_total = aggs.len() > 1;
+
   let mut widths = vec![0usize; headers.len()];
   for (i, h) in headers.iter().enumerate() {
     widths[i] = widths[i].max(h.text.len());
   }
   for row in &rows {
     for (i, c) in row.iter().enumerate() {
+      widths[i] = widths[i].max(c.text.len());
+    }
+  }
+  if show_total {
+    for (i, c) in total_row.iter().enumerate() {
       widths[i] = widths[i].max(c.text.len());
     }
   }
@@ -74,25 +96,9 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     out.push('\n');
   }
 
-  if aggs.len() > 1 {
+  if show_total {
     out.push_str(&sep);
     out.push('\n');
-
-    let mut total_row: Vec<Col> = (0..dims.len())
-      .map(|i| if i == 0 { Col::text("TOTAL") } else { Col::text("") })
-      .collect();
-    total_row.push(Col::num(&fmt_int(tot_in)));
-    total_row.push(Col::num(&fmt_int(tot_out)));
-    total_row.push(Col::num(&fmt_int(tot_re)));
-    total_row.push(Col::num(&fmt_int(tot_cr)));
-    total_row.push(Col::num(&fmt_int(tot_cw)));
-    total_row.push(Col::num(&fmt_int(tot_tot)));
-    total_row.push(Col::num(&fmt_int(tot_t)));
-    if opts.show_cost {
-      total_row.push(Col::num(&fmt_cost(tot_base)));
-      total_row.push(Col::num(&fmt_cost(tot_mult)));
-    }
-
     let total_style = if opts.use_color { Style::Total } else { Style::Plain };
     out.push_str(&colorize(&format_row(&total_row, &widths), total_style));
     out.push('\n');
