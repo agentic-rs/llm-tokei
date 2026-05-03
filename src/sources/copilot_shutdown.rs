@@ -43,14 +43,15 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
     .iter()
     .map(|(model, metric)| {
       let usage = metric.get("usage").unwrap_or(&Value::Null);
+      let (provider, normalized_model) = normalize_copilot_model(model.clone());
       UsageRecord {
         source: args.source,
         session_id: session_id.clone(),
         session_title: None,
         project_cwd: args.project_cwd.clone(),
         project_name: args.project_name.clone(),
-        provider: Some("github-copilot".to_string()),
-        model: Some(model.clone()),
+        provider: Some(provider),
+        model: Some(normalized_model),
         ts,
         input: token(usage, "inputTokens"),
         output: token(usage, "outputTokens"),
@@ -66,6 +67,20 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
       }
     })
     .collect()
+}
+
+pub fn normalize_copilot_model(model: String) -> (String, String) {
+  match model.split_once('/') {
+    Some((provider, rest)) if !rest.is_empty() => {
+      let normalized_provider = if provider == "copilot" {
+        "github-copilot".to_string()
+      } else {
+        provider.to_string()
+      };
+      (normalized_provider, rest.to_string())
+    }
+    _ => ("github-copilot".to_string(), model),
+  }
 }
 
 pub fn timestamp_from_event(event: &Value) -> chrono::DateTime<Utc> {

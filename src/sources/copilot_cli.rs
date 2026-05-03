@@ -1,5 +1,7 @@
 use crate::model::{Source, UsageRecord};
-use crate::sources::copilot_shutdown::{records_from_shutdown_model_metrics, timestamp_from_event, ShutdownRecordArgs};
+use crate::sources::copilot_shutdown::{
+  normalize_copilot_model, records_from_shutdown_model_metrics, timestamp_from_event, ShutdownRecordArgs,
+};
 use crate::sources::UsageSource;
 use anyhow::Result;
 use serde_json::Value;
@@ -143,7 +145,7 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
     let event_type = event.get("type").and_then(|v| v.as_str());
     if event_type == Some("session.model_change") {
       if let Some(model) = event.pointer("/data/newModel").and_then(|v| v.as_str()) {
-        current_model = model.to_string();
+        current_model = normalize_copilot_model(model.to_string()).1;
       }
     }
 
@@ -155,14 +157,15 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
     }
 
     if event_type == Some("assistant.message") {
+      let (provider, model) = normalize_copilot_model(current_model.clone());
       records.push(UsageRecord {
         source: Source::CopilotCli,
         session_id: session_id.clone().unwrap_or_else(|| fallback_session_id(path)),
         session_title: None,
         project_cwd: None,
         project_name: None,
-        provider: Some("github-copilot".to_string()),
-        model: Some(current_model.clone()),
+        provider: Some(provider),
+        model: Some(model),
         ts: timestamp_from_event(event),
         input: pending_input,
         output: event
@@ -185,18 +188,20 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
 
     if event_type == Some("session.compaction_complete") {
       if let Some(usage) = event.pointer("/data/compactionTokensUsed") {
+        let model_raw = usage
+          .get("model")
+          .and_then(|v| v.as_str())
+          .map(str::to_string)
+          .unwrap_or_else(|| current_model.clone());
+        let (provider, model) = normalize_copilot_model(model_raw);
         records.push(UsageRecord {
           source: Source::CopilotCli,
           session_id: session_id.clone().unwrap_or_else(|| fallback_session_id(path)),
           session_title: None,
           project_cwd: None,
           project_name: None,
-          provider: Some("github-copilot".to_string()),
-          model: usage
-            .get("model")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .or_else(|| Some(current_model.clone())),
+          provider: Some(provider),
+          model: Some(model),
           ts: timestamp_from_event(event),
           input: token_alias(usage, "inputTokens", "input"),
           output: token_alias(usage, "outputTokens", "output"),

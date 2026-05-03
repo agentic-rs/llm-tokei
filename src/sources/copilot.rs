@@ -1,5 +1,7 @@
 use crate::model::{Source, UsageRecord};
-use crate::sources::copilot_shutdown::{records_from_shutdown_model_metrics, ShutdownRecordArgs};
+use crate::sources::copilot_shutdown::{
+  normalize_copilot_model, records_from_shutdown_model_metrics, ShutdownRecordArgs,
+};
 use crate::sources::UsageSource;
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
@@ -332,12 +334,19 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       continue;
     }
     let req_ts_ms = req.get("timestamp").and_then(|v| v.as_i64()).or(creation_ms);
-    let req_model = req
+    let req_model_raw = req
       .pointer("/modelId")
       .and_then(|v| v.as_str())
       .or_else(|| req.pointer("/agent/modelId").and_then(|v| v.as_str()))
       .map(|s| s.to_string())
       .or_else(|| default_model.clone());
+    let (provider, req_model) = match req_model_raw {
+      Some(m) => {
+        let (p, mm) = normalize_copilot_model(m);
+        (Some(p), Some(mm))
+      }
+      None => (Some("github-copilot".to_string()), None),
+    };
 
     // --- Input estimate ---
     let mut input_chars: u64 = 0;
@@ -406,7 +415,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       session_title: title.clone(),
       project_cwd: project_cwd.clone(),
       project_name: project_name.clone(),
-      provider: Some("github-copilot".to_string()),
+      provider,
       model: req_model,
       ts,
       input,
