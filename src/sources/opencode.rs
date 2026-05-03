@@ -6,6 +6,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use tracing::debug;
 
 pub struct OpenCodeSource {
   pub db_path: PathBuf,
@@ -105,6 +106,7 @@ impl UsageSource for OpenCodeSource {
     if !self.db_path.exists() {
       return Ok(Vec::new());
     }
+    debug!(source = "opencode", file = %self.db_path.display(), "processing file");
     let conn = Connection::open_with_flags(
       &self.db_path,
       OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
@@ -193,6 +195,12 @@ impl UsageSource for OpenCodeSource {
         cost_embedded: parsed.cost.filter(|c| *c > 0.0),
       });
     }
+    debug!(
+      source = "opencode",
+      file = %self.db_path.display(),
+      summary = %summarize(&records),
+      "file summary"
+    );
     Ok(records)
   }
 }
@@ -245,3 +253,22 @@ fn ms_to_dt(ms: i64) -> DateTime<Utc> {
 
 #[allow(dead_code)]
 pub fn _phantom(_p: &Path) {}
+
+fn summarize(records: &[UsageRecord]) -> String {
+  let input: u64 = records.iter().map(|r| r.input).sum();
+  let output: u64 = records.iter().map(|r| r.output).sum();
+  let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
+  let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
+  let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();
+  let input_est = records.iter().any(|r| r.input_estimated);
+  let output_est = records.iter().any(|r| r.output_estimated);
+  format!(
+    "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}",
+    records.len(),
+    if input_est { format!("~{input}") } else { input.to_string() },
+    if output_est { format!("~{output}") } else { output.to_string() },
+    reasoning,
+    cache_read,
+    cache_write
+  )
+}

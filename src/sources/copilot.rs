@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use tracing::debug;
 use walkdir::WalkDir;
 
 pub struct CopilotSource {
@@ -118,6 +119,7 @@ impl UsageSource for CopilotSource {
     let mut out = Vec::new();
     let mut workspace_cache: HashMap<PathBuf, Option<String>> = HashMap::new();
     for path in self.discover_files() {
+      debug!(source = "copilot", file = %path.display(), "processing file");
       let ws_dir = match workspace_dir_for_file(&path) {
         Some(d) => d.to_path_buf(),
         None => continue,
@@ -132,6 +134,12 @@ impl UsageSource for CopilotSource {
         parse_session(&path, cwd)
       };
       if let Ok(Some(recs)) = parsed {
+        debug!(
+          source = "copilot",
+          file = %path.display(),
+          summary = %summarize(&recs),
+          "file summary"
+        );
         out.extend(recs);
       }
     }
@@ -544,6 +552,25 @@ fn response_item_chars(item: &Value) -> u64 {
   } else {
     0
   }
+}
+
+fn summarize(records: &[UsageRecord]) -> String {
+  let input: u64 = records.iter().map(|r| r.input).sum();
+  let output: u64 = records.iter().map(|r| r.output).sum();
+  let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
+  let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
+  let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();
+  let input_est = records.iter().any(|r| r.input_estimated);
+  let output_est = records.iter().any(|r| r.output_estimated);
+  format!(
+    "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}",
+    records.len(),
+    if input_est { format!("~{input}") } else { input.to_string() },
+    if output_est { format!("~{output}") } else { output.to_string() },
+    reasoning,
+    cache_read,
+    cache_write
+  )
 }
 
 fn ms_to_dt(ms: i64) -> DateTime<Utc> {

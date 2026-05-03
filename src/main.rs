@@ -12,6 +12,8 @@ use clap::Parser;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
+use tracing::debug;
+use tracing_subscriber::EnvFilter;
 
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
@@ -26,6 +28,7 @@ use crate::sources::{
 
 fn main() -> Result<()> {
   let args = Args::parse();
+  init_tracing(args.verbose);
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
   let cache = if args.no_cache {
     None
@@ -303,6 +306,7 @@ where
   let mut seen: HashSet<PathBuf> = HashSet::new();
 
   for file in files {
+    debug!(source, file = %file.display(), "processing file");
     seen.insert(file.clone());
     let mtime = file_mtime_secs(&file).unwrap_or(0);
     let was_known = known.get(&file).copied();
@@ -311,6 +315,7 @@ where
       let mut cached = cache.load_active_for_file(source, &file)?;
       if cached.is_empty() {
         let parsed = parse_file(&file)?.unwrap_or_default();
+        debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
         if let Some(prev) = was_known {
           if prev == mtime {
             stats.updated += 1;
@@ -320,12 +325,14 @@ where
         out.extend(parsed);
       } else {
         stats.cached += 1;
+        debug!(source, file = %file.display(), summary = %file_summary(&cached), "file summary");
         out.append(&mut cached);
       }
       continue;
     }
 
     let parsed = parse_file(&file)?.unwrap_or_default();
+    debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
     if was_known.is_some() {
       stats.updated += 1;
     } else {
@@ -363,6 +370,7 @@ fn collect_opencode_with_cache(cache: &CacheDb, src: &OpenCodeSource) -> Result<
   }
 
   stats.scanned = 1;
+  debug!(source = "opencode", file = %file.display(), "processing file");
   let mtime = file_mtime_secs(&file).unwrap_or(0);
   let known = cache.file_mtimes_for("opencode")?;
   let was_known = known.get(&file).copied();
@@ -376,6 +384,7 @@ fn collect_opencode_with_cache(cache: &CacheDb, src: &OpenCodeSource) -> Result<
   }
 
   out = src.collect()?;
+  debug!(source = "opencode", file = %file.display(), summary = %file_summary(&out), "file summary");
   if was_known.is_some() {
     stats.updated = 1;
   } else {
@@ -410,4 +419,40 @@ fn format_cache_stats(source: &str, unit: &str, stats: &CacheStats) -> String {
       stats.scanned, stats.cached, stats.added, stats.updated
     )
   }
+}
+
+fn file_summary(records: &[UsageRecord]) -> String {
+  let input: u64 = records.iter().map(|r| r.input).sum();
+  let output: u64 = records.iter().map(|r| r.output).sum();
+  let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
+  let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
+  let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();
+  let turns: u64 = records.iter().map(|r| r.turns).sum();
+  let rounds: u64 = records.iter().map(|r| r.rounds).sum();
+  let input_est = records.iter().any(|r| r.input_estimated);
+  let output_est = records.iter().any(|r| r.output_estimated);
+  format!(
+    "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}, turns={}, rounds={}",
+    records.len(),
+    fmt_est(input, input_est),
+    fmt_est(output, output_est),
+    reasoning,
+    cache_read,
+    cache_write,
+    turns,
+    rounds
+  )
+}
+
+fn fmt_est(v: u64, est: bool) -> String {
+  if est { format!("~{v}") } else { v.to_string() }
+}
+
+fn init_tracing(verbose: bool) {
+  let filter = match std::env::var("RUST_LOG") {
+    Ok(value) => EnvFilter::new(value),
+    Err(_) if verbose => EnvFilter::new("debug"),
+    Err(_) => EnvFilter::new("warn"),
+  };
+  let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }

@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use tracing::debug;
 use walkdir::WalkDir;
 
 pub struct ClaudeSource {
@@ -107,7 +108,14 @@ impl UsageSource for ClaudeSource {
   fn collect(&self) -> Result<Vec<UsageRecord>> {
     let mut out = Vec::new();
     for path in self.discover_files() {
+      debug!(source = "claude", file = %path.display(), "processing file");
       if let Ok(Some(recs)) = Self::parse_file(&path) {
+        debug!(
+          source = "claude",
+          file = %path.display(),
+          summary = %summarize(&recs),
+          "file summary"
+        );
         out.extend(recs);
       }
     }
@@ -300,4 +308,23 @@ fn decode_dir_name(path: &Path) -> Option<String> {
     name.to_string()
   };
   Some(decoded)
+}
+
+fn summarize(records: &[UsageRecord]) -> String {
+  let input: u64 = records.iter().map(|r| r.input).sum();
+  let output: u64 = records.iter().map(|r| r.output).sum();
+  let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
+  let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
+  let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();
+  let input_est = records.iter().any(|r| r.input_estimated);
+  let output_est = records.iter().any(|r| r.output_estimated);
+  format!(
+    "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}",
+    records.len(),
+    if input_est { format!("~{input}") } else { input.to_string() },
+    if output_est { format!("~{output}") } else { output.to_string() },
+    reasoning,
+    cache_read,
+    cache_write
+  )
 }
