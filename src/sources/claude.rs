@@ -45,7 +45,7 @@ impl ClaudeSource {
       .collect()
   }
 
-  pub fn parse_file(path: &Path) -> Result<Option<UsageRecord>> {
+  pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     parse_session(path)
   }
 }
@@ -107,29 +107,35 @@ impl UsageSource for ClaudeSource {
   fn collect(&self) -> Result<Vec<UsageRecord>> {
     let mut out = Vec::new();
     for path in self.discover_files() {
-      if let Ok(Some(rec)) = Self::parse_file(&path) {
-        out.push(rec);
+      if let Ok(Some(recs)) = Self::parse_file(&path) {
+        out.extend(recs);
       }
     }
     Ok(out)
   }
 }
 
-fn parse_session(path: &Path) -> Result<Option<UsageRecord>> {
+fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   let f = File::open(path)?;
   let reader = BufReader::new(f);
 
   let mut session_id: Option<String> = None;
   let mut cwd: Option<String> = None;
-  let mut model: Option<String> = None;
-  let mut first_ts: Option<DateTime<Utc>> = None;
-  let mut last_ts: Option<DateTime<Utc>> = None;
 
-  let mut input_uncached: u64 = 0;
-  let mut output: u64 = 0;
-  let mut cache_read: u64 = 0;
-  let mut cache_write: u64 = 0;
-  let mut assistant_rows: u64 = 0;
+  // Per-turn records emitted as we encounter each assistant message with usage.
+  let mut records: Vec<UsageRecord> = Vec::new();
+  // We can't construct the final record until we've resolved session_id/cwd
+  // (they may appear on later lines). Stash raw turn data and finalize at end.
+  struct PendingTurn {
+    ts: Option<DateTime<Utc>>,
+    model: Option<String>,
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_write: u64,
+    rounds_at: u64, // user_rounds counter snapshot at this turn (1 if part of round 1)
+  }
+  let mut pending: Vec<PendingTurn> = Vec::new();
   let mut user_rounds: u64 = 0;
 
   for line in reader.lines() {
@@ -145,15 +151,12 @@ fn parse_session(path: &Path) -> Result<Option<UsageRecord>> {
       Err(_) => continue,
     };
 
-    if let Some(ts_str) = &parsed.timestamp {
-      if let Ok(dt) = DateTime::parse_from_rfc3339(ts_str) {
-        let utc = dt.with_timezone(&Utc);
-        last_ts = Some(utc);
-        if first_ts.is_none() {
-          first_ts = Some(utc);
-        }
-      }
-    }
+    let ts = parsed
+      .timestamp
+      .as_deref()
+      .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+      .map(|dt| dt.with_timezone(&Utc));
+
     if session_id.is_none() {
       if let Some(s) = parsed.session_id {
         session_id = Some(s);
@@ -177,33 +180,29 @@ fn parse_session(path: &Path) -> Result<Option<UsageRecord>> {
 
     if parsed.kind.as_deref() == Some("assistant") {
       if let Some(msg) = parsed.message {
-        if let Some(m) = msg.model {
-          if !m.is_empty() {
-            model = Some(m);
-          }
-        }
         if let Some(u) = msg.usage {
-          input_uncached = input_uncached.saturating_add(u.input_tokens);
-          output = output.saturating_add(u.output_tokens);
-          cache_read = cache_read.saturating_add(u.cache_read_input_tokens);
           let cw = if let Some(cc) = u.cache_creation {
             cc.ephemeral_5m_input_tokens
               .saturating_add(cc.ephemeral_1h_input_tokens)
           } else {
             u.cache_creation_input_tokens
           };
-          // Fallback: if both forms are present prefer the detailed sum,
-          // but if cache_creation object is empty (zeros) and the flat
-          // field is set, use the flat field.
           let cw = if cw == 0 { u.cache_creation_input_tokens } else { cw };
-          cache_write = cache_write.saturating_add(cw);
-          assistant_rows += 1;
+          pending.push(PendingTurn {
+            ts,
+            model: msg.model.filter(|m| !m.is_empty()),
+            input: u.input_tokens,
+            output: u.output_tokens,
+            cache_read: u.cache_read_input_tokens,
+            cache_write: cw,
+            rounds_at: user_rounds.max(1),
+          });
         }
       }
     }
   }
 
-  if assistant_rows == 0 {
+  if pending.is_empty() {
     return Ok(None);
   }
 
@@ -214,36 +213,51 @@ fn parse_session(path: &Path) -> Result<Option<UsageRecord>> {
       .unwrap_or("unknown")
       .to_string()
   });
-
   let cwd = cwd.or_else(|| decode_dir_name(path));
 
-  let ts = last_ts
-    .or(first_ts)
-    .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
+  // Distribute `rounds` across turns: assign rounds=1 to the *first* turn of
+  // each round, 0 to subsequent turns in the same round, so the sum equals
+  // total user rounds.
+  let mut last_round_seen: u64 = 0;
+  for turn in pending.into_iter() {
+    let rounds_this = if turn.rounds_at != last_round_seen {
+      last_round_seen = turn.rounds_at;
+      1
+    } else {
+      0
+    };
+    let input = turn.input.saturating_add(turn.cache_read).saturating_add(turn.cache_write);
+    let ts = turn
+      .ts
+      .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
+    records.push(UsageRecord {
+      source: Source::Claude,
+      session_id: sid.clone(),
+      session_title: None,
+      project_cwd: cwd.clone(),
+      project_name: None,
+      provider: Some("anthropic".to_string()),
+      model: turn.model,
+      ts,
+      input,
+      output: turn.output,
+      reasoning: 0,
+      cache_read: turn.cache_read,
+      cache_write: turn.cache_write,
+      rounds: rounds_this,
+      turns: 1,
+      cost_embedded: None,
+    });
+  }
 
-  // `input` is the full prompt total (matching codex/opencode semantics):
-  // uncached + cache_read + cache_write (cache_creation is billed input that
-  // also became cached for later turns).
-  let input = input_uncached.saturating_add(cache_read).saturating_add(cache_write);
+  // Ensure at least one record carries rounds=1 even if no `user` line was seen.
+  if records.iter().all(|r| r.rounds == 0) {
+    if let Some(first) = records.first_mut() {
+      first.rounds = 1;
+    }
+  }
 
-  Ok(Some(UsageRecord {
-    source: Source::Claude,
-    session_id: sid,
-    session_title: None,
-    project_cwd: cwd,
-    project_name: None,
-    provider: Some("anthropic".to_string()),
-    model,
-    ts,
-    input,
-    output,
-    reasoning: 0,
-    cache_read,
-    cache_write,
-    rounds: if user_rounds > 0 { user_rounds } else { 1 },
-    turns: assistant_rows,
-    cost_embedded: None,
-  }))
+  Ok(Some(records))
 }
 
 /// Returns true if the message content is a tool-result injection

@@ -6,12 +6,22 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const SCHEMA: &str = "\
-CREATE TABLE IF NOT EXISTS records (
+CREATE TABLE IF NOT EXISTS sessions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
     source        TEXT NOT NULL,
     session_id    TEXT NOT NULL,
     session_title TEXT,
     project_cwd   TEXT,
     project_name  TEXT,
+    file_path     TEXT NOT NULL,
+    first_ts      TEXT NOT NULL,
+    last_ts       TEXT NOT NULL,
+    file_mtime    INTEGER NOT NULL,
+    pruned        INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS records (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_rowid INTEGER NOT NULL REFERENCES sessions(id),
     provider      TEXT,
     model         TEXT,
     ts            TEXT NOT NULL,
@@ -22,14 +32,42 @@ CREATE TABLE IF NOT EXISTS records (
     cache_write   INTEGER NOT NULL,
     rounds        INTEGER NOT NULL,
     turns         INTEGER NOT NULL,
-    cost_embedded REAL,
-    file_path     TEXT NOT NULL,
-    updated_at    INTEGER NOT NULL,
-    pruned        INTEGER NOT NULL DEFAULT 0
+    cost_embedded REAL
 );
-CREATE INDEX IF NOT EXISTS idx_records_file ON records(file_path, updated_at);
-CREATE INDEX IF NOT EXISTS idx_records_pruned ON records(pruned);
+CREATE INDEX IF NOT EXISTS idx_sessions_source_file ON sessions(source, file_path);
+CREATE INDEX IF NOT EXISTS idx_sessions_pruned ON sessions(pruned);
+CREATE INDEX IF NOT EXISTS idx_records_session ON records(session_rowid);
 ";
+
+const EXPECTED_SESSIONS_COLUMNS: &[&str] = &[
+  "id",
+  "source",
+  "session_id",
+  "session_title",
+  "project_cwd",
+  "project_name",
+  "file_path",
+  "first_ts",
+  "last_ts",
+  "file_mtime",
+  "pruned",
+];
+
+const EXPECTED_RECORDS_COLUMNS: &[&str] = &[
+  "id",
+  "session_rowid",
+  "provider",
+  "model",
+  "ts",
+  "input",
+  "output",
+  "reasoning",
+  "cache_read",
+  "cache_write",
+  "rounds",
+  "turns",
+  "cost_embedded",
+];
 
 pub struct CacheDb {
   conn: Connection,
@@ -61,25 +99,43 @@ impl CacheDb {
     if let Some(parent) = path.parent() {
       std::fs::create_dir_all(parent)?;
     }
+
+    let mut conn = Self::open_conn(&path)?;
+    if Self::needs_recreate(&conn)? {
+      drop(conn);
+      let _ = std::fs::remove_file(&path);
+      conn = Self::open_conn(&path)?;
+    }
+
+    conn.execute_batch(SCHEMA)?;
+    Ok(Self { conn })
+  }
+
+  fn open_conn(path: &Path) -> Result<Connection> {
     let conn = Connection::open_with_flags(
-      &path,
+      path,
       OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_URI,
     )
     .with_context(|| format!("opening cache db {}", path.display()))?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;").ok();
-    conn.execute_batch(SCHEMA)?;
-    let add_pruned = {
-      let mut stmt = conn.prepare("PRAGMA table_info(records)")?;
-      let cols: Vec<String> = stmt
-        .query_map([], |row| row.get::<_, String>(1))?
-        .filter_map(|r| r.ok())
-        .collect();
-      !cols.iter().any(|c| c == "pruned")
-    };
-    if add_pruned {
-      conn.execute_batch("ALTER TABLE records ADD COLUMN pruned INTEGER NOT NULL DEFAULT 0")?;
+    Ok(conn)
+  }
+
+  fn needs_recreate(conn: &Connection) -> Result<bool> {
+    let has_sessions = table_exists(conn, "sessions")?;
+    let has_records = table_exists(conn, "records")?;
+    if !has_sessions && !has_records {
+      return Ok(false);
     }
-    Ok(Self { conn })
+    if !has_sessions || !has_records {
+      return Ok(true);
+    }
+    let sessions_cols = table_columns(conn, "sessions")?;
+    let records_cols = table_columns(conn, "records")?;
+    Ok(
+      !columns_match(&sessions_cols, EXPECTED_SESSIONS_COLUMNS)
+        || !columns_match(&records_cols, EXPECTED_RECORDS_COLUMNS),
+    )
   }
 
   fn db_path() -> Result<PathBuf> {
@@ -93,10 +149,12 @@ impl CacheDb {
   pub fn load_active_for_file(&self, source: &str, file_path: &Path) -> Result<Vec<UsageRecord>> {
     let fp_str = file_path.to_string_lossy();
     let mut stmt = self.conn.prepare(
-      "SELECT source, session_id, session_title, project_cwd, project_name, \
-              provider, model, ts, input, output, reasoning, cache_read, \
-              cache_write, rounds, turns, cost_embedded \
-       FROM records WHERE pruned = 0 AND source = ?1 AND file_path = ?2",
+      "SELECT s.source, s.session_id, s.session_title, s.project_cwd, s.project_name, \
+              r.provider, r.model, r.ts, r.input, r.output, r.reasoning, r.cache_read, \
+              r.cache_write, r.rounds, r.turns, r.cost_embedded \
+       FROM records r \
+       INNER JOIN sessions s ON s.id = r.session_rowid \
+       WHERE s.pruned = 0 AND s.source = ?1 AND s.file_path = ?2",
     )?;
     let rows = stmt.query_map(params![source, fp_str.as_ref()], |row| {
       let source_str: String = row.get(0)?;
@@ -108,7 +166,7 @@ impl CacheDb {
 
   pub fn file_mtimes_for(&self, source: &str) -> Result<HashMap<PathBuf, i64>> {
     let mut stmt = self.conn.prepare(
-      "SELECT file_path, MAX(updated_at) FROM records \
+      "SELECT file_path, MAX(file_mtime) FROM sessions \
        WHERE source = ?1 AND pruned = 0 \
        GROUP BY file_path",
     )?;
@@ -123,38 +181,54 @@ impl CacheDb {
   pub fn upsert_file(&self, file_path: &Path, mtime: i64, source: &str, records: &[UsageRecord]) -> Result<()> {
     let fp_str = file_path.to_string_lossy();
     self.conn.execute(
-      "UPDATE records SET pruned = 1 WHERE file_path = ?1 AND source = ?2 AND pruned = 0",
+      "UPDATE sessions SET pruned = 1 WHERE file_path = ?1 AND source = ?2 AND pruned = 0",
       params![fp_str.as_ref(), source],
     )?;
-    let mut insert_stmt = self.conn.prepare(
-      "INSERT INTO records (source, session_id, session_title, project_cwd, project_name, \
-                           provider, model, ts, input, output, reasoning, cache_read, \
-                           cache_write, rounds, turns, cost_embedded, file_path, updated_at, pruned) \
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,0)",
-    )?;
-    for r in records {
-      let ts_str = r.ts.to_rfc3339();
-      insert_stmt.execute(params![
-        source,
-        r.session_id,
-        r.session_title,
-        r.project_cwd,
-        r.project_name,
-        r.provider,
-        r.model,
-        ts_str,
-        r.input,
-        r.output,
-        r.reasoning,
-        r.cache_read,
-        r.cache_write,
-        r.rounds,
-        r.turns,
-        r.cost_embedded,
-        fp_str.as_ref(),
-        mtime,
-      ])?;
+
+    let grouped = group_by_session(records);
+    for (_, session_records) in grouped {
+      let first = session_records.first().expect("session group is non-empty");
+      let (first_ts, last_ts) = ts_range(&session_records);
+      self.conn.execute(
+        "INSERT INTO sessions (source, session_id, session_title, project_cwd, project_name, \
+                              file_path, first_ts, last_ts, file_mtime, pruned) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
+        params![
+          source,
+          first.session_id,
+          first.session_title,
+          first.project_cwd,
+          first.project_name,
+          fp_str.as_ref(),
+          first_ts,
+          last_ts,
+          mtime,
+        ],
+      )?;
+      let sid = self.conn.last_insert_rowid();
+      let mut insert_record = self.conn.prepare(
+        "INSERT INTO records (session_rowid, provider, model, ts, input, output, reasoning, \
+                             cache_read, cache_write, rounds, turns, cost_embedded) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+      )?;
+      for record in session_records {
+        insert_record.execute(params![
+          sid,
+          record.provider,
+          record.model,
+          record.ts.to_rfc3339(),
+          record.input,
+          record.output,
+          record.reasoning,
+          record.cache_read,
+          record.cache_write,
+          record.rounds,
+          record.turns,
+          record.cost_embedded,
+        ])?;
+      }
     }
+
     Ok(())
   }
 
@@ -166,7 +240,7 @@ impl CacheDb {
     for fp in file_paths {
       let fp_str = fp.to_string_lossy();
       total += self.conn.execute(
-        "UPDATE records SET pruned = 1 WHERE file_path = ?1 AND source = ?2 AND pruned = 0",
+        "UPDATE sessions SET pruned = 1 WHERE file_path = ?1 AND source = ?2 AND pruned = 0",
         params![fp_str.as_ref(), source],
       )?;
     }
@@ -176,13 +250,61 @@ impl CacheDb {
   pub fn active_file_paths(&self, source: &str) -> Result<Vec<PathBuf>> {
     let mut stmt = self
       .conn
-      .prepare("SELECT DISTINCT file_path FROM records WHERE source = ?1 AND pruned = 0")?;
+      .prepare("SELECT DISTINCT file_path FROM sessions WHERE source = ?1 AND pruned = 0")?;
     let rows = stmt.query_map(params![source], |row| {
       let fp: String = row.get(0)?;
       Ok(PathBuf::from(fp))
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
   }
+}
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
+  let exists: i64 = conn.query_row(
+    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+    params![table],
+    |row| row.get(0),
+  )?;
+  Ok(exists == 1)
+}
+
+fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
+  let sql = format!("PRAGMA table_info({})", table);
+  let mut stmt = conn.prepare(&sql)?;
+  let cols = stmt
+    .query_map([], |row| row.get::<_, String>(1))?
+    .filter_map(|r| r.ok())
+    .collect();
+  Ok(cols)
+}
+
+fn columns_match(actual: &[String], expected: &[&str]) -> bool {
+  actual.len() == expected.len() && actual.iter().zip(expected.iter()).all(|(a, e)| a == e)
+}
+
+fn ts_range(records: &[UsageRecord]) -> (String, String) {
+  let mut min_ts = records[0].ts;
+  let mut max_ts = records[0].ts;
+  for r in records.iter().skip(1) {
+    if r.ts < min_ts {
+      min_ts = r.ts;
+    }
+    if r.ts > max_ts {
+      max_ts = r.ts;
+    }
+  }
+  (min_ts.to_rfc3339(), max_ts.to_rfc3339())
+}
+
+fn group_by_session(records: &[UsageRecord]) -> HashMap<&str, Vec<UsageRecord>> {
+  let mut grouped: HashMap<&str, Vec<UsageRecord>> = HashMap::new();
+  for record in records {
+    grouped
+      .entry(record.session_id.as_str())
+      .or_default()
+      .push(record.clone());
+  }
+  grouped
 }
 
 fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> UsageRecord {

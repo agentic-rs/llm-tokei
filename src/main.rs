@@ -251,7 +251,7 @@ fn collect_one_record_source_with_cache<F>(
   parse_file: F,
 ) -> Result<(Vec<UsageRecord>, CacheStats)>
 where
-  F: Fn(&Path) -> Result<Option<UsageRecord>>,
+  F: Fn(&Path) -> Result<Option<Vec<UsageRecord>>>,
 {
   let mut out = Vec::new();
   let mut stats = CacheStats::new();
@@ -268,10 +268,7 @@ where
     if was_known == Some(mtime) {
       let mut cached = cache.load_active_for_file(source, &file)?;
       if cached.is_empty() {
-        let mut parsed = Vec::new();
-        if let Some(rec) = parse_file(&file)? {
-          parsed.push(rec);
-        }
+        let parsed = parse_file(&file)?.unwrap_or_default();
         if let Some(prev) = was_known {
           if prev == mtime {
             stats.updated += 1;
@@ -286,10 +283,7 @@ where
       continue;
     }
 
-    let mut parsed = Vec::new();
-    if let Some(rec) = parse_file(&file)? {
-      parsed.push(rec);
-    }
+    let parsed = parse_file(&file)?.unwrap_or_default();
     if was_known.is_some() {
       stats.updated += 1;
     } else {

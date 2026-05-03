@@ -46,7 +46,7 @@ impl CodexSource {
       .collect()
   }
 
-  pub fn parse_file(path: &Path) -> Result<Option<UsageRecord>> {
+  pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     parse_rollout(path)
   }
 }
@@ -92,15 +92,15 @@ impl UsageSource for CodexSource {
   fn collect(&self) -> Result<Vec<UsageRecord>> {
     let mut out = Vec::new();
     for path in self.discover_files() {
-      if let Ok(Some(rec)) = Self::parse_file(&path) {
-        out.push(rec);
+      if let Ok(Some(recs)) = Self::parse_file(&path) {
+        out.extend(recs);
       }
     }
     Ok(out)
   }
 }
 
-fn parse_rollout(path: &Path) -> Result<Option<UsageRecord>> {
+fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   let f = File::open(path)?;
   let reader = BufReader::new(f);
 
@@ -109,11 +109,22 @@ fn parse_rollout(path: &Path) -> Result<Option<UsageRecord>> {
   let mut model: Option<String> = None;
   let mut provider: Option<String> = None;
   let mut session_ts: Option<DateTime<Utc>> = None;
-  let mut last_total: Option<TokenUsage> = None;
-  let mut summed: Option<TokenUsage> = None; // fallback if only deltas exist
+
+  // We emit one record per `token_count` event. Source data is one of:
+  //   - `last_token_usage` (per-turn delta), preferred when present
+  //   - `total_token_usage` (cumulative), in which case we emit deltas
+  //     vs. the previous cumulative snapshot.
+  struct Turn {
+    ts: DateTime<Utc>,
+    model: Option<String>,
+    provider: Option<String>,
+    usage: TokenUsage,
+    rounds: u64,
+  }
+  let mut turns: Vec<Turn> = Vec::new();
+  let mut prev_total: Option<TokenUsage> = None;
+  let mut pending_round: u64 = 0; // turn_context events that haven't been attributed yet
   let mut last_ts: Option<DateTime<Utc>> = None;
-  let mut round_count: u64 = 0;
-  let mut turn_count: u64 = 0;
 
   for line in reader.lines() {
     let line = match line {
@@ -140,7 +151,6 @@ fn parse_rollout(path: &Path) -> Result<Option<UsageRecord>> {
 
     match parsed.kind.as_deref() {
       Some("session_meta") => {
-        // payload may carry the meta or it may be at top-level.
         if let Some(payload) = &parsed.payload {
           let meta_holder = payload.get("meta").unwrap_or(payload);
           if session_id.is_none() {
@@ -182,31 +192,57 @@ fn parse_rollout(path: &Path) -> Result<Option<UsageRecord>> {
         if let Some(payload) = &parsed.payload {
           let inner_kind = payload.get("type").and_then(|v| v.as_str());
           if inner_kind == Some("token_count") {
-            turn_count += 1;
             let info = payload.get("info").unwrap_or(payload);
-            if let Some(total) = info.get("total_token_usage") {
-              if let Ok(t) = serde_json::from_value::<TokenUsage>(total.clone()) {
-                last_total = Some(t);
-              }
-            } else if let Some(last) = info.get("last_token_usage") {
+
+            let mut turn_usage: Option<TokenUsage> = None;
+
+            if let Some(last) = info.get("last_token_usage") {
               if let Ok(t) = serde_json::from_value::<TokenUsage>(last.clone()) {
-                let acc = summed.get_or_insert_with(TokenUsage::default);
-                acc.input_tokens += t.input_tokens;
-                acc.cached_input_tokens += t.cached_input_tokens;
-                acc.output_tokens += t.output_tokens;
-                acc.reasoning_output_tokens += t.reasoning_output_tokens;
-                acc.total_tokens += t.total_tokens;
+                turn_usage = Some(t);
               }
+            }
+
+            if turn_usage.is_none() {
+              if let Some(total) = info.get("total_token_usage") {
+                if let Ok(t) = serde_json::from_value::<TokenUsage>(total.clone()) {
+                  let delta = match &prev_total {
+                    Some(prev) => sub_usage(&t, prev),
+                    None => t.clone(),
+                  };
+                  prev_total = Some(t);
+                  turn_usage = Some(delta);
+                }
+              }
+            } else if let Some(total) = info.get("total_token_usage") {
+              if let Ok(t) = serde_json::from_value::<TokenUsage>(total.clone()) {
+                prev_total = Some(t);
+              }
+            }
+
+            if let Some(usage) = turn_usage {
+              let ts = last_ts
+                .or(session_ts)
+                .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
+              let rounds = std::mem::take(&mut pending_round);
+              turns.push(Turn {
+                ts,
+                model: model.clone(),
+                provider: provider.clone(),
+                usage,
+                rounds,
+              });
             }
           }
         }
       }
       Some("turn_context") => {
-        round_count += 1;
+        pending_round += 1;
         if let Some(payload) = &parsed.payload {
           if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
-            // prefer the latest turn_context model
             model = Some(m.to_string());
+          }
+          if let Some(p) = payload.get("model_provider").and_then(|v| v.as_str()) {
+            provider = Some(p.to_string());
           }
         }
       }
@@ -221,12 +257,16 @@ fn parse_rollout(path: &Path) -> Result<Option<UsageRecord>> {
     }
   }
 
-  let usage = match last_total.or(summed) {
-    Some(u) => u,
-    None => return Ok(None), // no token data → skip
-  };
+  if turns.is_empty() {
+    return Ok(None);
+  }
 
-  // session_id fallback: file stem
+  // If no turn_context events were ever observed, attribute one round to the
+  // first turn so totals match historical behavior.
+  if turns.iter().all(|t| t.rounds == 0) {
+    turns[0].rounds = 1;
+  }
+
   let sid = session_id.unwrap_or_else(|| {
     path
       .file_stem()
@@ -235,31 +275,39 @@ fn parse_rollout(path: &Path) -> Result<Option<UsageRecord>> {
       .to_string()
   });
 
-  let ts = last_ts
-    .or(session_ts)
-    .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
+  let records = turns
+    .into_iter()
+    .map(|t| UsageRecord {
+      source: Source::Codex,
+      session_id: sid.clone(),
+      session_title: None,
+      project_cwd: cwd.clone(),
+      project_name: None,
+      provider: t.provider,
+      model: t.model,
+      ts: t.ts,
+      input: t.usage.input_tokens,
+      output: t.usage.output_tokens,
+      reasoning: t.usage.reasoning_output_tokens,
+      cache_read: t.usage.cached_input_tokens,
+      cache_write: 0,
+      rounds: t.rounds,
+      turns: 1,
+      cost_embedded: None,
+    })
+    .collect();
 
-  // Codex's `input_tokens` is already the full prompt total (cached + uncached);
-  // `cached_input_tokens` is the cached subset of that. Keep `input` as the
-  // full total and surface the cached portion separately.
-  Ok(Some(UsageRecord {
-    source: Source::Codex,
-    session_id: sid,
-    session_title: None,
-    project_cwd: cwd,
-    project_name: None,
-    provider,
-    model,
-    ts,
-    input: usage.input_tokens,
-    output: usage.output_tokens,
-    reasoning: usage.reasoning_output_tokens,
-    cache_read: usage.cached_input_tokens,
-    cache_write: 0,
-    rounds: if round_count > 0 { round_count } else { 1 },
-    turns: if turn_count > 0 { turn_count } else { 1 },
-    cost_embedded: None,
-  }))
+  Ok(Some(records))
+}
+
+fn sub_usage(a: &TokenUsage, b: &TokenUsage) -> TokenUsage {
+  TokenUsage {
+    input_tokens: a.input_tokens.saturating_sub(b.input_tokens),
+    cached_input_tokens: a.cached_input_tokens.saturating_sub(b.cached_input_tokens),
+    output_tokens: a.output_tokens.saturating_sub(b.output_tokens),
+    reasoning_output_tokens: a.reasoning_output_tokens.saturating_sub(b.reasoning_output_tokens),
+    total_tokens: a.total_tokens.saturating_sub(b.total_tokens),
+  }
 }
 
 #[allow(dead_code)]

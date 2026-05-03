@@ -116,13 +116,12 @@ fn copilot_fixture_estimates_and_thinking() {
   let arr = v.as_array().unwrap();
   assert_eq!(arr.len(), 1);
   let row = &arr[0];
-  // input chars  = "Please refactor the auth module" (31) + "workspace=myrepo  " (18)
-  //              + "Thanks!" (7) = 56 → ceil(56/4) = 14 tokens
-  // output chars = "Sure, here is the refactor plan." (32) + tool args "{\"path\":\"a\"}" (12)
-  //              + tool resp "ok" (2) + "Done!" (5) = 51 → ceil(51/4) = 13 tokens
+  // Per-turn (per-request) ceil(chars/4) — request 1 input chars 31+18=49 → 13;
+  //   request 2 input chars 7 → 2; total 15.
+  // Output per request: 32+2+12=46 → 12; 5 → 2; total 14.
   // reasoning = 17 (exact, from thinking.tokens)
-  assert_eq!(row["input"], 14);
-  assert_eq!(row["output"], 13);
+  assert_eq!(row["input"], 15);
+  assert_eq!(row["output"], 14);
   assert_eq!(row["reasoning"], 17);
   assert_eq!(row["cache_read"], 0);
   assert_eq!(row["cache_write"], 0);

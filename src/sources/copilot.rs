@@ -80,7 +80,7 @@ impl CopilotSource {
     files
   }
 
-  pub fn parse_file(path: &Path) -> Result<Option<UsageRecord>> {
+  pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     let ws_dir = match path.parent().and_then(|p| p.parent()) {
       Some(d) => d.to_path_buf(),
       None => return Ok(None),
@@ -107,8 +107,8 @@ impl UsageSource for CopilotSource {
         .entry(ws_dir.clone())
         .or_insert_with(|| read_workspace_folder(&ws_dir))
         .clone();
-      if let Ok(Some(rec)) = parse_session(&path, cwd) {
-        out.push(rec);
+      if let Ok(Some(recs)) = parse_session(&path, cwd) {
+        out.extend(recs);
       }
     }
     Ok(out)
@@ -157,7 +157,7 @@ fn hex(b: u8) -> Option<u8> {
   }
 }
 
-fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<UsageRecord>> {
+fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<UsageRecord>>> {
   let f = File::open(path)?;
   let reader = BufReader::new(f);
 
@@ -228,40 +228,32 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Usag
     })
     .map(|s| s.to_string());
 
-  let mut latest_model = default_model.clone();
-  let mut latest_ts_ms: Option<i64> = creation_ms;
+  let project_name = project_cwd
+    .as_ref()
+    .and_then(|p| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()));
 
-  let mut input_chars: u64 = 0;
-  let mut output_chars: u64 = 0;
-  let mut reasoning: u64 = 0;
-  let mut round_count: u64 = 0;
-  let mut turn_count: u64 = 0;
+  let mut records: Vec<UsageRecord> = Vec::new();
 
   if let Some(requests) = state.get("requests").and_then(|v| v.as_array()) {
     for req in requests {
       if !req.is_object() {
         continue;
       }
-      round_count += 1;
-      turn_count += 1;
-      if let Some(ts) = req.get("timestamp").and_then(|v| v.as_i64()) {
-        latest_ts_ms = Some(latest_ts_ms.map(|x| x.max(ts)).unwrap_or(ts));
-      }
-      if let Some(m) = req
+      let req_ts_ms = req.get("timestamp").and_then(|v| v.as_i64()).or(creation_ms);
+      let req_model = req
         .pointer("/modelId")
         .and_then(|v| v.as_str())
         .or_else(|| req.pointer("/agent/modelId").and_then(|v| v.as_str()))
-      {
-        latest_model = Some(m.to_string());
-      }
+        .map(|s| s.to_string())
+        .or_else(|| default_model.clone());
 
       // --- Input estimate ---
-      // renderedUserMessage: list of {type, text, cacheType?}
+      let mut input_chars: u64 = 0;
       input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedUserMessage")));
       input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedGlobalContext")));
 
       // --- Output estimate ---
-      // response: list of items; only count text-bearing kinds
+      let mut output_chars: u64 = 0;
       if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
         for it in resp {
           output_chars = output_chars.saturating_add(response_item_chars(it));
@@ -269,11 +261,13 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Usag
       }
 
       // --- toolCallRounds: thinking tokens (exact) + tool call args (output) ---
+      let mut reasoning: u64 = 0;
+      let mut extra_turns: u64 = 0;
       if let Some(rounds) = req
         .pointer("/result/metadata/toolCallRounds")
         .and_then(|v| v.as_array())
       {
-        turn_count += rounds.len() as u64;
+        extra_turns = rounds.len() as u64;
         for round in rounds {
           if let Some(t) = round.pointer("/thinking/tokens").and_then(|v| v.as_u64()) {
             reasoning = reasoning.saturating_add(t);
@@ -290,41 +284,39 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Usag
           }
         }
       }
+
+      let input = input_chars.div_ceil(4);
+      let output = output_chars.div_ceil(4);
+      let ts = req_ts_ms
+        .map(ms_to_dt)
+        .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
+
+      records.push(UsageRecord {
+        source: Source::Copilot,
+        session_id: session_id.clone(),
+        session_title: title.clone(),
+        project_cwd: project_cwd.clone(),
+        project_name: project_name.clone(),
+        provider: Some("github-copilot".to_string()),
+        model: req_model,
+        ts,
+        input,
+        output,
+        reasoning,
+        cache_read: 0,
+        cache_write: 0,
+        rounds: 1,
+        turns: 1 + extra_turns,
+        cost_embedded: None,
+      });
     }
   }
 
-  if round_count == 0 {
+  if records.is_empty() {
     return Ok(None);
   }
 
-  // ~4 chars per token, round up.
-  let input = input_chars.div_ceil(4);
-  let output = output_chars.div_ceil(4);
-
-  let ts = latest_ts_ms
-    .map(ms_to_dt)
-    .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
-
-  Ok(Some(UsageRecord {
-    source: Source::Copilot,
-    session_id,
-    session_title: title,
-    project_cwd: project_cwd.clone(),
-    project_name: project_cwd
-      .as_ref()
-      .and_then(|p| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned())),
-    provider: Some("github-copilot".to_string()),
-    model: latest_model,
-    ts,
-    input,
-    output,
-    reasoning,
-    cache_read: 0,
-    cache_write: 0,
-    rounds: round_count,
-    turns: turn_count,
-    cost_embedded: None,
-  }))
+  Ok(Some(records))
 }
 
 #[derive(Debug, Clone)]
