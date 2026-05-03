@@ -55,6 +55,8 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
         ts,
         input: token(usage, "inputTokens"),
         output: token(usage, "outputTokens"),
+        input_estimated: false,
+        output_estimated: false,
         reasoning: 0,
         cache_read: token(usage, "cacheReadTokens"),
         cache_write: token(usage, "cacheWriteTokens"),

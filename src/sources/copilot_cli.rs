@@ -158,6 +158,7 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
 
     if event_type == Some("assistant.message") {
       let (provider, model) = normalize_copilot_model(current_model.clone());
+      let output_exact = event.pointer("/data/outputTokens").and_then(|v| v.as_u64());
       records.push(UsageRecord {
         source: Source::CopilotCli,
         session_id: session_id.clone().unwrap_or_else(|| fallback_session_id(path)),
@@ -168,10 +169,9 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
         model: Some(model),
         ts: timestamp_from_event(event),
         input: pending_input,
-        output: event
-          .pointer("/data/outputTokens")
-          .and_then(|v| v.as_u64())
-          .unwrap_or(0),
+        output: output_exact.unwrap_or(0),
+        input_estimated: true,
+        output_estimated: output_exact.is_none(),
         reasoning: 0,
         cache_read: 0,
         cache_write: 0,
@@ -205,6 +205,8 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
           ts: timestamp_from_event(event),
           input: token_alias(usage, "inputTokens", "input"),
           output: token_alias(usage, "outputTokens", "output"),
+          input_estimated: false,
+          output_estimated: false,
           reasoning: 0,
           cache_read: token_alias(usage, "cacheReadTokens", "cachedInput"),
           cache_write: usage.get("cacheWriteTokens").and_then(|v| v.as_u64()).unwrap_or(0),

@@ -40,6 +40,8 @@ pub struct UsageRecord {
   pub ts: DateTime<Utc>,
   pub input: u64,
   pub output: u64,
+  pub input_estimated: bool,
+  pub output_estimated: bool,
   pub reasoning: u64,
   pub cache_read: u64,
   pub cache_write: u64,

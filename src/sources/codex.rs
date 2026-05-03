@@ -288,6 +288,8 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       ts: t.ts,
       input: t.usage.input_tokens,
       output: t.usage.output_tokens,
+      input_estimated: false,
+      output_estimated: false,
       reasoning: t.usage.reasoning_output_tokens,
       cache_read: t.usage.cached_input_tokens,
       cache_write: 0,

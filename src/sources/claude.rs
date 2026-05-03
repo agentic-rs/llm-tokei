@@ -244,6 +244,8 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       ts,
       input,
       output: turn.output,
+      input_estimated: false,
+      output_estimated: false,
       reasoning: 0,
       cache_read: turn.cache_read,
       cache_write: turn.cache_write,

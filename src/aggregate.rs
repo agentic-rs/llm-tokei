@@ -45,6 +45,8 @@ pub struct Aggregate {
   pub keys: Vec<String>,
   pub input: u64,
   pub output: u64,
+  pub input_estimated: bool,
+  pub output_estimated: bool,
   pub reasoning: u64,
   pub cache_read: u64,
   pub cache_write: u64,
@@ -148,6 +150,8 @@ pub fn aggregate(
       keys: key.clone(),
       input: 0,
       output: 0,
+      input_estimated: false,
+      output_estimated: false,
       reasoning: 0,
       cache_read: 0,
       cache_write: 0,
@@ -166,6 +170,8 @@ pub fn aggregate(
 
     agg.input += r.input;
     agg.output += r.output;
+    agg.input_estimated |= r.input_estimated;
+    agg.output_estimated |= r.output_estimated;
     agg.reasoning += r.reasoning;
     agg.cache_read += r.cache_read;
     agg.cache_write += r.cache_write;

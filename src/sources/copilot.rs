@@ -387,10 +387,8 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
     }
 
     let input = input_chars.div_ceil(4);
-    let output = req
-      .get("completionTokens")
-      .and_then(|v| v.as_u64())
-      .unwrap_or_else(|| output_chars.div_ceil(4));
+    let output_exact = req.get("completionTokens").and_then(|v| v.as_u64());
+    let output = output_exact.unwrap_or_else(|| output_chars.div_ceil(4));
     let ts = req_ts_ms
       .map(ms_to_dt)
       .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
@@ -420,6 +418,8 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       ts,
       input,
       output,
+      input_estimated: true,
+      output_estimated: output_exact.is_none(),
       reasoning,
       cache_read: 0,
       cache_write: 0,

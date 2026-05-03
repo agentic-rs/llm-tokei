@@ -28,8 +28,8 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   let mut rows: Vec<Vec<Col>> = Vec::new();
   for a in aggs {
     let mut row: Vec<Col> = a.keys.iter().map(|k| Col::text(k)).collect();
-    row.push(Col::num(&fmt_int(a.input)));
-    row.push(Col::num(&fmt_int(a.output)));
+    row.push(Col::num(&fmt_est_int(a.input, a.input_estimated)));
+    row.push(Col::num(&fmt_est_int(a.output, a.output_estimated)));
     row.push(Col::num(&fmt_int(a.reasoning)));
     row.push(Col::num(&fmt_int(a.cache_read)));
     row.push(Col::num(&fmt_int(a.cache_write)));
@@ -58,8 +58,8 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   let mut total_row: Vec<Col> = (0..dims.len())
     .map(|i| if i == 0 { Col::text("TOTAL") } else { Col::text("") })
     .collect();
-  total_row.push(Col::num(&fmt_int(tot_in)));
-  total_row.push(Col::num(&fmt_int(tot_out)));
+  total_row.push(Col::num(&fmt_est_int(tot_in, aggs.iter().any(|a| a.input_estimated))));
+  total_row.push(Col::num(&fmt_est_int(tot_out, aggs.iter().any(|a| a.output_estimated))));
   total_row.push(Col::num(&fmt_int(tot_re)));
   total_row.push(Col::num(&fmt_int(tot_cr)));
   total_row.push(Col::num(&fmt_int(tot_cw)));
@@ -185,5 +185,13 @@ fn fmt_cost(v: f64) -> String {
     "-".to_string()
   } else {
     format!("{:.4}", v)
+  }
+}
+
+fn fmt_est_int(n: u64, estimated: bool) -> String {
+  if estimated {
+    format!("~{}", fmt_int(n))
+  } else {
+    fmt_int(n)
   }
 }
