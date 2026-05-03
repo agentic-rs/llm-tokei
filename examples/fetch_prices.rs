@@ -221,11 +221,14 @@ fn load_models_dev_json<W: Write>(cache_dir: &Path, log: &mut W) -> Result<Strin
   }
 
   eprintln!("Fetching {MODELS_DEV_URL} ...");
-  let body = ureq::get(MODELS_DEV_URL)
-    .timeout(Duration::from_secs(30))
-    .call()
-    .context("requesting models.dev")?
-    .into_string()
+  let config = ureq::Agent::config_builder()
+    .timeout_global(Some(Duration::from_secs(30)))
+    .build();
+  let agent: ureq::Agent = config.into();
+  let mut response = agent.get(MODELS_DEV_URL).call().context("requesting models.dev")?;
+  let body = response
+    .body_mut()
+    .read_to_string()
     .context("reading models.dev response body")?;
 
   let temp_path = cache_dir.join(format!("{MODELS_DEV_CACHE_FILE}.tmp"));

@@ -225,16 +225,16 @@ impl CacheDb {
           record.provider,
           record.model,
           record.ts.to_rfc3339(),
-          record.input,
-          record.output,
-          record.reasoning,
-          record.cache_read,
-          record.cache_write,
+          to_sql_i64(record.input),
+          to_sql_i64(record.output),
+          to_sql_i64(record.reasoning),
+          to_sql_i64(record.cache_read),
+          to_sql_i64(record.cache_write),
           record.mode,
           record.agent,
           if record.is_compaction { 1 } else { 0 },
-          record.rounds,
-          record.turns,
+          to_sql_i64(record.rounds),
+          to_sql_i64(record.turns),
           record.cost_embedded,
         ])?;
       }
@@ -339,16 +339,24 @@ fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> Usa
     provider: row.get(5).unwrap_or(None),
     model: row.get(6).unwrap_or(None),
     ts,
-    input: row.get(8).unwrap_or(0),
-    output: row.get(9).unwrap_or(0),
-    reasoning: row.get(10).unwrap_or(0),
-    cache_read: row.get(11).unwrap_or(0),
-    cache_write: row.get(12).unwrap_or(0),
+    input: row.get::<_, i64>(8).ok().map(from_sql_i64).unwrap_or(0),
+    output: row.get::<_, i64>(9).ok().map(from_sql_i64).unwrap_or(0),
+    reasoning: row.get::<_, i64>(10).ok().map(from_sql_i64).unwrap_or(0),
+    cache_read: row.get::<_, i64>(11).ok().map(from_sql_i64).unwrap_or(0),
+    cache_write: row.get::<_, i64>(12).ok().map(from_sql_i64).unwrap_or(0),
     mode: row.get(13).unwrap_or(None),
     agent: row.get(14).unwrap_or(None),
     is_compaction: row.get::<_, i64>(15).unwrap_or(0) != 0,
-    rounds: row.get(16).unwrap_or(0),
-    turns: row.get(17).unwrap_or(0),
+    rounds: row.get::<_, i64>(16).ok().map(from_sql_i64).unwrap_or(0),
+    turns: row.get::<_, i64>(17).ok().map(from_sql_i64).unwrap_or(0),
     cost_embedded: row.get(18).unwrap_or(None),
   }
+}
+
+fn to_sql_i64(value: u64) -> i64 {
+  i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn from_sql_i64(value: i64) -> u64 {
+  u64::try_from(value).unwrap_or(0)
 }
