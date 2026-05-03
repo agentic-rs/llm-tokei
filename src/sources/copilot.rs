@@ -361,7 +361,9 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       }
     }
 
-    // --- toolCallRounds: thinking tokens (exact) + tool call args (output) ---
+    // --- toolCallRounds: thinking tokens (exact) ---
+    // Tool call arguments are model output.
+    // Tool call results/responses are fed back as model input.
     let mut reasoning: u64 = 0;
     let mut extra_turns: u64 = 0;
     if let Some(rounds) = req
@@ -374,7 +376,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
           reasoning = reasoning.saturating_add(t);
         }
         if let Some(resp) = round.get("response").and_then(|v| v.as_str()) {
-          output_chars = output_chars.saturating_add(resp.chars().count() as u64);
+          input_chars = input_chars.saturating_add(resp.chars().count() as u64);
         }
         if let Some(calls) = round.get("toolCalls").and_then(|v| v.as_array()) {
           for call in calls {
