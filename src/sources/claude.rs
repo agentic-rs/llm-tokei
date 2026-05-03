@@ -226,7 +226,10 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     } else {
       0
     };
-    let input = turn.input.saturating_add(turn.cache_read).saturating_add(turn.cache_write);
+    let input = turn
+      .input
+      .saturating_add(turn.cache_read)
+      .saturating_add(turn.cache_write);
     let ts = turn
       .ts
       .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
@@ -244,6 +247,9 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       reasoning: 0,
       cache_read: turn.cache_read,
       cache_write: turn.cache_write,
+      mode: None,
+      agent: None,
+      is_compaction: false,
       rounds: rounds_this,
       turns: 1,
       cost_embedded: None,

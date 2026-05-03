@@ -133,3 +133,70 @@ fn copilot_fixture_estimates_and_thinking() {
   let project = row["keys"]["project"].as_str().unwrap();
   assert!(project.ends_with("myrepo"), "got {project}");
 }
+
+#[test]
+fn copilot_transcript_shutdown_dedupes_chat_session() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_exact/workspaceStorage");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "copilot",
+      "--copilot-dir",
+      fixtures.to_str().unwrap(),
+      "--format",
+      "json",
+      "--group-by",
+      "source,model,project",
+    ])
+    .output()
+    .expect("run llm-tokei");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let s = String::from_utf8_lossy(&out.stdout);
+  let v: serde_json::Value = serde_json::from_str(&s).expect("valid json");
+  let arr = v.as_array().unwrap();
+  assert_eq!(arr.len(), 1);
+  let row = &arr[0];
+  assert_eq!(row["input"], 10);
+  assert_eq!(row["output"], 20);
+  assert_eq!(row["cache_read"], 3);
+  assert_eq!(row["cache_write"], 4);
+  assert_eq!(row["total"], 34);
+  assert_eq!(row["turns"], 2);
+  assert_eq!(row["rounds"], 2);
+  assert_eq!(row["sessions"], 1);
+  assert_eq!(row["keys"]["source"], "copilot");
+  assert_eq!(row["keys"]["model"], "gpt-5-mini");
+  assert_eq!(row["keys"]["project"], "exactrepo");
+}
+
+#[test]
+fn copilot_cli_fixture_parses_fallback_and_compaction() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_cli/session-state");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "copilot-cli",
+      "--copilot-cli-dir",
+      fixtures.to_str().unwrap(),
+      "--format",
+      "json",
+    ])
+    .output()
+    .expect("run llm-tokei");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let s = String::from_utf8_lossy(&out.stdout);
+  let v: serde_json::Value = serde_json::from_str(&s).expect("valid json");
+  let arr = v.as_array().unwrap();
+  assert_eq!(arr.len(), 1);
+  let row = &arr[0];
+  assert_eq!(row["input"], 13);
+  assert_eq!(row["output"], 20);
+  assert_eq!(row["cache_read"], 5);
+  assert_eq!(row["cache_write"], 2);
+  assert_eq!(row["total"], 35);
+  assert_eq!(row["turns"], 2);
+  assert_eq!(row["rounds"], 2);
+  assert_eq!(row["sessions"], 1);
+  assert_eq!(row["keys"]["source"], "copilot-cli");
+  assert_eq!(row["keys"]["model"], "gpt-5-mini");
+}

@@ -4,6 +4,8 @@ use anyhow::Result;
 pub mod claude;
 pub mod codex;
 pub mod copilot;
+pub mod copilot_cli;
+pub mod copilot_shutdown;
 pub mod opencode;
 
 #[allow(dead_code)]

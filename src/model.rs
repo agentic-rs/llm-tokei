@@ -7,6 +7,7 @@ pub enum Source {
   OpenCode,
   Claude,
   Copilot,
+  CopilotCli,
 }
 
 impl Source {
@@ -16,6 +17,7 @@ impl Source {
       Source::OpenCode => "opencode",
       Source::Claude => "claude",
       Source::Copilot => "copilot",
+      Source::CopilotCli => "copilot-cli",
     }
   }
 }
@@ -41,6 +43,9 @@ pub struct UsageRecord {
   pub reasoning: u64,
   pub cache_read: u64,
   pub cache_write: u64,
+  pub mode: Option<String>,
+  pub agent: Option<String>,
+  pub is_compaction: bool,
   /// Number of user-initiated rounds (prompts) in this record.
   pub rounds: u64,
   /// Number of total API turns (including tool-call continuations) in this record.

@@ -20,7 +20,8 @@ use crate::format::{json::render_json, table::render_table};
 use crate::model::UsageRecord;
 use crate::pricing::PricingTable;
 use crate::sources::{
-  claude::ClaudeSource, codex::CodexSource, copilot::CopilotSource, opencode::OpenCodeSource, UsageSource,
+  claude::ClaudeSource, codex::CodexSource, copilot::CopilotSource, copilot_cli::CopilotCliSource,
+  opencode::OpenCodeSource, UsageSource,
 };
 
 fn main() -> Result<()> {
@@ -45,7 +46,15 @@ fn main() -> Result<()> {
     .source
     .as_ref()
     .map(|v| v.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>())
-    .unwrap_or_else(|| vec!["codex".into(), "opencode".into(), "claude".into(), "copilot".into()]);
+    .unwrap_or_else(|| {
+      vec![
+        "codex".into(),
+        "opencode".into(),
+        "claude".into(),
+        "copilot".into(),
+        "copilot-cli".into(),
+      ]
+    });
 
   let mut all: Vec<UsageRecord> = Vec::new();
 
@@ -70,6 +79,38 @@ fn main() -> Result<()> {
           all.append(&mut v);
         }
         Err(e) if args.verbose => eprintln!("codex: error: {e:#}"),
+        Err(_) => {}
+      }
+    }
+  }
+
+  if want.iter().any(|s| s == "copilot-cli") {
+    let roots = args
+      .copilot_cli_dir
+      .clone()
+      .unwrap_or_else(CopilotCliSource::default_paths);
+    if !roots.is_empty() {
+      let src = CopilotCliSource::new(roots);
+      let result = if let Some(c) = cache.as_ref() {
+        collect_one_record_source_with_cache(c, "copilot-cli", src.discover_files(), CopilotCliSource::parse_file)
+      } else {
+        src.collect().map(|records| {
+          let mut stats = CacheStats::new();
+          stats.scanned = src.discover_files().len();
+          (records, stats)
+        })
+      };
+      match result {
+        Ok((mut v, stats)) => {
+          if args.verbose {
+            eprintln!(
+              "{} (uses exact shutdown metrics when present; otherwise input is estimated)",
+              format_cache_stats("copilot-cli", "files", &stats)
+            );
+          }
+          all.append(&mut v);
+        }
+        Err(e) if args.verbose => eprintln!("copilot-cli: error: {e:#}"),
         Err(_) => {}
       }
     }
@@ -142,6 +183,7 @@ fn main() -> Result<()> {
       };
       match result {
         Ok((mut v, stats)) => {
+          CopilotSource::dedupe_exact_sessions(&mut v);
           if args.verbose {
             eprintln!(
               "{} (input/output are estimates from rendered text length)",

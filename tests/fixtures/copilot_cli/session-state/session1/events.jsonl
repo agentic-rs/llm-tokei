@@ -1,0 +1,5 @@
+{"type":"session.start","timestamp":"2024-03-09T16:00:00Z","data":{"sessionId":"cli-session"}}
+{"type":"session.model_change","timestamp":"2024-03-09T16:00:01Z","data":{"newModel":"gpt-5-mini"}}
+{"type":"user.message","timestamp":"2024-03-09T16:00:02Z","data":{"content":"12345678"}}
+{"type":"assistant.message","id":"a1","timestamp":"2024-03-09T16:00:03Z","data":{"messageId":"a1","content":"abcd","outputTokens":7}}
+{"type":"session.compaction_complete","id":"c1","timestamp":"2024-03-09T16:00:04Z","data":{"compactionTokensUsed":{"model":"gpt-5-mini","inputTokens":11,"outputTokens":13,"cacheReadTokens":5,"cacheWriteTokens":2}}}

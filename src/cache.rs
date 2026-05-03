@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS records (
     reasoning     INTEGER NOT NULL,
     cache_read    INTEGER NOT NULL,
     cache_write   INTEGER NOT NULL,
+    mode          TEXT,
+    agent         TEXT,
+    is_compaction INTEGER NOT NULL,
     rounds        INTEGER NOT NULL,
     turns         INTEGER NOT NULL,
     cost_embedded REAL
@@ -64,6 +67,9 @@ const EXPECTED_RECORDS_COLUMNS: &[&str] = &[
   "reasoning",
   "cache_read",
   "cache_write",
+  "mode",
+  "agent",
+  "is_compaction",
   "rounds",
   "turns",
   "cost_embedded",
@@ -117,7 +123,9 @@ impl CacheDb {
       OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_URI,
     )
     .with_context(|| format!("opening cache db {}", path.display()))?;
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;").ok();
+    conn
+      .execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+      .ok();
     Ok(conn)
   }
 
@@ -150,8 +158,8 @@ impl CacheDb {
     let fp_str = file_path.to_string_lossy();
     let mut stmt = self.conn.prepare(
       "SELECT s.source, s.session_id, s.session_title, s.project_cwd, s.project_name, \
-              r.provider, r.model, r.ts, r.input, r.output, r.reasoning, r.cache_read, \
-              r.cache_write, r.rounds, r.turns, r.cost_embedded \
+               r.provider, r.model, r.ts, r.input, r.output, r.reasoning, r.cache_read, \
+               r.cache_write, r.mode, r.agent, r.is_compaction, r.rounds, r.turns, r.cost_embedded \
        FROM records r \
        INNER JOIN sessions s ON s.id = r.session_rowid \
        WHERE s.pruned = 0 AND s.source = ?1 AND s.file_path = ?2",
@@ -208,8 +216,8 @@ impl CacheDb {
       let sid = self.conn.last_insert_rowid();
       let mut insert_record = self.conn.prepare(
         "INSERT INTO records (session_rowid, provider, model, ts, input, output, reasoning, \
-                             cache_read, cache_write, rounds, turns, cost_embedded) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                             cache_read, cache_write, mode, agent, is_compaction, rounds, turns, cost_embedded) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
       )?;
       for record in session_records {
         insert_record.execute(params![
@@ -222,6 +230,9 @@ impl CacheDb {
           record.reasoning,
           record.cache_read,
           record.cache_write,
+          record.mode,
+          record.agent,
+          if record.is_compaction { 1 } else { 0 },
           record.rounds,
           record.turns,
           record.cost_embedded,
@@ -313,6 +324,7 @@ fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> Usa
     "opencode" => Source::OpenCode,
     "claude" => Source::Claude,
     "copilot" => Source::Copilot,
+    "copilot-cli" => Source::CopilotCli,
     _ => Source::Codex,
   };
   let ts = DateTime::parse_from_rfc3339(ts_str)
@@ -332,8 +344,11 @@ fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> Usa
     reasoning: row.get(10).unwrap_or(0),
     cache_read: row.get(11).unwrap_or(0),
     cache_write: row.get(12).unwrap_or(0),
-    rounds: row.get(13).unwrap_or(0),
-    turns: row.get(14).unwrap_or(0),
-    cost_embedded: row.get(15).unwrap_or(None),
+    mode: row.get(13).unwrap_or(None),
+    agent: row.get(14).unwrap_or(None),
+    is_compaction: row.get::<_, i64>(15).unwrap_or(0) != 0,
+    rounds: row.get(16).unwrap_or(0),
+    turns: row.get(17).unwrap_or(0),
+    cost_embedded: row.get(18).unwrap_or(None),
   }
 }

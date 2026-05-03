@@ -1,0 +1,2 @@
+{"type":"session.start","timestamp":"2024-03-09T16:00:00Z","data":{"sessionId":"exact-session"}}
+{"type":"session.shutdown","id":"shutdown-1","timestamp":"2024-03-09T16:01:00Z","data":{"modelMetrics":{"gpt-5-mini":{"usage":{"inputTokens":10,"outputTokens":20,"cacheReadTokens":3,"cacheWriteTokens":4},"requests":{"count":2}}}}}

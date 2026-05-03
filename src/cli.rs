@@ -32,11 +32,11 @@ pub enum Period {
   Month,
 }
 
-/// Token usage stats for Codex and OpenCode sessions.
+/// Token usage stats for local LLM agent sessions.
 #[derive(Debug, Parser)]
 #[command(name = "llm-tokei", version, about)]
 pub struct Args {
-  /// Comma-separated source list: codex,opencode,claude,copilot (default: all).
+  /// Comma-separated source list: codex,opencode,claude,copilot,copilot-cli (default: all).
   #[arg(long, value_delimiter = ',')]
   pub source: Option<Vec<String>>,
 
@@ -56,6 +56,11 @@ pub struct Args {
   /// Repeatable; if unset, all known defaults are scanned.
   #[arg(long)]
   pub copilot_dir: Option<Vec<PathBuf>>,
+
+  /// Override GitHub Copilot CLI state root (default: ~/.copilot/session-state).
+  /// Repeatable; if unset, all known defaults are scanned.
+  #[arg(long)]
+  pub copilot_cli_dir: Option<Vec<PathBuf>>,
 
   /// Shortcut: filter to a recent time window (today / 7d / month).
   #[arg(long, value_enum)]

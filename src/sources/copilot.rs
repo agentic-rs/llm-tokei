@@ -1,9 +1,10 @@
 use crate::model::{Source, UsageRecord};
+use crate::sources::copilot_shutdown::{records_from_shutdown_model_metrics, ShutdownRecordArgs};
 use crate::sources::UsageSource;
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -55,7 +56,7 @@ impl CopilotSource {
       }
       for entry in WalkDir::new(root)
         .min_depth(3)
-        .max_depth(3)
+        .max_depth(4)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -71,22 +72,38 @@ impl CopilotSource {
         if !name.ends_with(".jsonl") {
           continue;
         }
-        if path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) != Some("chatSessions") {
-          continue;
+        let parent = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str());
+        if parent == Some("chatSessions") || parent == Some("transcripts") {
+          files.push(path.to_path_buf());
         }
-        files.push(path.to_path_buf());
       }
     }
     files
   }
 
   pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
-    let ws_dir = match path.parent().and_then(|p| p.parent()) {
+    let ws_dir = match workspace_dir_for_file(path) {
       Some(d) => d.to_path_buf(),
       None => return Ok(None),
     };
     let cwd = read_workspace_folder(&ws_dir);
-    parse_session(path, cwd)
+    if is_transcript_file(path) {
+      parse_transcript(path, cwd)
+    } else {
+      parse_session(path, cwd)
+    }
+  }
+
+  pub fn dedupe_exact_sessions(records: &mut Vec<UsageRecord>) {
+    let exact: HashSet<String> = records
+      .iter()
+      .filter(|r| r.mode.as_deref() == Some("session.shutdown"))
+      .map(|r| r.session_id.clone())
+      .collect();
+    if exact.is_empty() {
+      return;
+    }
+    records.retain(|r| r.mode.as_deref() == Some("session.shutdown") || !exact.contains(&r.session_id));
   }
 }
 
@@ -99,7 +116,7 @@ impl UsageSource for CopilotSource {
     let mut out = Vec::new();
     let mut workspace_cache: HashMap<PathBuf, Option<String>> = HashMap::new();
     for path in self.discover_files() {
-      let ws_dir = match path.parent().and_then(|p| p.parent()) {
+      let ws_dir = match workspace_dir_for_file(&path) {
         Some(d) => d.to_path_buf(),
         None => continue,
       };
@@ -107,11 +124,74 @@ impl UsageSource for CopilotSource {
         .entry(ws_dir.clone())
         .or_insert_with(|| read_workspace_folder(&ws_dir))
         .clone();
-      if let Ok(Some(recs)) = parse_session(&path, cwd) {
+      let parsed = if is_transcript_file(&path) {
+        parse_transcript(&path, cwd)
+      } else {
+        parse_session(&path, cwd)
+      };
+      if let Ok(Some(recs)) = parsed {
         out.extend(recs);
       }
     }
+    CopilotSource::dedupe_exact_sessions(&mut out);
     Ok(out)
+  }
+}
+
+fn is_transcript_file(path: &Path) -> bool {
+  path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) == Some("transcripts")
+}
+
+fn workspace_dir_for_file(path: &Path) -> Option<&Path> {
+  if is_transcript_file(path) {
+    path.parent()?.parent()?.parent()
+  } else {
+    path.parent()?.parent()
+  }
+}
+
+fn parse_transcript(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<UsageRecord>>> {
+  let f = File::open(path)?;
+  let reader = BufReader::new(f);
+  let project_name = project_cwd
+    .as_ref()
+    .and_then(|p| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()));
+
+  let mut session_id: Option<String> = None;
+  let mut records = Vec::new();
+  for line in reader.lines() {
+    let line = match line {
+      Ok(l) => l,
+      Err(_) => continue,
+    };
+    if line.trim().is_empty() {
+      continue;
+    }
+    let event: Value = match serde_json::from_str(&line) {
+      Ok(v) => v,
+      Err(_) => continue,
+    };
+    if event.get("type").and_then(|v| v.as_str()) == Some("session.start") {
+      session_id = event
+        .pointer("/data/sessionId")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or(session_id);
+    }
+    records.extend(records_from_shutdown_model_metrics(ShutdownRecordArgs {
+      source: Source::Copilot,
+      source_path: path,
+      session_id: session_id.clone(),
+      project_cwd: project_cwd.clone(),
+      project_name: project_name.clone(),
+      event: &event,
+    }));
+  }
+
+  if records.is_empty() {
+    Ok(None)
+  } else {
+    Ok(Some(records))
   }
 }
 
@@ -163,6 +243,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
 
   // Replay patches into a single JSON document.
   let mut state: Value = Value::Null;
+  let mut requests_by_id: HashMap<String, Value> = HashMap::new();
   for line in reader.lines() {
     let line = match line {
       Ok(l) => l,
@@ -180,6 +261,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       0 => {
         if let Some(v) = rec.get("v") {
           state = v.clone();
+          capture_requests_from_state(&state, &mut requests_by_id);
         }
       }
       1 | 2 => {
@@ -193,6 +275,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
         };
         let segments: Vec<PathSeg> = path_arr.iter().filter_map(PathSeg::from_value).collect();
         apply_patch(&mut state, &segments, v);
+        capture_request_patch(&state, &path_arr, &mut requests_by_id);
       }
       _ => {}
     }
@@ -234,82 +317,110 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
 
   let mut records: Vec<UsageRecord> = Vec::new();
 
-  if let Some(requests) = state.get("requests").and_then(|v| v.as_array()) {
-    for req in requests {
-      if !req.is_object() {
-        continue;
+  let requests: Vec<Value> = if requests_by_id.is_empty() {
+    state
+      .get("requests")
+      .and_then(|v| v.as_array())
+      .cloned()
+      .unwrap_or_default()
+  } else {
+    requests_by_id.into_values().collect()
+  };
+
+  for req in &requests {
+    if !req.is_object() {
+      continue;
+    }
+    let req_ts_ms = req.get("timestamp").and_then(|v| v.as_i64()).or(creation_ms);
+    let req_model = req
+      .pointer("/modelId")
+      .and_then(|v| v.as_str())
+      .or_else(|| req.pointer("/agent/modelId").and_then(|v| v.as_str()))
+      .map(|s| s.to_string())
+      .or_else(|| default_model.clone());
+
+    // --- Input estimate ---
+    let mut input_chars: u64 = 0;
+    input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedUserMessage")));
+    input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedGlobalContext")));
+
+    // --- Output estimate ---
+    let mut output_chars: u64 = 0;
+    if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
+      for it in resp {
+        output_chars = output_chars.saturating_add(response_item_chars(it));
       }
-      let req_ts_ms = req.get("timestamp").and_then(|v| v.as_i64()).or(creation_ms);
-      let req_model = req
-        .pointer("/modelId")
-        .and_then(|v| v.as_str())
-        .or_else(|| req.pointer("/agent/modelId").and_then(|v| v.as_str()))
-        .map(|s| s.to_string())
-        .or_else(|| default_model.clone());
+    }
 
-      // --- Input estimate ---
-      let mut input_chars: u64 = 0;
-      input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedUserMessage")));
-      input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedGlobalContext")));
-
-      // --- Output estimate ---
-      let mut output_chars: u64 = 0;
-      if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
-        for it in resp {
-          output_chars = output_chars.saturating_add(response_item_chars(it));
+    // --- toolCallRounds: thinking tokens (exact) + tool call args (output) ---
+    let mut reasoning: u64 = 0;
+    let mut extra_turns: u64 = 0;
+    if let Some(rounds) = req
+      .pointer("/result/metadata/toolCallRounds")
+      .and_then(|v| v.as_array())
+    {
+      extra_turns = rounds.len() as u64;
+      for round in rounds {
+        if let Some(t) = round.pointer("/thinking/tokens").and_then(|v| v.as_u64()) {
+          reasoning = reasoning.saturating_add(t);
         }
-      }
-
-      // --- toolCallRounds: thinking tokens (exact) + tool call args (output) ---
-      let mut reasoning: u64 = 0;
-      let mut extra_turns: u64 = 0;
-      if let Some(rounds) = req
-        .pointer("/result/metadata/toolCallRounds")
-        .and_then(|v| v.as_array())
-      {
-        extra_turns = rounds.len() as u64;
-        for round in rounds {
-          if let Some(t) = round.pointer("/thinking/tokens").and_then(|v| v.as_u64()) {
-            reasoning = reasoning.saturating_add(t);
-          }
-          if let Some(resp) = round.get("response").and_then(|v| v.as_str()) {
-            output_chars = output_chars.saturating_add(resp.chars().count() as u64);
-          }
-          if let Some(calls) = round.get("toolCalls").and_then(|v| v.as_array()) {
-            for call in calls {
-              if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
-                output_chars = output_chars.saturating_add(args.chars().count() as u64);
-              }
+        if let Some(resp) = round.get("response").and_then(|v| v.as_str()) {
+          output_chars = output_chars.saturating_add(resp.chars().count() as u64);
+        }
+        if let Some(calls) = round.get("toolCalls").and_then(|v| v.as_array()) {
+          for call in calls {
+            if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
+              output_chars = output_chars.saturating_add(args.chars().count() as u64);
             }
           }
         }
       }
-
-      let input = input_chars.div_ceil(4);
-      let output = output_chars.div_ceil(4);
-      let ts = req_ts_ms
-        .map(ms_to_dt)
-        .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
-
-      records.push(UsageRecord {
-        source: Source::Copilot,
-        session_id: session_id.clone(),
-        session_title: title.clone(),
-        project_cwd: project_cwd.clone(),
-        project_name: project_name.clone(),
-        provider: Some("github-copilot".to_string()),
-        model: req_model,
-        ts,
-        input,
-        output,
-        reasoning,
-        cache_read: 0,
-        cache_write: 0,
-        rounds: 1,
-        turns: 1 + extra_turns,
-        cost_embedded: None,
-      });
     }
+
+    let input = input_chars.div_ceil(4);
+    let output = req
+      .get("completionTokens")
+      .and_then(|v| v.as_u64())
+      .unwrap_or_else(|| output_chars.div_ceil(4));
+    let ts = req_ts_ms
+      .map(ms_to_dt)
+      .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
+    let command = req
+      .get("command")
+      .and_then(|v| v.as_str())
+      .or_else(|| req.pointer("/slashCommand/command").and_then(|v| v.as_str()));
+    let is_compaction =
+      command == Some("compact") || req.pointer("/slashCommand/name").and_then(|v| v.as_str()) == Some("compact");
+    let mode = if is_compaction {
+      Some("compaction".to_string())
+    } else {
+      req
+        .pointer("/modeInfo/modeId")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    };
+
+    records.push(UsageRecord {
+      source: Source::Copilot,
+      session_id: session_id.clone(),
+      session_title: title.clone(),
+      project_cwd: project_cwd.clone(),
+      project_name: project_name.clone(),
+      provider: Some("github-copilot".to_string()),
+      model: req_model,
+      ts,
+      input,
+      output,
+      reasoning,
+      cache_read: 0,
+      cache_write: 0,
+      mode,
+      agent: req.pointer("/agent/id").and_then(|v| v.as_str()).map(str::to_string),
+      is_compaction,
+      rounds: 1,
+      turns: 1 + extra_turns,
+      cost_embedded: None,
+    });
   }
 
   if records.is_empty() {
@@ -428,4 +539,61 @@ fn ms_to_dt(ms: i64) -> DateTime<Utc> {
   let secs = ms.div_euclid(1000);
   let nanos = (ms.rem_euclid(1000) * 1_000_000) as u32;
   Utc.timestamp_opt(secs, nanos).single().unwrap_or_else(Utc::now)
+}
+
+fn capture_requests_from_state(state: &Value, requests_by_id: &mut HashMap<String, Value>) {
+  if let Some(requests) = state.get("requests").and_then(|v| v.as_array()) {
+    for request in requests {
+      capture_request(request, requests_by_id);
+    }
+  }
+}
+
+fn capture_request_patch(state: &Value, path_arr: &[Value], requests_by_id: &mut HashMap<String, Value>) {
+  if path_arr.first().and_then(|v| v.as_str()) != Some("requests") {
+    return;
+  }
+  if path_arr.len() == 1 {
+    capture_requests_from_state(state, requests_by_id);
+    return;
+  }
+  let Some(index) = path_arr.get(1).and_then(|v| v.as_u64()).map(|i| i as usize) else {
+    return;
+  };
+  if let Some(request) = state.pointer(&format!("/requests/{index}")) {
+    capture_request(request, requests_by_id);
+  }
+}
+
+fn capture_request(request: &Value, requests_by_id: &mut HashMap<String, Value>) {
+  let Some(request_id) = request.get("requestId").and_then(|v| v.as_str()) else {
+    return;
+  };
+  if request_id.is_empty() {
+    return;
+  }
+  if let Some(existing) = requests_by_id.get_mut(request_id) {
+    let prev_tokens = existing.get("completionTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+    let new_tokens = request.get("completionTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+    let mut merged = existing.clone();
+    merge_objects(&mut merged, request);
+    if new_tokens < prev_tokens {
+      if let Some(map) = merged.as_object_mut() {
+        map.insert("completionTokens".to_string(), Value::from(prev_tokens));
+      }
+    }
+    *existing = merged;
+  } else {
+    requests_by_id.insert(request_id.to_string(), request.clone());
+  }
+}
+
+fn merge_objects(base: &mut Value, next: &Value) {
+  let (Some(base_obj), Some(next_obj)) = (base.as_object_mut(), next.as_object()) else {
+    *base = next.clone();
+    return;
+  };
+  for (key, value) in next_obj {
+    base_obj.insert(key.clone(), value.clone());
+  }
 }

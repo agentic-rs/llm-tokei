@@ -1,0 +1,1 @@
+{"kind":0,"v":{"sessionId":"exact-session","creationDate":1710000000000,"requests":[{"requestId":"r1","timestamp":1710000000000,"modelId":"gpt-5-mini","result":{"metadata":{"renderedUserMessage":[{"text":"fallback input"}],"renderedGlobalContext":[]}},"completionTokens":999}]}}
