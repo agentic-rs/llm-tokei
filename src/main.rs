@@ -1,4 +1,5 @@
 mod aggregate;
+mod cache;
 mod cli;
 mod format;
 mod model;
@@ -8,8 +9,12 @@ mod time;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
+use crate::cache::{CacheDb, CacheStats};
 use crate::cli::{Args, Format, Period};
 use crate::format::{json::render_json, table::render_table};
 use crate::model::UsageRecord;
@@ -21,6 +26,19 @@ use crate::sources::{
 fn main() -> Result<()> {
   let args = Args::parse();
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
+  let cache = if args.no_cache {
+    None
+  } else {
+    match CacheDb::open() {
+      Ok(db) => Some(db),
+      Err(e) => {
+        if args.verbose {
+          eprintln!("cache: error: {e:#}; falling back to direct parsing");
+        }
+        None
+      }
+    }
+  };
 
   // Resolve sources.
   let want = args
@@ -35,10 +53,19 @@ fn main() -> Result<()> {
     let path = args.codex_dir.clone().or_else(CodexSource::default_path);
     if let Some(p) = path {
       let src = CodexSource::new(p);
-      match src.collect() {
-        Ok(mut v) => {
+      let result = if let Some(c) = cache.as_ref() {
+        collect_one_record_source_with_cache(c, "codex", src.discover_files(), CodexSource::parse_file)
+      } else {
+        src.collect().map(|records| {
+          let mut stats = CacheStats::new();
+          stats.scanned = src.discover_files().len();
+          (records, stats)
+        })
+      };
+      match result {
+        Ok((mut v, stats)) => {
           if args.verbose {
-            eprintln!("codex: {} session record(s)", v.len());
+            eprintln!("{}", format_cache_stats("codex", "files", &stats));
           }
           all.append(&mut v);
         }
@@ -52,10 +79,19 @@ fn main() -> Result<()> {
     let path = args.opencode_db.clone().or_else(OpenCodeSource::default_path);
     if let Some(p) = path {
       let src = OpenCodeSource::new(p);
-      match src.collect() {
-        Ok(mut v) => {
+      let result = if let Some(c) = cache.as_ref() {
+        collect_opencode_with_cache(c, &src)
+      } else {
+        src.collect().map(|records| {
+          let mut stats = CacheStats::new();
+          stats.scanned = usize::from(src.db_path.exists());
+          (records, stats)
+        })
+      };
+      match result {
+        Ok((mut v, stats)) => {
           if args.verbose {
-            eprintln!("opencode: {} message record(s)", v.len());
+            eprintln!("{}", format_cache_stats("opencode", "db files", &stats));
           }
           all.append(&mut v);
         }
@@ -69,10 +105,19 @@ fn main() -> Result<()> {
     let path = args.claude_dir.clone().or_else(ClaudeSource::default_path);
     if let Some(p) = path {
       let src = ClaudeSource::new(p);
-      match src.collect() {
-        Ok(mut v) => {
+      let result = if let Some(c) = cache.as_ref() {
+        collect_one_record_source_with_cache(c, "claude", src.discover_files(), ClaudeSource::parse_file)
+      } else {
+        src.collect().map(|records| {
+          let mut stats = CacheStats::new();
+          stats.scanned = src.discover_files().len();
+          (records, stats)
+        })
+      };
+      match result {
+        Ok((mut v, stats)) => {
           if args.verbose {
-            eprintln!("claude: {} session record(s)", v.len());
+            eprintln!("{}", format_cache_stats("claude", "files", &stats));
           }
           all.append(&mut v);
         }
@@ -86,12 +131,21 @@ fn main() -> Result<()> {
     let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
     if !roots.is_empty() {
       let src = CopilotSource::new(roots);
-      match src.collect() {
-        Ok(mut v) => {
+      let result = if let Some(c) = cache.as_ref() {
+        collect_one_record_source_with_cache(c, "copilot", src.discover_files(), CopilotSource::parse_file)
+      } else {
+        src.collect().map(|records| {
+          let mut stats = CacheStats::new();
+          stats.scanned = src.discover_files().len();
+          (records, stats)
+        })
+      };
+      match result {
+        Ok((mut v, stats)) => {
           if args.verbose {
             eprintln!(
-              "copilot: {} session record(s) (input/output are estimates from rendered text length)",
-              v.len()
+              "{} (input/output are estimates from rendered text length)",
+              format_cache_stats("copilot", "files", &stats)
             );
           }
           all.append(&mut v);
@@ -188,4 +242,136 @@ fn main() -> Result<()> {
   }
 
   Ok(())
+}
+
+fn collect_one_record_source_with_cache<F>(
+  cache: &CacheDb,
+  source: &str,
+  files: Vec<PathBuf>,
+  parse_file: F,
+) -> Result<(Vec<UsageRecord>, CacheStats)>
+where
+  F: Fn(&Path) -> Result<Option<UsageRecord>>,
+{
+  let mut out = Vec::new();
+  let mut stats = CacheStats::new();
+  stats.scanned = files.len();
+
+  let known = cache.file_mtimes_for(source)?;
+  let mut seen: HashSet<PathBuf> = HashSet::new();
+
+  for file in files {
+    seen.insert(file.clone());
+    let mtime = file_mtime_secs(&file).unwrap_or(0);
+    let was_known = known.get(&file).copied();
+
+    if was_known == Some(mtime) {
+      let mut cached = cache.load_active_for_file(source, &file)?;
+      if cached.is_empty() {
+        let mut parsed = Vec::new();
+        if let Some(rec) = parse_file(&file)? {
+          parsed.push(rec);
+        }
+        if let Some(prev) = was_known {
+          if prev == mtime {
+            stats.updated += 1;
+          }
+        }
+        cache.upsert_file(&file, mtime, source, &parsed)?;
+        out.extend(parsed);
+      } else {
+        stats.cached += 1;
+        out.append(&mut cached);
+      }
+      continue;
+    }
+
+    let mut parsed = Vec::new();
+    if let Some(rec) = parse_file(&file)? {
+      parsed.push(rec);
+    }
+    if was_known.is_some() {
+      stats.updated += 1;
+    } else {
+      stats.added += 1;
+    }
+    cache.upsert_file(&file, mtime, source, &parsed)?;
+    out.extend(parsed);
+  }
+
+  let to_prune: Vec<PathBuf> = cache
+    .active_file_paths(source)?
+    .into_iter()
+    .filter(|p| !seen.contains(p))
+    .collect();
+  if !to_prune.is_empty() {
+    let _ = cache.prune_files(source, &to_prune)?;
+    stats.pruned = to_prune.len();
+  }
+
+  Ok((out, stats))
+}
+
+fn collect_opencode_with_cache(cache: &CacheDb, src: &OpenCodeSource) -> Result<(Vec<UsageRecord>, CacheStats)> {
+  let mut stats = CacheStats::new();
+  let mut out = Vec::new();
+  let file = src.db_path.clone();
+
+  if !file.exists() {
+    let to_prune = cache.active_file_paths("opencode")?;
+    if !to_prune.is_empty() {
+      let _ = cache.prune_files("opencode", &to_prune)?;
+      stats.pruned = to_prune.len();
+    }
+    return Ok((out, stats));
+  }
+
+  stats.scanned = 1;
+  let mtime = file_mtime_secs(&file).unwrap_or(0);
+  let known = cache.file_mtimes_for("opencode")?;
+  let was_known = known.get(&file).copied();
+
+  if was_known == Some(mtime) {
+    out = cache.load_active_for_file("opencode", &file)?;
+    if !out.is_empty() {
+      stats.cached = 1;
+      return Ok((out, stats));
+    }
+  }
+
+  out = src.collect()?;
+  if was_known.is_some() {
+    stats.updated = 1;
+  } else {
+    stats.added = 1;
+  }
+  cache.upsert_file(&file, mtime, "opencode", &out)?;
+  Ok((out, stats))
+}
+
+fn file_mtime_secs(path: &Path) -> Option<i64> {
+  let meta = std::fs::metadata(path).ok()?;
+  let modified = meta.modified().ok()?;
+  let dur = modified.duration_since(UNIX_EPOCH).ok()?;
+  Some(dur.as_secs() as i64)
+}
+
+fn format_cache_stats(source: &str, unit: &str, stats: &CacheStats) -> String {
+  if stats.scanned == 0 {
+    return format!("{source}: 0 {unit}");
+  }
+  if stats.cached == 0 && stats.added == 0 && stats.updated == 0 && stats.pruned == 0 {
+    return format!("{source}: {} {unit}", stats.scanned);
+  }
+  if stats.pruned > 0 {
+    format!(
+      "{source}: {} {unit}, {} cached, {} added, {} updated, {} pruned",
+      stats.scanned, stats.cached, stats.added, stats.updated, stats.pruned
+    )
+  } else {
+    format!(
+      "{source}: {} {unit}, {} cached, {} added, {} updated",
+      stats.scanned, stats.cached, stats.added, stats.updated
+    )
+  }
 }

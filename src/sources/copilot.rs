@@ -46,22 +46,13 @@ impl CopilotSource {
     }
     bases.into_iter().filter(|p| p.exists()).collect()
   }
-}
 
-impl UsageSource for CopilotSource {
-  fn name(&self) -> &'static str {
-    "copilot"
-  }
-
-  fn collect(&self) -> Result<Vec<UsageRecord>> {
-    let mut out = Vec::new();
-    let mut workspace_cache: HashMap<PathBuf, Option<String>> = HashMap::new();
-
+  pub fn discover_files(&self) -> Vec<PathBuf> {
+    let mut files = Vec::new();
     for root in &self.roots {
       if !root.exists() {
         continue;
       }
-      // Walk up to a fixed depth: <root>/<wsid>/chatSessions/<file>.jsonl
       for entry in WalkDir::new(root)
         .min_depth(3)
         .max_depth(3)
@@ -83,19 +74,41 @@ impl UsageSource for CopilotSource {
         if path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) != Some("chatSessions") {
           continue;
         }
+        files.push(path.to_path_buf());
+      }
+    }
+    files
+  }
 
-        let ws_dir = match path.parent().and_then(|p| p.parent()) {
-          Some(d) => d.to_path_buf(),
-          None => continue,
-        };
-        let cwd = workspace_cache
-          .entry(ws_dir.clone())
-          .or_insert_with(|| read_workspace_folder(&ws_dir))
-          .clone();
+  pub fn parse_file(path: &Path) -> Result<Option<UsageRecord>> {
+    let ws_dir = match path.parent().and_then(|p| p.parent()) {
+      Some(d) => d.to_path_buf(),
+      None => return Ok(None),
+    };
+    let cwd = read_workspace_folder(&ws_dir);
+    parse_session(path, cwd)
+  }
+}
 
-        if let Ok(Some(rec)) = parse_session(path, cwd) {
-          out.push(rec);
-        }
+impl UsageSource for CopilotSource {
+  fn name(&self) -> &'static str {
+    "copilot"
+  }
+
+  fn collect(&self) -> Result<Vec<UsageRecord>> {
+    let mut out = Vec::new();
+    let mut workspace_cache: HashMap<PathBuf, Option<String>> = HashMap::new();
+    for path in self.discover_files() {
+      let ws_dir = match path.parent().and_then(|p| p.parent()) {
+        Some(d) => d.to_path_buf(),
+        None => continue,
+      };
+      let cwd = workspace_cache
+        .entry(ws_dir.clone())
+        .or_insert_with(|| read_workspace_folder(&ws_dir))
+        .clone();
+      if let Ok(Some(rec)) = parse_session(&path, cwd) {
+        out.push(rec);
       }
     }
     Ok(out)

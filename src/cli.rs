@@ -117,6 +117,10 @@ pub struct Args {
   #[arg(long)]
   pub pricing: Option<PathBuf>,
 
+  /// Disable the usage cache (re-parse all source files).
+  #[arg(long)]
+  pub no_cache: bool,
+
   /// Print parsing warnings.
   #[arg(short, long)]
   pub verbose: bool,

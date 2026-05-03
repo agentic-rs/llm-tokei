@@ -6,7 +6,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub struct CodexSource {
@@ -23,6 +23,31 @@ impl CodexSource {
       .map(PathBuf::from)
       .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|p| p.join(".codex")))?;
     Some(base.join("sessions"))
+  }
+
+  pub fn discover_files(&self) -> Vec<PathBuf> {
+    if !self.root.exists() {
+      return Vec::new();
+    }
+    WalkDir::new(&self.root)
+      .follow_links(false)
+      .into_iter()
+      .filter_map(|e| e.ok())
+      .filter(|e| e.file_type().is_file())
+      .filter_map(|entry| {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str())?;
+        if name.ends_with(".jsonl") {
+          Some(path.to_path_buf())
+        } else {
+          None
+        }
+      })
+      .collect()
+  }
+
+  pub fn parse_file(path: &Path) -> Result<Option<UsageRecord>> {
+    parse_rollout(path)
   }
 }
 
@@ -65,27 +90,9 @@ impl UsageSource for CodexSource {
   }
 
   fn collect(&self) -> Result<Vec<UsageRecord>> {
-    if !self.root.exists() {
-      return Ok(Vec::new());
-    }
     let mut out = Vec::new();
-    for entry in WalkDir::new(&self.root)
-      .follow_links(false)
-      .into_iter()
-      .filter_map(|e| e.ok())
-    {
-      if !entry.file_type().is_file() {
-        continue;
-      }
-      let path = entry.path();
-      let name = match path.file_name().and_then(|n| n.to_str()) {
-        Some(n) => n,
-        None => continue,
-      };
-      if !name.ends_with(".jsonl") {
-        continue;
-      }
-      if let Ok(Some(rec)) = parse_rollout(path) {
+    for path in self.discover_files() {
+      if let Ok(Some(rec)) = Self::parse_file(&path) {
         out.push(rec);
       }
     }
@@ -93,7 +100,7 @@ impl UsageSource for CodexSource {
   }
 }
 
-fn parse_rollout(path: &std::path::Path) -> Result<Option<UsageRecord>> {
+fn parse_rollout(path: &Path) -> Result<Option<UsageRecord>> {
   let f = File::open(path)?;
   let reader = BufReader::new(f);
 
