@@ -46,8 +46,16 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     } else {
       a.input
     };
-    row.push(Col::num(&fmt_est_avg(shown_input, a.input_estimated, avg_den(a, opts.avg))));
-    row.push(Col::num(&fmt_est_avg(a.output, a.output_estimated, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_est_avg(
+      shown_input,
+      a.input_estimated,
+      avg_den(a, opts.avg),
+    )));
+    row.push(Col::num(&fmt_est_avg(
+      a.output,
+      a.output_estimated,
+      avg_den(a, opts.avg),
+    )));
     row.push(Col::num(&fmt_avg(a.reasoning, avg_den(a, opts.avg))));
     row.push(Col::num(&fmt_avg(a.cache_read, avg_den(a, opts.avg))));
     row.push(Col::num(&fmt_avg(a.cache_write, avg_den(a, opts.avg))));
@@ -243,7 +251,11 @@ fn fmt_avg(n: u64, den: u64) -> String {
 
 fn fmt_est_avg(n: u64, estimated: bool, den: u64) -> String {
   let body = fmt_avg(n, den);
-  if estimated { format!("~{body}") } else { body }
+  if estimated {
+    format!("~{body}")
+  } else {
+    body
+  }
 }
 
 fn fmt_cost_avg(v: f64, den: u64) -> String {

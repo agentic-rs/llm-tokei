@@ -454,7 +454,11 @@ fn file_summary(records: &[UsageRecord]) -> String {
 }
 
 fn fmt_est(v: u64, est: bool) -> String {
-  if est { format!("~{v}") } else { v.to_string() }
+  if est {
+    format!("~{v}")
+  } else {
+    v.to_string()
+  }
 }
 
 fn init_tracing(verbose: bool) {

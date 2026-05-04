@@ -265,8 +265,16 @@ fn summarize(records: &[UsageRecord]) -> String {
   format!(
     "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}",
     records.len(),
-    if input_est { format!("~{input}") } else { input.to_string() },
-    if output_est { format!("~{output}") } else { output.to_string() },
+    if input_est {
+      format!("~{input}")
+    } else {
+      input.to_string()
+    },
+    if output_est {
+      format!("~{output}")
+    } else {
+      output.to_string()
+    },
     reasoning,
     cache_read,
     cache_write

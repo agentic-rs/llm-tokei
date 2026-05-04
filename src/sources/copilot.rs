@@ -560,7 +560,11 @@ fn rich_text_chars(value: &Value) -> u64 {
     Value::String(s) => s.chars().count() as u64,
     Value::Array(items) => items.iter().map(rich_text_chars).sum(),
     Value::Object(map) => {
-      let mut total: u64 = map.get("text").and_then(|v| v.as_str()).map(|s| s.chars().count() as u64).unwrap_or(0);
+      let mut total: u64 = map
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(|s| s.chars().count() as u64)
+        .unwrap_or(0);
       if let Some(children) = map.get("children").and_then(|v| v.as_array()) {
         total = total.saturating_add(children.iter().map(rich_text_chars).sum::<u64>());
       }
@@ -615,8 +619,16 @@ fn summarize(records: &[UsageRecord]) -> String {
   format!(
     "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}",
     records.len(),
-    if input_est { format!("~{input}") } else { input.to_string() },
-    if output_est { format!("~{output}") } else { output.to_string() },
+    if input_est {
+      format!("~{input}")
+    } else {
+      input.to_string()
+    },
+    if output_est {
+      format!("~{output}")
+    } else {
+      output.to_string()
+    },
     reasoning,
     cache_read,
     cache_write
