@@ -277,7 +277,16 @@ fn main() -> Result<()> {
       } else {
         println!(
           "{}",
-          render_table(&aggs, &dims, &crate::format::table::TableOpts { show_cost, use_color },)
+          render_table(
+            &aggs,
+            &dims,
+            &crate::format::table::TableOpts {
+              show_cost,
+              use_color,
+              split_input: args.split_input,
+              avg: args.avg,
+            },
+          )
         );
       }
     }

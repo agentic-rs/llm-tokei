@@ -51,6 +51,8 @@ llm-tokei --group-by project --format json
 | `--sort total\|input\|output\|cost\|cost-base\|date\|turns` | Sort key (desc; `--asc` to invert). `cost` = multiplied. |
 | `--limit <N>` | Truncate rows |
 | `--no-cost` | Hide cost column |
+| `--avg turn\|round\|session` | Show per-unit averages in table output |
+| `--split-input` | Show uncached input (`input - cache_r`) as `input_u` |
 | `--pricing path.json` | Merge custom prices into bundled table |
 | `--no-color` | Disable ANSI colors |
 | `-v, --verbose` | Print parse stats to stderr |

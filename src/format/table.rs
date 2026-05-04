@@ -1,18 +1,31 @@
 use crate::aggregate::{Aggregate, GroupDim};
+use crate::cli::AvgBy;
 
 pub struct TableOpts {
   pub show_cost: bool,
   pub use_color: bool,
+  pub split_input: bool,
+  pub avg: Option<AvgBy>,
 }
 
 pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> String {
   let mut headers: Vec<Col> = dims.iter().map(|d| Col::text(d.label())).collect();
-  headers.push(Col::num("input"));
-  headers.push(Col::num("output"));
-  headers.push(Col::num("reasoning"));
-  headers.push(Col::num("cache_r"));
-  headers.push(Col::num("cache_w"));
-  headers.push(Col::num("total"));
+  let avg_suffix = match opts.avg {
+    Some(AvgBy::Turn) => "/t",
+    Some(AvgBy::Round) => "/r",
+    Some(AvgBy::Session) => "/s",
+    None => "",
+  };
+  headers.push(Col::num(&format!(
+    "{}{}",
+    if opts.split_input { "input_u" } else { "input" },
+    avg_suffix
+  )));
+  headers.push(Col::num(&format!("output{avg_suffix}")));
+  headers.push(Col::num(&format!("reasoning{avg_suffix}")));
+  headers.push(Col::num(&format!("cache_r{avg_suffix}")));
+  headers.push(Col::num(&format!("cache_w{avg_suffix}")));
+  headers.push(Col::num(&format!("total{avg_suffix}")));
   headers.push(Col::num("turns"));
   headers.push(Col::num("rounds"));
   headers.push(Col::num("sessions"));
@@ -28,18 +41,23 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   let mut rows: Vec<Vec<Col>> = Vec::new();
   for a in aggs {
     let mut row: Vec<Col> = a.keys.iter().map(|k| Col::text(k)).collect();
-    row.push(Col::num(&fmt_est_int(a.input, a.input_estimated)));
-    row.push(Col::num(&fmt_est_int(a.output, a.output_estimated)));
-    row.push(Col::num(&fmt_int(a.reasoning)));
-    row.push(Col::num(&fmt_int(a.cache_read)));
-    row.push(Col::num(&fmt_int(a.cache_write)));
-    row.push(Col::num(&fmt_int(a.total)));
+    let shown_input = if opts.split_input {
+      a.input.saturating_sub(a.cache_read)
+    } else {
+      a.input
+    };
+    row.push(Col::num(&fmt_est_avg(shown_input, a.input_estimated, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_est_avg(a.output, a.output_estimated, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_avg(a.reasoning, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_avg(a.cache_read, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_avg(a.cache_write, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_avg(a.total, avg_den(a, opts.avg))));
     row.push(Col::num(&fmt_int(a.turns)));
     row.push(Col::num(&fmt_int(a.rounds)));
     row.push(Col::num(&fmt_int(a.sessions)));
     if opts.show_cost {
-      row.push(Col::num(&fmt_cost(a.cost_base)));
-      row.push(Col::num(&fmt_cost(a.cost_multiplied)));
+      row.push(Col::num(&fmt_cost_avg(a.cost_base, avg_den(a, opts.avg))));
+      row.push(Col::num(&fmt_cost_avg(a.cost_multiplied, avg_den(a, opts.avg))));
       tot_base += a.cost_base;
       tot_mult += a.cost_multiplied;
     }
@@ -58,18 +76,37 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   let mut total_row: Vec<Col> = (0..dims.len())
     .map(|i| if i == 0 { Col::text("TOTAL") } else { Col::text("") })
     .collect();
-  total_row.push(Col::num(&fmt_est_int(tot_in, aggs.iter().any(|a| a.input_estimated))));
-  total_row.push(Col::num(&fmt_est_int(tot_out, aggs.iter().any(|a| a.output_estimated))));
-  total_row.push(Col::num(&fmt_int(tot_re)));
-  total_row.push(Col::num(&fmt_int(tot_cr)));
-  total_row.push(Col::num(&fmt_int(tot_cw)));
-  total_row.push(Col::num(&fmt_int(tot_tot)));
+  let shown_total_input = if opts.split_input {
+    tot_in.saturating_sub(tot_cr)
+  } else {
+    tot_in
+  };
+  let total_den = match opts.avg {
+    Some(AvgBy::Turn) => tot_t,
+    Some(AvgBy::Round) => tot_r,
+    Some(AvgBy::Session) => tot_s,
+    None => 1,
+  };
+  total_row.push(Col::num(&fmt_est_avg(
+    shown_total_input,
+    aggs.iter().any(|a| a.input_estimated),
+    total_den,
+  )));
+  total_row.push(Col::num(&fmt_est_avg(
+    tot_out,
+    aggs.iter().any(|a| a.output_estimated),
+    total_den,
+  )));
+  total_row.push(Col::num(&fmt_avg(tot_re, total_den)));
+  total_row.push(Col::num(&fmt_avg(tot_cr, total_den)));
+  total_row.push(Col::num(&fmt_avg(tot_cw, total_den)));
+  total_row.push(Col::num(&fmt_avg(tot_tot, total_den)));
   total_row.push(Col::num(&fmt_int(tot_t)));
   total_row.push(Col::num(&fmt_int(tot_r)));
   total_row.push(Col::num(&fmt_int(tot_s)));
   if opts.show_cost {
-    total_row.push(Col::num(&fmt_cost(tot_base)));
-    total_row.push(Col::num(&fmt_cost(tot_mult)));
+    total_row.push(Col::num(&fmt_cost_avg(tot_base, total_den)));
+    total_row.push(Col::num(&fmt_cost_avg(tot_mult, total_den)));
   }
 
   let show_total = aggs.len() > 1;
@@ -188,10 +225,38 @@ fn fmt_cost(v: f64) -> String {
   }
 }
 
-fn fmt_est_int(n: u64, estimated: bool) -> String {
-  if estimated {
-    format!("~{}", fmt_int(n))
+fn avg_den(a: &Aggregate, avg: Option<AvgBy>) -> u64 {
+  match avg {
+    Some(AvgBy::Turn) => a.turns,
+    Some(AvgBy::Round) => a.rounds,
+    Some(AvgBy::Session) => a.sessions,
+    None => 1,
+  }
+}
+
+fn fmt_avg(n: u64, den: u64) -> String {
+  if den <= 1 {
+    return fmt_int(n);
+  }
+  fmt_float(n as f64 / den as f64)
+}
+
+fn fmt_est_avg(n: u64, estimated: bool, den: u64) -> String {
+  let body = fmt_avg(n, den);
+  if estimated { format!("~{body}") } else { body }
+}
+
+fn fmt_cost_avg(v: f64, den: u64) -> String {
+  if den <= 1 {
+    return fmt_cost(v);
+  }
+  fmt_cost(v / den as f64)
+}
+
+fn fmt_float(v: f64) -> String {
+  if (v.fract()).abs() < 1e-9 {
+    fmt_int(v as u64)
   } else {
-    fmt_int(n)
+    format!("{v:.2}")
   }
 }

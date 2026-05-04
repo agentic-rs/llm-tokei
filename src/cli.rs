@@ -32,6 +32,13 @@ pub enum Period {
   Month,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum AvgBy {
+  Turn,
+  Round,
+  Session,
+}
+
 /// Token usage stats for local LLM agent sessions.
 #[derive(Debug, Parser)]
 #[command(name = "llm-tokei", version, about)]
@@ -117,6 +124,14 @@ pub struct Args {
   /// Hide cost column.
   #[arg(long)]
   pub no_cost: bool,
+
+  /// Show uncached input separately (input becomes input-cache_r).
+  #[arg(long)]
+  pub split_input: bool,
+
+  /// Show per-unit averages in table output: turn|round|session.
+  #[arg(long, value_enum)]
+  pub avg: Option<AvgBy>,
 
   /// Override/extend pricing table (JSON file).
   #[arg(long)]
