@@ -374,6 +374,9 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
     // Tool call results/responses are fed back as model input.
     let mut reasoning: u64 = 0;
     let mut extra_turns: u64 = 0;
+    let tool_call_results = req
+      .pointer("/result/metadata/toolCallResults")
+      .and_then(|v| v.as_object());
     if let Some(rounds) = req
       .pointer("/result/metadata/toolCallRounds")
       .and_then(|v| v.as_array())
@@ -383,16 +386,25 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
         if let Some(t) = round.pointer("/thinking/tokens").and_then(|v| v.as_u64()) {
           reasoning = reasoning.saturating_add(t);
         }
-        if let Some(resp) = round.get("response").and_then(|v| v.as_str()) {
-          input_chars = input_chars.saturating_add(resp.chars().count() as u64);
-        }
+        let mut round_result_chars: u64 = 0;
         if let Some(calls) = round.get("toolCalls").and_then(|v| v.as_array()) {
           for call in calls {
+            if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
+              if let Some(result) = tool_call_results.and_then(|results| results.get(id)) {
+                round_result_chars = round_result_chars.saturating_add(tool_result_chars(result));
+              }
+            }
             if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
               output_chars = output_chars.saturating_add(args.chars().count() as u64);
             }
           }
         }
+        if round_result_chars == 0 {
+          if let Some(resp) = round.get("response").and_then(|v| v.as_str()) {
+            round_result_chars = round_result_chars.saturating_add(resp.chars().count() as u64);
+          }
+        }
+        input_chars = input_chars.saturating_add(round_result_chars);
       }
     }
 
@@ -528,14 +540,53 @@ fn sum_text_chars(node: Option<&Value>) -> u64 {
   total
 }
 
+fn tool_result_chars(result: &Value) -> u64 {
+  result
+    .get("content")
+    .and_then(|v| v.as_array())
+    .map(|items| items.iter().map(tool_result_content_chars).sum())
+    .unwrap_or(0)
+}
+
+fn tool_result_content_chars(item: &Value) -> u64 {
+  if let Some(value) = item.get("value") {
+    return rich_text_chars(value);
+  }
+  rich_text_chars(item)
+}
+
+fn rich_text_chars(value: &Value) -> u64 {
+  match value {
+    Value::String(s) => s.chars().count() as u64,
+    Value::Array(items) => items.iter().map(rich_text_chars).sum(),
+    Value::Object(map) => {
+      let mut total: u64 = map.get("text").and_then(|v| v.as_str()).map(|s| s.chars().count() as u64).unwrap_or(0);
+      if let Some(children) = map.get("children").and_then(|v| v.as_array()) {
+        total = total.saturating_add(children.iter().map(rich_text_chars).sum::<u64>());
+      }
+      if let Some(node) = map.get("node") {
+        total = total.saturating_add(rich_text_chars(node));
+      }
+      total
+    }
+    _ => 0,
+  }
+}
+
 fn response_item_chars(item: &Value) -> u64 {
   // Plain `{value: "..."}` text segments and `{kind: "text", value: "..."}`
-  // are LLM-generated text. Skip tool invocations, codeblockUri, undoStop, etc.
+  // are LLM-generated text. For tool invocations, only count user-visible
+  // invocation/past-tense text; skip tool payloads (tool output/input blobs).
   let kind = item.get("kind").and_then(|v| v.as_str());
-  let skip = matches!(
+  if kind == Some("toolInvocationSerialized") {
+    let mut total: u64 = 0;
+    total = total.saturating_add(sum_text_chars(item.pointer("/invocationMessage")));
+    total = total.saturating_add(sum_text_chars(item.pointer("/pastTenseMessage")));
+    return total;
+  }
+  if matches!(
     kind,
-    Some("toolInvocationSerialized")
-      | Some("codeblockUri")
+    Some("codeblockUri")
       | Some("textEditGroup")
       | Some("undoStop")
       | Some("inlineReference")
@@ -543,8 +594,7 @@ fn response_item_chars(item: &Value) -> u64 {
       | Some("mcpServersStarting")
       | Some("promptFile")
       | Some("agent")
-  );
-  if skip {
+  ) {
     return 0;
   }
   if let Some(s) = item.get("value").and_then(|v| v.as_str()) {

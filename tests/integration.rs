@@ -114,14 +114,16 @@ fn copilot_fixture_estimates_and_thinking() {
   let s = String::from_utf8_lossy(&out.stdout);
   let v: serde_json::Value = serde_json::from_str(&s).expect("valid json");
   let arr = v.as_array().unwrap();
-  assert_eq!(arr.len(), 1);
-  let row = &arr[0];
-  // Per-turn (per-request) ceil(chars/4) — request 1 input chars 31+18=49 → 13;
-  //   request 2 input chars 7 → 2; total 15.
+  let row = arr
+    .iter()
+    .find(|row| row["keys"]["model"] == "claude-sonnet-4.5")
+    .expect("fixture row for claude-sonnet-4.5");
+  // Per-turn (per-request) ceil(chars/4) — request 1 input chars 31+18+26=75 → 19;
+  //   request 2 input chars 7 → 2; total 21.
   // Output per request: 32+12=44 → 11; 5 → 2; total 13.
-  // (`toolCallRounds.response` is treated as tool output fed back as input.)
+  // (`toolCallResults` is preferred over short `toolCallRounds.response` summaries.)
   // reasoning = 17 (exact, from thinking.tokens)
-  assert_eq!(row["input"], 15);
+  assert_eq!(row["input"], 21);
   assert_eq!(row["output"], 13);
   assert_eq!(row["reasoning"], 17);
   assert_eq!(row["cache_read"], 0);
