@@ -182,8 +182,12 @@ impl UsageSource for OpenCodeSource {
         // `input` is the full prompt total (matching Codex semantics).
         input: tokens.input.saturating_add(cache.read),
         output: tokens.output,
+        input_bytes: 0,
+        output_bytes: 0,
         input_estimated: false,
         output_estimated: false,
+        input_bytes_estimated: true,
+        output_bytes_estimated: true,
         reasoning: tokens.reasoning,
         cache_read: cache.read,
         cache_write: cache.write,

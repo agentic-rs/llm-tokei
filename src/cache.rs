@@ -27,8 +27,12 @@ CREATE TABLE IF NOT EXISTS records (
     ts            TEXT NOT NULL,
     input         INTEGER NOT NULL,
     output        INTEGER NOT NULL,
+    input_bytes   INTEGER NOT NULL,
+    output_bytes  INTEGER NOT NULL,
     input_estimated INTEGER NOT NULL,
     output_estimated INTEGER NOT NULL,
+    input_bytes_estimated INTEGER NOT NULL,
+    output_bytes_estimated INTEGER NOT NULL,
     reasoning     INTEGER NOT NULL,
     cache_read    INTEGER NOT NULL,
     cache_write   INTEGER NOT NULL,
@@ -66,8 +70,12 @@ const EXPECTED_RECORDS_COLUMNS: &[&str] = &[
   "ts",
   "input",
   "output",
+  "input_bytes",
+  "output_bytes",
   "input_estimated",
   "output_estimated",
+  "input_bytes_estimated",
+  "output_bytes_estimated",
   "reasoning",
   "cache_read",
   "cache_write",
@@ -162,7 +170,8 @@ impl CacheDb {
     let fp_str = file_path.to_string_lossy();
     let mut stmt = self.conn.prepare(
       "SELECT s.source, s.session_id, s.session_title, s.project_cwd, s.project_name, \
-               r.provider, r.model, r.ts, r.input, r.output, r.input_estimated, r.output_estimated, \
+               r.provider, r.model, r.ts, r.input, r.output, r.input_bytes, r.output_bytes, \
+               r.input_estimated, r.output_estimated, r.input_bytes_estimated, r.output_bytes_estimated, \
                r.reasoning, r.cache_read, r.cache_write, r.mode, r.agent, r.is_compaction, r.rounds, \
                r.turns, r.cost_embedded \
        FROM records r \
@@ -220,10 +229,11 @@ impl CacheDb {
       )?;
       let sid = self.conn.last_insert_rowid();
       let mut insert_record = self.conn.prepare(
-        "INSERT INTO records (session_rowid, provider, model, ts, input, output, input_estimated, \
-                             output_estimated, reasoning, cache_read, cache_write, mode, agent, \
-                             is_compaction, rounds, turns, cost_embedded) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        "INSERT INTO records (session_rowid, provider, model, ts, input, output, input_bytes, output_bytes, \
+                             input_estimated, output_estimated, input_bytes_estimated, output_bytes_estimated, \
+                             reasoning, cache_read, cache_write, mode, agent, is_compaction, rounds, turns, \
+                             cost_embedded) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
       )?;
       for record in session_records {
         insert_record.execute(params![
@@ -233,8 +243,12 @@ impl CacheDb {
           record.ts.to_rfc3339(),
           to_sql_i64(record.input),
           to_sql_i64(record.output),
+          to_sql_i64(record.input_bytes),
+          to_sql_i64(record.output_bytes),
           if record.input_estimated { 1 } else { 0 },
           if record.output_estimated { 1 } else { 0 },
+          if record.input_bytes_estimated { 1 } else { 0 },
+          if record.output_bytes_estimated { 1 } else { 0 },
           to_sql_i64(record.reasoning),
           to_sql_i64(record.cache_read),
           to_sql_i64(record.cache_write),
@@ -349,17 +363,21 @@ fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> Usa
     ts,
     input: row.get::<_, i64>(8).ok().map(from_sql_i64).unwrap_or(0),
     output: row.get::<_, i64>(9).ok().map(from_sql_i64).unwrap_or(0),
-    input_estimated: row.get::<_, i64>(10).unwrap_or(0) != 0,
-    output_estimated: row.get::<_, i64>(11).unwrap_or(0) != 0,
-    reasoning: row.get::<_, i64>(12).ok().map(from_sql_i64).unwrap_or(0),
-    cache_read: row.get::<_, i64>(13).ok().map(from_sql_i64).unwrap_or(0),
-    cache_write: row.get::<_, i64>(14).ok().map(from_sql_i64).unwrap_or(0),
-    mode: row.get(15).unwrap_or(None),
-    agent: row.get(16).unwrap_or(None),
-    is_compaction: row.get::<_, i64>(17).unwrap_or(0) != 0,
-    rounds: row.get::<_, i64>(18).ok().map(from_sql_i64).unwrap_or(0),
-    turns: row.get::<_, i64>(19).ok().map(from_sql_i64).unwrap_or(0),
-    cost_embedded: row.get(20).unwrap_or(None),
+    input_bytes: row.get::<_, i64>(10).ok().map(from_sql_i64).unwrap_or(0),
+    output_bytes: row.get::<_, i64>(11).ok().map(from_sql_i64).unwrap_or(0),
+    input_estimated: row.get::<_, i64>(12).unwrap_or(0) != 0,
+    output_estimated: row.get::<_, i64>(13).unwrap_or(0) != 0,
+    input_bytes_estimated: row.get::<_, i64>(14).unwrap_or(0) != 0,
+    output_bytes_estimated: row.get::<_, i64>(15).unwrap_or(0) != 0,
+    reasoning: row.get::<_, i64>(16).ok().map(from_sql_i64).unwrap_or(0),
+    cache_read: row.get::<_, i64>(17).ok().map(from_sql_i64).unwrap_or(0),
+    cache_write: row.get::<_, i64>(18).ok().map(from_sql_i64).unwrap_or(0),
+    mode: row.get(19).unwrap_or(None),
+    agent: row.get(20).unwrap_or(None),
+    is_compaction: row.get::<_, i64>(21).unwrap_or(0) != 0,
+    rounds: row.get::<_, i64>(22).ok().map(from_sql_i64).unwrap_or(0),
+    turns: row.get::<_, i64>(23).ok().map(from_sql_i64).unwrap_or(0),
+    cost_embedded: row.get(24).unwrap_or(None),
   }
 }
 

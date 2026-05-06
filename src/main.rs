@@ -262,7 +262,7 @@ fn main() -> Result<()> {
   let mut aggs = aggregate(&all, &dims, args.date_bucket.as_str(), &filters, &pricing);
 
   let sort_key = SortKey::parse(&args.sort).unwrap_or(SortKey::Total);
-  sort_aggs(&mut aggs, sort_key, !args.asc);
+  sort_aggs(&mut aggs, sort_key, !args.asc, args.bytes);
 
   if let Some(n) = args.limit {
     aggs.truncate(n);
@@ -285,13 +285,14 @@ fn main() -> Result<()> {
               use_color,
               split_input: args.split_input,
               avg: args.avg,
+              bytes: args.bytes,
             },
           )
         );
       }
     }
     Format::Json => {
-      println!("{}", render_json(&aggs, &dims));
+      println!("{}", render_json(&aggs, &dims, args.bytes));
     }
   }
 

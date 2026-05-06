@@ -32,6 +32,9 @@ llm-tokei --source opencode --group-by session --sort cost --limit 10
 
 # Per-project totals as JSON
 llm-tokei --group-by project --format json
+
+# Show input/output in bytes instead of tokens
+llm-tokei --bytes
 ```
 
 ## Flags
@@ -53,6 +56,7 @@ llm-tokei --group-by project --format json
 | `--no-cost` | Hide cost column |
 | `--avg turn\|round\|session` | Show per-unit averages in table output |
 | `--split-input` | Show uncached input (`input - cache_r`) as `input_u` |
+| `--bytes` | Show `input`/`output` in bytes (`input(B)`/`output(B)` in table) |
 | `--pricing path.json` | Merge custom prices into bundled table |
 | `--no-color` | Disable ANSI colors |
 | `-v, --verbose` | Print parse stats to stderr |
@@ -106,6 +110,11 @@ Two cost columns are reported:
 - `cache_r` is the cached portion of `input` (a subset, not additional).
 - `cache_w` is cache-write tokens (billed separately at write rates).
 - `total = input + output + reasoning + cache_w` (cache_read isn't double-counted).
+
+`--bytes` mode:
+- Default mode reports `input`/`output` as tokens.
+- With `--bytes`, only `input` and `output` switch to bytes.
+- `reasoning`, `cache_r`, `cache_w`, `total`, and pricing remain token-based.
 
 ### Refreshing models.dev data
 

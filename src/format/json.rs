@@ -22,7 +22,7 @@ struct JsonRow<'a> {
   last_ts: Option<&'a chrono::DateTime<chrono::Utc>>,
 }
 
-pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim]) -> String {
+pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim], use_bytes: bool) -> String {
   let rows: Vec<JsonRow> = aggs
     .iter()
     .map(|a| {
@@ -35,10 +35,18 @@ pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim]) -> String {
       }
       JsonRow {
         keys,
-        input: a.input,
-        output: a.output,
-        input_estimated: a.input_estimated,
-        output_estimated: a.output_estimated,
+        input: if use_bytes { a.input_bytes } else { a.input },
+        output: if use_bytes { a.output_bytes } else { a.output },
+        input_estimated: if use_bytes {
+          a.input_bytes_estimated
+        } else {
+          a.input_estimated
+        },
+        output_estimated: if use_bytes {
+          a.output_bytes_estimated
+        } else {
+          a.output_estimated
+        },
         reasoning: a.reasoning,
         cache_read: a.cache_read,
         cache_write: a.cache_write,

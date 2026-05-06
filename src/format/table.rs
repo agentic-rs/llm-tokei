@@ -6,6 +6,7 @@ pub struct TableOpts {
   pub use_color: bool,
   pub split_input: bool,
   pub avg: Option<AvgBy>,
+  pub bytes: bool,
 }
 
 pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> String {
@@ -17,11 +18,16 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     None => "",
   };
   headers.push(Col::num(&format!(
-    "{}{}",
+    "{}{}{}",
     if opts.split_input { "input_u" } else { "input" },
+    if opts.bytes { "(B)" } else { "" },
     avg_suffix
   )));
-  headers.push(Col::num(&format!("output{avg_suffix}")));
+  headers.push(Col::num(&format!(
+    "output{}{}",
+    if opts.bytes { "(B)" } else { "" },
+    avg_suffix
+  )));
   headers.push(Col::num(&format!("reasoning{avg_suffix}")));
   headers.push(Col::num(&format!("cache_r{avg_suffix}")));
   headers.push(Col::num(&format!("cache_w{avg_suffix}")));
@@ -42,18 +48,30 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   for a in aggs {
     let mut row: Vec<Col> = a.keys.iter().map(|k| Col::text(k)).collect();
     let shown_input = if opts.split_input {
-      a.input.saturating_sub(a.cache_read)
+      if opts.bytes {
+        a.input_bytes
+      } else {
+        a.input.saturating_sub(a.cache_read)
+      }
     } else {
-      a.input
+      if opts.bytes { a.input_bytes } else { a.input }
     };
     row.push(Col::num(&fmt_est_avg(
       shown_input,
-      a.input_estimated,
+      if opts.bytes {
+        a.input_bytes_estimated
+      } else {
+        a.input_estimated
+      },
       avg_den(a, opts.avg),
     )));
     row.push(Col::num(&fmt_est_avg(
-      a.output,
-      a.output_estimated,
+      if opts.bytes { a.output_bytes } else { a.output },
+      if opts.bytes {
+        a.output_bytes_estimated
+      } else {
+        a.output_estimated
+      },
       avg_den(a, opts.avg),
     )));
     row.push(Col::num(&fmt_avg(a.reasoning, avg_den(a, opts.avg))));
@@ -85,9 +103,22 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     .map(|i| if i == 0 { Col::text("TOTAL") } else { Col::text("") })
     .collect();
   let shown_total_input = if opts.split_input {
-    tot_in.saturating_sub(tot_cr)
+    if opts.bytes {
+      aggs.iter().map(|a| a.input_bytes).sum()
+    } else {
+      tot_in.saturating_sub(tot_cr)
+    }
   } else {
-    tot_in
+    if opts.bytes {
+      aggs.iter().map(|a| a.input_bytes).sum()
+    } else {
+      tot_in
+    }
+  };
+  let tot_out_display = if opts.bytes {
+    aggs.iter().map(|a| a.output_bytes).sum()
+  } else {
+    tot_out
   };
   let total_den = match opts.avg {
     Some(AvgBy::Turn) => tot_t,
@@ -97,12 +128,20 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   };
   total_row.push(Col::num(&fmt_est_avg(
     shown_total_input,
-    aggs.iter().any(|a| a.input_estimated),
+    if opts.bytes {
+      aggs.iter().any(|a| a.input_bytes_estimated)
+    } else {
+      aggs.iter().any(|a| a.input_estimated)
+    },
     total_den,
   )));
   total_row.push(Col::num(&fmt_est_avg(
-    tot_out,
-    aggs.iter().any(|a| a.output_estimated),
+    tot_out_display,
+    if opts.bytes {
+      aggs.iter().any(|a| a.output_bytes_estimated)
+    } else {
+      aggs.iter().any(|a| a.output_estimated)
+    },
     total_den,
   )));
   total_row.push(Col::num(&fmt_avg(tot_re, total_den)));

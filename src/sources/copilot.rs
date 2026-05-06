@@ -358,14 +358,19 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
 
     // --- Input estimate ---
     let mut input_chars: u64 = 0;
+    let mut input_bytes: u64 = 0;
     input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedUserMessage")));
     input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedGlobalContext")));
+    input_bytes = input_bytes.saturating_add(sum_text_bytes(req.pointer("/result/metadata/renderedUserMessage")));
+    input_bytes = input_bytes.saturating_add(sum_text_bytes(req.pointer("/result/metadata/renderedGlobalContext")));
 
     // --- Output estimate ---
     let mut output_chars: u64 = 0;
+    let mut output_bytes: u64 = 0;
     if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
       for it in resp {
         output_chars = output_chars.saturating_add(response_item_chars(it));
+        output_bytes = output_bytes.saturating_add(response_item_bytes(it));
       }
     }
 
@@ -392,16 +397,19 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
             if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
               if let Some(result) = tool_call_results.and_then(|results| results.get(id)) {
                 round_result_chars = round_result_chars.saturating_add(tool_result_chars(result));
+                input_bytes = input_bytes.saturating_add(tool_result_bytes(result));
               }
             }
             if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
               output_chars = output_chars.saturating_add(args.chars().count() as u64);
+              output_bytes = output_bytes.saturating_add(args.len() as u64);
             }
           }
         }
         if round_result_chars == 0 {
           if let Some(resp) = round.get("response").and_then(|v| v.as_str()) {
             round_result_chars = round_result_chars.saturating_add(resp.chars().count() as u64);
+            input_bytes = input_bytes.saturating_add(resp.len() as u64);
           }
         }
         input_chars = input_chars.saturating_add(round_result_chars);
@@ -440,8 +448,12 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       ts,
       input,
       output,
+      input_bytes,
+      output_bytes,
       input_estimated: true,
       output_estimated: output_exact.is_none(),
+      input_bytes_estimated: true,
+      output_bytes_estimated: true,
       reasoning,
       cache_read: 0,
       cache_write: 0,
@@ -540,6 +552,22 @@ fn sum_text_chars(node: Option<&Value>) -> u64 {
   total
 }
 
+fn sum_text_bytes(node: Option<&Value>) -> u64 {
+  let arr = match node.and_then(|v| v.as_array()) {
+    Some(a) => a,
+    None => return 0,
+  };
+  let mut total: u64 = 0;
+  for item in arr {
+    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
+      total = total.saturating_add(t.len() as u64);
+    } else if let Some(t) = item.get("value").and_then(|v| v.as_str()) {
+      total = total.saturating_add(t.len() as u64);
+    }
+  }
+  total
+}
+
 fn tool_result_chars(result: &Value) -> u64 {
   result
     .get("content")
@@ -548,11 +576,26 @@ fn tool_result_chars(result: &Value) -> u64 {
     .unwrap_or(0)
 }
 
+fn tool_result_bytes(result: &Value) -> u64 {
+  result
+    .get("content")
+    .and_then(|v| v.as_array())
+    .map(|items| items.iter().map(tool_result_content_bytes).sum())
+    .unwrap_or(0)
+}
+
 fn tool_result_content_chars(item: &Value) -> u64 {
   if let Some(value) = item.get("value") {
     return rich_text_chars(value);
   }
   rich_text_chars(item)
+}
+
+fn tool_result_content_bytes(item: &Value) -> u64 {
+  if let Some(value) = item.get("value") {
+    return rich_text_bytes(value);
+  }
+  rich_text_bytes(item)
 }
 
 fn rich_text_chars(value: &Value) -> u64 {
@@ -570,6 +613,28 @@ fn rich_text_chars(value: &Value) -> u64 {
       }
       if let Some(node) = map.get("node") {
         total = total.saturating_add(rich_text_chars(node));
+      }
+      total
+    }
+    _ => 0,
+  }
+}
+
+fn rich_text_bytes(value: &Value) -> u64 {
+  match value {
+    Value::String(s) => s.len() as u64,
+    Value::Array(items) => items.iter().map(rich_text_bytes).sum(),
+    Value::Object(map) => {
+      let mut total: u64 = map
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(|s| s.len() as u64)
+        .unwrap_or(0);
+      if let Some(children) = map.get("children").and_then(|v| v.as_array()) {
+        total = total.saturating_add(children.iter().map(rich_text_bytes).sum::<u64>());
+      }
+      if let Some(node) = map.get("node") {
+        total = total.saturating_add(rich_text_bytes(node));
       }
       total
     }
@@ -603,6 +668,34 @@ fn response_item_chars(item: &Value) -> u64 {
   }
   if let Some(s) = item.get("value").and_then(|v| v.as_str()) {
     s.chars().count() as u64
+  } else {
+    0
+  }
+}
+
+fn response_item_bytes(item: &Value) -> u64 {
+  let kind = item.get("kind").and_then(|v| v.as_str());
+  if kind == Some("toolInvocationSerialized") {
+    let mut total: u64 = 0;
+    total = total.saturating_add(sum_text_bytes(item.pointer("/invocationMessage")));
+    total = total.saturating_add(sum_text_bytes(item.pointer("/pastTenseMessage")));
+    return total;
+  }
+  if matches!(
+    kind,
+    Some("codeblockUri")
+      | Some("textEditGroup")
+      | Some("undoStop")
+      | Some("inlineReference")
+      | Some("reference")
+      | Some("mcpServersStarting")
+      | Some("promptFile")
+      | Some("agent")
+  ) {
+    return 0;
+  }
+  if let Some(s) = item.get("value").and_then(|v| v.as_str()) {
+    s.len() as u64
   } else {
     0
   }

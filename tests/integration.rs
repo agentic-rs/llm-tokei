@@ -203,3 +203,76 @@ fn copilot_cli_fixture_parses_fallback_and_compaction() {
   assert_eq!(row["keys"]["source"], "copilot-cli");
   assert_eq!(row["keys"]["model"], "gpt-5-mini");
 }
+
+#[test]
+fn bytes_mode_switches_input_output_units_only() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot/workspaceStorage");
+  let base_args = [
+    "--source",
+    "copilot",
+    "--copilot-dir",
+    fixtures.to_str().unwrap(),
+    "--format",
+    "json",
+    "--group-by",
+    "source,model,project",
+  ];
+
+  let token_out = Command::new(bin())
+    .args(base_args)
+    .output()
+    .expect("run llm-tokei token mode");
+  assert!(token_out.status.success(), "stderr: {}", String::from_utf8_lossy(&token_out.stderr));
+  let token_v: serde_json::Value =
+    serde_json::from_slice(&token_out.stdout).expect("valid json in token mode");
+  let token_row = token_v
+    .as_array()
+    .unwrap()
+    .iter()
+    .find(|row| row["keys"]["model"] == "claude-sonnet-4.5")
+    .expect("token row for claude-sonnet-4.5");
+
+  let bytes_out = Command::new(bin())
+    .args(base_args)
+    .arg("--bytes")
+    .output()
+    .expect("run llm-tokei bytes mode");
+  assert!(bytes_out.status.success(), "stderr: {}", String::from_utf8_lossy(&bytes_out.stderr));
+  let bytes_v: serde_json::Value =
+    serde_json::from_slice(&bytes_out.stdout).expect("valid json in bytes mode");
+  let bytes_row = bytes_v
+    .as_array()
+    .unwrap()
+    .iter()
+    .find(|row| row["keys"]["model"] == "claude-sonnet-4.5")
+    .expect("bytes row for claude-sonnet-4.5");
+
+  assert_eq!(token_row["input"], 21);
+  assert_eq!(token_row["output"], 13);
+  assert_eq!(bytes_row["input"], 82);
+  assert_eq!(bytes_row["output"], 49);
+  assert_eq!(token_row["total"], bytes_row["total"]);
+  assert_eq!(token_row["cost_base"], bytes_row["cost_base"]);
+  assert_eq!(token_row["cost_multiplied"], bytes_row["cost_multiplied"]);
+}
+
+#[test]
+fn bytes_mode_table_header_uses_byte_suffix() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot/workspaceStorage");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "copilot",
+      "--copilot-dir",
+      fixtures.to_str().unwrap(),
+      "--group-by",
+      "source,model",
+      "--bytes",
+    ])
+    .output()
+    .expect("run llm-tokei table bytes mode");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let table = String::from_utf8_lossy(&out.stdout);
+  assert!(table.contains("input(B)"), "table output: {table}");
+  assert!(table.contains("output(B)"), "table output: {table}");
+}

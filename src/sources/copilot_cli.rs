@@ -148,6 +148,7 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
   let mut records = Vec::new();
   let mut current_model = FALLBACK_MODEL.to_string();
   let mut pending_input = 0;
+  let mut pending_input_bytes = 0;
 
   for event in events {
     let event_type = event.get("type").and_then(|v| v.as_str());
@@ -161,14 +162,18 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
       event_type,
       Some("system.message" | "user.message" | "tool.execution_complete")
     ) {
-      pending_input += rough_tokens(event.get("data").unwrap_or(&Value::Null));
+      let data = event.get("data").unwrap_or(&Value::Null);
+      pending_input += rough_tokens(data);
+      pending_input_bytes += rough_bytes(data);
     }
 
     if event_type == Some("assistant.message") {
       let (provider, model) = normalize_copilot_model(current_model.clone());
       let output_exact = event.pointer("/data/outputTokens").and_then(|v| v.as_u64());
-      let output_estimated_tokens = rough_tokens(event.pointer("/data/content").unwrap_or(&Value::Null))
-        + rough_tokens(event.pointer("/data/toolRequests").unwrap_or(&Value::Null));
+      let content = event.pointer("/data/content").unwrap_or(&Value::Null);
+      let tool_requests = event.pointer("/data/toolRequests").unwrap_or(&Value::Null);
+      let output_estimated_tokens = rough_tokens(content) + rough_tokens(tool_requests);
+      let output_estimated_bytes = rough_bytes(content) + rough_bytes(tool_requests);
       records.push(UsageRecord {
         source: Source::CopilotCli,
         session_id: session_id.clone().unwrap_or_else(|| fallback_session_id(path)),
@@ -180,8 +185,12 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
         ts: timestamp_from_event(event),
         input: pending_input,
         output: output_exact.unwrap_or(output_estimated_tokens),
+        input_bytes: pending_input_bytes,
+        output_bytes: output_estimated_bytes,
         input_estimated: true,
         output_estimated: output_exact.is_none(),
+        input_bytes_estimated: true,
+        output_bytes_estimated: true,
         reasoning: 0,
         cache_read: 0,
         cache_write: 0,
@@ -192,8 +201,8 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
         turns: 1,
         cost_embedded: None,
       });
-      pending_input = rough_tokens(event.pointer("/data/content").unwrap_or(&Value::Null))
-        + rough_tokens(event.pointer("/data/toolRequests").unwrap_or(&Value::Null));
+      pending_input = rough_tokens(content) + rough_tokens(tool_requests);
+      pending_input_bytes = rough_bytes(content) + rough_bytes(tool_requests);
     }
 
     if event_type == Some("session.compaction_complete") {
@@ -215,8 +224,12 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
           ts: timestamp_from_event(event),
           input: token_alias(usage, "inputTokens", "input"),
           output: token_alias(usage, "outputTokens", "output"),
+          input_bytes: 0,
+          output_bytes: 0,
           input_estimated: false,
           output_estimated: false,
+          input_bytes_estimated: true,
+          output_bytes_estimated: true,
           reasoning: 0,
           cache_read: token_alias(usage, "cacheReadTokens", "cachedInput"),
           cache_write: usage.get("cacheWriteTokens").and_then(|v| v.as_u64()).unwrap_or(0),
@@ -236,6 +249,15 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
 
 fn rough_tokens(value: &Value) -> u64 {
   rough_chars(value).div_ceil(4)
+}
+
+fn rough_bytes(value: &Value) -> u64 {
+  match value {
+    Value::String(s) => s.len() as u64,
+    Value::Array(items) => items.iter().map(rough_bytes).sum(),
+    Value::Object(map) => map.values().map(rough_bytes).sum(),
+    _ => 0,
+  }
 }
 
 fn rough_chars(value: &Value) -> u64 {

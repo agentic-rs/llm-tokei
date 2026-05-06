@@ -129,6 +129,10 @@ pub struct Args {
   #[arg(long)]
   pub split_input: bool,
 
+  /// Show input/output in bytes instead of tokens.
+  #[arg(long)]
+  pub bytes: bool,
+
   /// Show per-unit averages in table output: turn|round|session.
   #[arg(long, value_enum)]
   pub avg: Option<AvgBy>,
