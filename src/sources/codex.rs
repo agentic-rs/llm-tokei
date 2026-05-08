@@ -85,6 +85,45 @@ struct TokenUsage {
   total_tokens: u64,
 }
 
+#[derive(Debug, Default, Clone)]
+struct BytesUsage {
+  input_bytes: u64,
+  output_bytes: u64,
+  reasoning_output_bytes: u64,
+  total_bytes: u64,
+}
+
+impl BytesUsage {
+  fn add_input(&mut self, bytes: u64) {
+    self.input_bytes = self.input_bytes.saturating_add(bytes);
+    self.recompute_total();
+  }
+
+  fn add_output(&mut self, bytes: u64) {
+    self.output_bytes = self.output_bytes.saturating_add(bytes);
+    self.recompute_total();
+  }
+
+  fn add_reasoning_output(&mut self, bytes: u64) {
+    self.reasoning_output_bytes = self.reasoning_output_bytes.saturating_add(bytes);
+    self.recompute_total();
+  }
+
+  fn add(&mut self, other: BytesUsage) {
+    self.input_bytes = self.input_bytes.saturating_add(other.input_bytes);
+    self.output_bytes = self.output_bytes.saturating_add(other.output_bytes);
+    self.reasoning_output_bytes = self.reasoning_output_bytes.saturating_add(other.reasoning_output_bytes);
+    self.recompute_total();
+  }
+
+  fn recompute_total(&mut self) {
+    self.total_bytes = self
+      .input_bytes
+      .saturating_add(self.output_bytes)
+      .saturating_add(self.reasoning_output_bytes);
+  }
+}
+
 impl UsageSource for CodexSource {
   fn name(&self) -> &'static str {
     "codex"
@@ -127,11 +166,13 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     model: Option<String>,
     provider: Option<String>,
     usage: TokenUsage,
+    bytes: BytesUsage,
     rounds: u64,
   }
   let mut turns: Vec<Turn> = Vec::new();
   let mut prev_total: Option<TokenUsage> = None;
   let mut pending_round: u64 = 0; // turn_context events that haven't been attributed yet
+  let mut pending_bytes = BytesUsage::default();
   let mut last_ts: Option<DateTime<Utc>> = None;
 
   for line in reader.lines() {
@@ -232,11 +273,13 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
                 .or(session_ts)
                 .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
               let rounds = std::mem::take(&mut pending_round);
+              let bytes = std::mem::take(&mut pending_bytes);
               turns.push(Turn {
                 ts,
                 model: model.clone(),
                 provider: provider.clone(),
                 usage,
+                bytes,
                 rounds,
               });
             }
@@ -254,11 +297,14 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
           }
         }
       }
-      Some("response_item") if model.is_none() => {
+      Some("response_item") => {
         if let Some(payload) = &parsed.payload {
           if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
-            model = Some(m.to_string());
+            if model.is_none() {
+              model = Some(m.to_string());
+            }
           }
+          pending_bytes.add(response_item_bytes(payload));
         }
       }
       _ => {}
@@ -296,8 +342,8 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       ts: t.ts,
       input: t.usage.input_tokens,
       output: t.usage.output_tokens,
-      input_bytes: 0,
-      output_bytes: 0,
+      input_bytes: t.bytes.input_bytes,
+      output_bytes: t.bytes.output_bytes,
       input_estimated: false,
       output_estimated: false,
       input_bytes_estimated: true,
@@ -325,6 +371,76 @@ fn sub_usage(a: &TokenUsage, b: &TokenUsage) -> TokenUsage {
     reasoning_output_tokens: a.reasoning_output_tokens.saturating_sub(b.reasoning_output_tokens),
     total_tokens: a.total_tokens.saturating_sub(b.total_tokens),
   }
+}
+
+fn response_item_bytes(payload: &serde_json::Value) -> BytesUsage {
+  let mut usage = BytesUsage::default();
+  match payload.get("type").and_then(|v| v.as_str()) {
+    Some("message") => {
+      let bytes = message_content_bytes(payload.get("content"));
+      match payload.get("role").and_then(|v| v.as_str()) {
+        Some("user" | "system" | "developer") => usage.add_input(bytes),
+        Some("assistant") => usage.add_output(bytes),
+        _ => {}
+      }
+    }
+    Some("function_call") => {
+      let mut output_bytes: u64 = 0;
+      output_bytes = output_bytes.saturating_add(string_field_bytes(payload, "name"));
+      output_bytes = output_bytes.saturating_add(string_field_bytes(payload, "arguments"));
+      usage.add_output(output_bytes);
+    }
+    Some("function_call_output") => usage.add_input(nested_text_bytes(payload.get("output"))),
+    Some("custom_tool_call") => {
+      let mut output_bytes: u64 = 0;
+      output_bytes = output_bytes.saturating_add(string_field_bytes(payload, "name"));
+      output_bytes = output_bytes.saturating_add(nested_text_bytes(payload.get("input")));
+      usage.add_output(output_bytes);
+    }
+    Some("custom_tool_call_output") => usage.add_input(nested_text_bytes(payload.get("output"))),
+    Some("reasoning") => usage.add_reasoning_output(reasoning_bytes(payload)),
+    _ => {}
+  };
+  usage
+}
+
+fn message_content_bytes(content: Option<&serde_json::Value>) -> u64 {
+  match content {
+    Some(serde_json::Value::String(s)) => s.len() as u64,
+    Some(serde_json::Value::Array(items)) => items
+      .iter()
+      .map(|item| {
+        item
+          .get("text")
+          .and_then(|v| v.as_str())
+          .map(|s| s.len() as u64)
+          .unwrap_or_else(|| nested_text_bytes(Some(item)))
+      })
+      .sum(),
+    Some(value) => nested_text_bytes(Some(value)),
+    None => 0,
+  }
+}
+
+fn string_field_bytes(value: &serde_json::Value, field: &str) -> u64 {
+  value
+    .get(field)
+    .and_then(|v| v.as_str())
+    .map(|s| s.len() as u64)
+    .unwrap_or(0)
+}
+
+fn nested_text_bytes(value: Option<&serde_json::Value>) -> u64 {
+  match value {
+    Some(serde_json::Value::String(s)) => s.len() as u64,
+    Some(serde_json::Value::Array(items)) => items.iter().map(|item| nested_text_bytes(Some(item))).sum(),
+    Some(serde_json::Value::Object(map)) => map.values().map(|item| nested_text_bytes(Some(item))).sum(),
+    _ => 0,
+  }
+}
+
+fn reasoning_bytes(payload: &serde_json::Value) -> u64 {
+  string_field_bytes(payload, "encrypted_content")
 }
 
 #[allow(dead_code)]
@@ -355,4 +471,49 @@ fn summarize(records: &[UsageRecord]) -> String {
     cache_read,
     cache_write
   )
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn response_item_bytes_are_attached_to_each_pushed_turn() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/fixtures/codex/sessions/2025/01/02/rollout-2025-01-02T10-00-00-test.jsonl");
+    let records = parse_rollout(&path).expect("parse fixture").expect("records");
+
+    assert_eq!(records.len(), 4);
+    assert_eq!(
+      records.iter().map(|r| r.input_bytes).collect::<Vec<_>>(),
+      vec![18, 4, 7, 5]
+    );
+    assert_eq!(
+      records.iter().map(|r| r.output_bytes).collect::<Vec<_>>(),
+      vec![20, 4, 5, 5]
+    );
+    assert_eq!(
+      records.iter().map(|r| r.input).collect::<Vec<_>>(),
+      vec![100, 100, 200, 100]
+    );
+    assert_eq!(
+      records.iter().map(|r| r.output).collect::<Vec<_>>(),
+      vec![50, 40, 90, 40]
+    );
+  }
+
+  #[test]
+  fn reasoning_response_item_bytes_are_separate_from_output_bytes() {
+    let payload = serde_json::json!({
+      "type": "reasoning",
+      "encrypted_content": "sealed",
+      "summary": [{ "type": "summary_text", "text": "ignored" }]
+    });
+    let usage = response_item_bytes(&payload);
+
+    assert_eq!(usage.input_bytes, 0);
+    assert_eq!(usage.output_bytes, 0);
+    assert_eq!(usage.reasoning_output_bytes, 6);
+    assert_eq!(usage.total_bytes, 6);
+  }
 }

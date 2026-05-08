@@ -54,6 +54,37 @@ fn codex_fixture_parses_last_total() {
 }
 
 #[test]
+fn codex_fixture_reports_response_item_bytes() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+      "--format",
+      "json",
+      "--bytes",
+    ])
+    .output()
+    .expect("run llm-tokei bytes mode");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let s = String::from_utf8_lossy(&out.stdout);
+  let v: serde_json::Value = serde_json::from_str(&s).expect("valid json");
+  let arr = v.as_array().unwrap();
+  assert_eq!(arr.len(), 1);
+  let row = &arr[0];
+  assert_eq!(row["input"], 34);
+  assert_eq!(row["output"], 34);
+  assert_eq!(row["reasoning"], 50);
+  assert_eq!(row["total"], 770);
+  assert_eq!(row["turns"], 4);
+  assert_eq!(row["rounds"], 2);
+}
+
+#[test]
 fn claude_fixture_parses_usage() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/projects");
   let out = Command::new(bin())
