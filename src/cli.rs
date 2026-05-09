@@ -125,7 +125,7 @@ pub struct Args {
   #[arg(long)]
   pub no_cost: bool,
 
-  /// Show uncached input separately (input becomes input-cache_r).
+  /// Show uncached input only.
   #[arg(long)]
   pub split_input: bool,
 

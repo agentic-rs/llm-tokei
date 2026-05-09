@@ -176,7 +176,7 @@ pub fn aggregate(
     let sess_set = session_sets.entry(key).or_default();
     sess_set.insert(r.session_id.clone());
 
-    agg.input += r.input;
+    agg.input += r.display_input();
     agg.output += r.output;
     agg.input_bytes += r.input_bytes;
     agg.output_bytes += r.output_bytes;

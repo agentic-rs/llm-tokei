@@ -55,7 +55,7 @@ llm-tokei --bytes
 | `--limit <N>` | Truncate rows |
 | `--no-cost` | Hide cost column |
 | `--avg turn\|round\|session` | Show per-unit averages in table output |
-| `--split-input` | Show uncached input (`input - cache_r`) as `input_u` |
+| `--split-input` | Show uncached input as `input_u` |
 | `--bytes` | Show `input`/`output` in bytes (`input(B)`/`output(B)` in table) |
 | `--pricing path.json` | Merge custom prices into bundled table |
 | `--no-color` | Disable ANSI colors |
@@ -106,10 +106,11 @@ Two cost columns are reported:
 
 ### Token semantics
 
-- `input` is the **full prompt total** (cached + uncached).
-- `cache_r` is the cached portion of `input` (a subset, not additional).
+- `input` is the displayed prompt total: uncached + `cache_r` + `cache_w`.
+- `input_u` is uncached prompt tokens only (`--split-input`).
+- `cache_r` is cached-read prompt tokens.
 - `cache_w` is cache-write tokens (billed separately at write rates).
-- `total = input + output + reasoning + cache_w` (cache_read isn't double-counted).
+- `total = input + output + reasoning`.
 
 `--bytes` mode:
 - Default mode reports `input`/`output` as tokens.
@@ -147,10 +148,8 @@ supply win).
   `last_token_usage` deltas if the totals are absent.
 - OpenCode token totals are per-assistant-message and aggregated per session.
 - The OpenCode DB is opened read-only; safe to run while OpenCode is active.
-- Claude Code: `input` is summed across assistant turns as
-  `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`
-  (matching the cached+uncached convention used by the other sources);
-  `cache_w` corresponds to `cache_creation`.
+- Claude Code: raw `input_tokens` are treated as uncached input,
+  `cache_read_input_tokens` as `cache_r`, and `cache_creation*` as `cache_w`.
 - GitHub Copilot Chat: chat session files don't persist per-turn input/output
   token counts. `input` and `output` are **estimates** derived from the
   rendered prompt and response text length (~4 chars/token); `reasoning` is

@@ -14,8 +14,8 @@ pub struct Price {
   pub output: f64,
   #[serde(default)]
   pub cache_read: f64,
-  #[serde(default)]
-  pub cache_write: f64,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub cache_write: Option<f64>,
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub reasoning: Option<f64>,
 }
@@ -34,8 +34,8 @@ pub struct PriceRow {
   pub reasoning: Option<f64>,
   #[serde(default)]
   pub cache_read: f64,
-  #[serde(default)]
-  pub cache_write: f64,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub cache_write: Option<f64>,
 }
 
 impl From<PriceRow> for Price {
@@ -243,11 +243,11 @@ impl PricingTable {
     let p = self.lookup_base(r.provider.as_deref(), r.model.as_deref())?;
     let m = 1_000_000.0_f64;
     let reasoning_rate = p.reasoning.unwrap_or(p.output);
-    let uncached_input = r.input.saturating_sub(r.cache_read);
-    let base = (uncached_input as f64 * p.input
+    let cache_write_rate = p.cache_write.unwrap_or(p.input);
+    let base = (r.input as f64 * p.input
       + r.output as f64 * p.output
       + r.cache_read as f64 * p.cache_read
-      + r.cache_write as f64 * p.cache_write
+      + r.cache_write as f64 * cache_write_rate
       + r.reasoning as f64 * reasoning_rate)
       / m;
     let multiplied = if self.lookup_included(r.provider.as_deref(), r.model.as_deref()) {

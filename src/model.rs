@@ -61,13 +61,19 @@ pub struct UsageRecord {
 }
 
 impl UsageRecord {
-  /// Sum of distinctly-billed token categories.
-  /// `cache_read` is intentionally excluded because it is a subset of `input`.
-  pub fn total(&self) -> u64 {
+  /// Displayed input includes cached reads and writes.
+  pub fn display_input(&self) -> u64 {
     self
       .input
+      .saturating_add(self.cache_read)
+      .saturating_add(self.cache_write)
+  }
+
+  /// Display total uses the displayed input column as-is.
+  pub fn total(&self) -> u64 {
+    self
+      .display_input()
       .saturating_add(self.output)
       .saturating_add(self.reasoning)
-      .saturating_add(self.cache_write)
   }
 }

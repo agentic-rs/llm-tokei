@@ -234,10 +234,7 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     } else {
       0
     };
-    let input = turn
-      .input
-      .saturating_add(turn.cache_read)
-      .saturating_add(turn.cache_write);
+    let input = turn.input;
     let ts = turn
       .ts
       .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));

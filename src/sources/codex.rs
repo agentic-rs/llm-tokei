@@ -340,7 +340,7 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       provider: t.provider,
       model: t.model,
       ts: t.ts,
-      input: t.usage.input_tokens,
+      input: t.usage.input_tokens.saturating_sub(t.usage.cached_input_tokens),
       output: t.usage.output_tokens,
       input_bytes: t.bytes.input_bytes,
       output_bytes: t.bytes.output_bytes,

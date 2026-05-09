@@ -51,7 +51,7 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
       if opts.bytes {
         a.input_bytes
       } else {
-        a.input.saturating_sub(a.cache_read)
+        a.input.saturating_sub(a.cache_read).saturating_sub(a.cache_write)
       }
     } else {
       if opts.bytes { a.input_bytes } else { a.input }
@@ -106,7 +106,7 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     if opts.bytes {
       aggs.iter().map(|a| a.input_bytes).sum()
     } else {
-      tot_in.saturating_sub(tot_cr)
+      tot_in.saturating_sub(tot_cr).saturating_sub(tot_cw)
     }
   } else {
     if opts.bytes {

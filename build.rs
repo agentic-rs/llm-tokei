@@ -54,8 +54,8 @@ struct PriceRow {
   reasoning: Option<f64>,
   #[serde(default, skip_serializing_if = "is_zero")]
   cache_read: f64,
-  #[serde(default, skip_serializing_if = "is_zero")]
-  cache_write: f64,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  cache_write: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -320,7 +320,7 @@ fn build_prices(rows: &[CsvRow], providers: &BTreeMap<String, ProviderEntry>) ->
       output: row.output_cost.unwrap_or(0.0),
       reasoning: row.reasoning_cost,
       cache_read: row.cache_read_cost.unwrap_or(0.0),
-      cache_write: row.cache_write_cost.unwrap_or(0.0),
+      cache_write: row.cache_write_cost,
     })
     .filter(|row| !price_is_zero(row))
     .collect()
@@ -353,7 +353,7 @@ fn price_is_zero(row: &PriceRow) -> bool {
     && row.output == 0.0
     && row.reasoning.unwrap_or(0.0) == 0.0
     && row.cache_read == 0.0
-    && row.cache_write == 0.0
+    && row.cache_write.unwrap_or(0.0) == 0.0
 }
 
 fn resolve_alias(aliases: &BTreeMap<String, String>, provider: &str, model: &str) -> String {

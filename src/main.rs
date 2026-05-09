@@ -432,7 +432,7 @@ fn format_cache_stats(source: &str, unit: &str, stats: &CacheStats) -> String {
 }
 
 fn file_summary(records: &[UsageRecord]) -> String {
-  let input: u64 = records.iter().map(|r| r.input).sum();
+  let input: u64 = records.iter().map(UsageRecord::display_input).sum();
   let output: u64 = records.iter().map(|r| r.output).sum();
   let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
   let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();

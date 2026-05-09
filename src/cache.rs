@@ -5,6 +5,8 @@ use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+const CACHE_SCHEMA_VERSION: i64 = 3;
+
 const SCHEMA: &str = "\
 CREATE TABLE IF NOT EXISTS sessions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,6 +128,7 @@ impl CacheDb {
     }
 
     conn.execute_batch(SCHEMA)?;
+    conn.pragma_update(None, "user_version", CACHE_SCHEMA_VERSION)?;
     Ok(Self { conn })
   }
 
@@ -142,6 +145,10 @@ impl CacheDb {
   }
 
   fn needs_recreate(conn: &Connection) -> Result<bool> {
+    let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if schema_version != CACHE_SCHEMA_VERSION {
+      return Ok(true);
+    }
     let has_sessions = table_exists(conn, "sessions")?;
     let has_records = table_exists(conn, "records")?;
     if !has_sessions && !has_records {
