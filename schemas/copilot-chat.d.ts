@@ -12,20 +12,83 @@ export type ExtensionId_Type_5b6f8a91 = {
   value: string;
 };
 
-/** 0.v.requests[].message.parts[] -> text */
-export type Parts_Text_587c1dc1 = {
-  editorRange: {
-    endColumn: number;
-    endLineNumber: number;
-    startColumn: number;
-    startLineNumber: number;
+/** 0.v.requests[].agent -> Variant.metadata -> Variant */
+export type Metadata_Type_3e2f0323 = {
+  hasFollowups: boolean;
+  supportIssueReporting: boolean;
+  themeIcon: {
+    id: string;
   };
+};
+
+/** 0.v.requests[].agent -> Variant.slashCommands[] -> Variant.disambiguation[] -> Variant */
+export type Disambiguation_Type_d9420919 = {
+  category: string;
+  description: string;
+  examples: string[];
+};
+
+/** 0.v.requests[].agent -> Variant.slashCommands[] -> Variant */
+export type SlashCommands_Variant_40f96f06 = {
+  description: string;
+  disambiguation?: Disambiguation_Type_d9420919[];
+  isSticky?: boolean;
+  name: string;
+  sampleRequest?: string;
+};
+
+/** 0.v.requests[].agent -> Variant.slashCommands[] -> Variant */
+export type SlashCommands_Variant_40f96f06_2 = {
+  description: string;
+  disambiguation?: Disambiguation_Type_d9420919[];
+  name: string;
+  sampleRequest: string;
+  when?: string;
+};
+
+/** 0.v.requests[].agent -> Variant */
+export type Agent_Type_dc9bd4a7 = {
+  description: string;
+  disambiguation: never[];
+  extensionDisplayName: string;
+  extensionId: ExtensionId_Type_5b6f8a91;
+  extensionPublisherId: string;
+  extensionVersion: Semver;
+  fullName: string;
+  id: string;
+  isDefault: boolean;
+  locations: string[];
+  metadata: Metadata_Type_3e2f0323;
+  modes: string[];
+  name: string;
+  publisherDisplayName: string;
+  slashCommands: Array<SlashCommands_Variant_40f96f06 | SlashCommands_Variant_40f96f06_2>;
+  when: string;
+};
+
+/** 0.v.requests[].message -> Variant.parts[] -> text.editorRange -> Variant */
+export type EditorRange_Type_c56f3a3b = {
+  endColumn: number;
+  endLineNumber: number;
+  startColumn: number;
+  startLineNumber: number;
+};
+
+/** 0.v.requests[].message -> Variant.parts[] -> text */
+export type Parts_Text_7b4416bc = {
+  editorRange: EditorRange_Type_c56f3a3b;
   kind: "text";
   range: {
     endExclusive: number;
     start: number;
   };
-  text: Path;
+  text: string;
+};
+
+/** 0.v.requests[].message -> Variant */
+export type Message_Type_cb5b622e = {
+  parts: Parts_Text_7b4416bc[];
+  text: string;
 };
 
 /** 0.v.requests[].modeInfo -> agent */
@@ -56,15 +119,18 @@ export type Response_ProgressTaskSerialized_f7bc608c = {
   progress: never[];
 };
 
+/** 0.v.requests[].response[] -> thinking.metadata -> Variant */
+export type Metadata_Type_8ea244cb = {
+  stopReason: string;
+  vscodeReasoningDone: boolean;
+};
+
 /** 0.v.requests[].response[] -> thinking */
 export type Response_Thinking_8de6614a = {
   id: string;
   kind: "thinking";
-  metadata?: {
-    stopReason: string;
-    vscodeReasoningDone: boolean;
-  };
-  value: never[] | string;
+  metadata?: Metadata_Type_8ea244cb;
+  value: never[] | string | Path;
 };
 
 /** 0.v.requests[].response[] -> Variant.baseUri -> 1 */
@@ -98,7 +164,7 @@ export type InvocationMessage_Type_d84d1caa = {
   supportHtml: boolean;
   supportThemeIcons: boolean;
   uris: Record<Url, BaseUri_1_6148a1b9>;
-  value: Path;
+  value: string;
 };
 
 /** 0.v.requests[].response[] -> toolInvocationSerialized.source -> internal */
@@ -202,48 +268,11 @@ export type $0_801eaa31 = {
     };
     pendingRequests: never[];
     requests: {
-      agent: {
-        description: string;
-        disambiguation: never[];
-        extensionDisplayName: string;
-        extensionId: ExtensionId_Type_5b6f8a91;
-        extensionPublisherId: string;
-        extensionVersion: Semver;
-        fullName: string;
-        id: string;
-        isDefault: boolean;
-        locations: string[];
-        metadata: {
-          hasFollowups: boolean;
-          supportIssueReporting: boolean;
-          themeIcon: {
-            id: string;
-          };
-        };
-        modes: string[];
-        name: string;
-        publisherDisplayName: string;
-        slashCommands: {
-          description: string;
-          disambiguation?: {
-            category: string;
-            description: string;
-            examples: string[];
-          }[];
-          isSticky?: boolean;
-          name: string;
-          sampleRequest?: string;
-          when?: string;
-        }[];
-        when: string;
-      };
+      agent: Agent_Type_dc9bd4a7;
       codeCitations: never[];
       completionTokens: number;
       contentReferences: never[];
-      message: {
-        parts: Parts_Text_587c1dc1[];
-        text: Path;
-      };
+      message: Message_Type_cb5b622e;
       modeInfo: ModeInfo_Agent_b665cdab;
       modelId: Path;
       modelState: {
@@ -342,9 +371,8 @@ export type Content_21_2696179f = {
 
 /** 1.v -> Variant */
 export type V_Variant_9dcab11c = {
-  completedAt?: number;
-  details?: string;
-  metadata?: {
+  details: string;
+  metadata: {
     agentId: string;
     cacheKey?: Url;
     codeBlocks: never[];
@@ -367,7 +395,7 @@ export type V_Variant_9dcab11c = {
       thinking: {
         encrypted: Path;
         id: Path;
-        text: never[] | Blob;
+        text: never[] | Path | Blob;
         tokens: number;
       };
       timestamp: number;
@@ -379,18 +407,23 @@ export type V_Variant_9dcab11c = {
       toolInputRetry: number;
     }[];
   };
-  timings?: {
+  timings: {
     firstProgress: number;
     totalElapsed: number;
   };
-  value?: number;
+};
+
+/** 1.v -> Variant */
+export type V_Variant_9dcab11c_2 = {
+  completedAt: number;
+  value: number;
 };
 
 /** 1 */
 export type $1_a2c6e3e4 = {
   k: Array<string | number>;
   kind: 1;
-  v: V_Variant_9dcab11c | never[] | string | number | boolean;
+  v: V_Variant_9dcab11c | never[] | V_Variant_9dcab11c_2 | number | boolean | string;
 };
 
 /** 2.v[] -> toolInvocationSerialized */
@@ -415,11 +448,25 @@ export type V_Thinking_0d8c201c = {
   generatedTitle?: string;
   id: string;
   kind: "thinking";
-  metadata?: {
-    stopReason: string;
-    vscodeReasoningDone: boolean;
-  };
+  metadata?: Metadata_Type_8ea244cb;
   value: never[] | string;
+};
+
+/** 2.v[] -> Variant */
+export type V_Variant_ca258acf = {
+  baseUri?: BaseUri_1_6148a1b9;
+  supportAlertSyntax?: boolean;
+  supportHtml: boolean;
+  supportThemeIcons: boolean;
+  uris?: Record<string, unknown>;
+  value: string;
+};
+
+/** 2.v[] -> inlineReference */
+export type V_InlineReference_3f1ce092 = {
+  inlineReference: BaseUri_1_6148a1b9;
+  kind: "inlineReference";
+  name?: string;
 };
 
 /** 2.v[] -> Variant.response[] -> toolInvocationSerialized */
@@ -438,65 +485,22 @@ export type Response_ToolInvocationSerialized_f9d74c88 = {
 };
 
 /** 2.v[] -> Variant */
-export type V_Variant_ca258acf = {
-  agent?: {
-    description: string;
-    disambiguation: never[];
-    extensionDisplayName: string;
-    extensionId: ExtensionId_Type_5b6f8a91;
-    extensionPublisherId: string;
-    extensionVersion: Semver;
-    fullName: string;
-    id: string;
-    isDefault: boolean;
-    locations: string[];
-    metadata: {
-      hasFollowups: boolean;
-      supportIssueReporting: boolean;
-      themeIcon: {
-        id: string;
-      };
-    };
-    modes: string[];
-    name: string;
-    publisherDisplayName: string;
-    slashCommands: {
-      description: string;
-      disambiguation?: {
-        category: string;
-        description: string;
-        examples: string[];
-      }[];
-      isSticky?: boolean;
-      name: string;
-      sampleRequest?: string;
-      when?: string;
-    }[];
-    when: string;
-  };
-  baseUri?: BaseUri_1_6148a1b9;
-  codeCitations?: never[];
-  contentReferences?: never[];
-  message?: {
-    parts: Parts_Text_587c1dc1[];
-    text: string;
-  };
-  modeInfo?: ModeInfo_Agent_b665cdab;
-  modelId?: Path;
-  modelState?: {
+export type V_Variant_ca258acf_2 = {
+  agent: Agent_Type_dc9bd4a7;
+  codeCitations: never[];
+  contentReferences: never[];
+  message: Message_Type_cb5b622e;
+  modeInfo: ModeInfo_Agent_b665cdab;
+  modelId: Path;
+  modelState: {
     value: number;
   };
-  requestId?: string;
-  response?: Array<Response_McpServersStarting_083d2bc5 | Response_ToolInvocationSerialized_f9d74c88>;
-  responseId?: string;
-  supportAlertSyntax?: boolean;
-  supportHtml?: boolean;
-  supportThemeIcons?: boolean;
-  timeSpentWaiting?: number;
-  timestamp?: number;
-  uris?: Record<string, unknown>;
-  value?: string;
-  variableData?: {
+  requestId: string;
+  response: Array<Response_McpServersStarting_083d2bc5 | Response_ToolInvocationSerialized_f9d74c88>;
+  responseId: string;
+  timeSpentWaiting: number;
+  timestamp: number;
+  variableData: {
     variables: {
       fullName: string;
       icon: {
@@ -507,13 +511,6 @@ export type V_Variant_ca258acf = {
       name: string;
     }[];
   };
-};
-
-/** 2.v[] -> inlineReference */
-export type V_InlineReference_3f1ce092 = {
-  inlineReference: BaseUri_1_6148a1b9;
-  kind: "inlineReference";
-  name?: string;
 };
 
 /** 2.v[] -> undoStop */
@@ -533,12 +530,7 @@ export type V_CodeblockUri_d78e5a97 = {
 export type V_TextEditGroup_f858d8c6 = {
   done: boolean;
   edits: {
-    range: {
-      endColumn: number;
-      endLineNumber: number;
-      startColumn: number;
-      startLineNumber: number;
-    };
+    range: EditorRange_Type_c56f3a3b;
     text: Path;
   }[][];
   kind: "textEditGroup";
@@ -550,7 +542,7 @@ export type $2_3da03859 = {
   i?: number;
   k: Array<string | number>;
   kind: 2;
-  v: Array<V_ToolInvocationSerialized_d70cc2ca | V_Thinking_0d8c201c | V_Variant_ca258acf | V_InlineReference_3f1ce092 | V_UndoStop_d2a847c5 | V_CodeblockUri_d78e5a97 | V_TextEditGroup_f858d8c6>;
+  v: Array<V_ToolInvocationSerialized_d70cc2ca | V_Thinking_0d8c201c | V_Variant_ca258acf | V_InlineReference_3f1ce092 | V_Variant_ca258acf_2 | V_UndoStop_d2a847c5 | V_CodeblockUri_d78e5a97 | V_TextEditGroup_f858d8c6>;
 };
 
 export type CopilotChat = $0_801eaa31 | $1_a2c6e3e4 | $2_3da03859;

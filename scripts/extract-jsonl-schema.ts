@@ -202,7 +202,7 @@ function fromValue(v: unknown, isTagField = false): Schema {
       const tagField = (TAG_CANDIDATES as readonly string[]).includes(key);
       props.set(key, { schema: fromValue(val, tagField), present: 1 });
     }
-    return maybeRecordify({ k: "object", total: 1, props });
+    return { k: "object", total: 1, props };
   }
   return { k: "any" };
 }
@@ -273,7 +273,7 @@ function merge(a: Schema, b: Schema): Schema {
   if (b.k === "record" && a.k === "object") return mergeRecordWithObject(b, a);
 
   if (a.k === "object" && b.k === "object") {
-    if (!compatibleForMerge(a, b)) return { k: "union", variants: [a, b] };
+    if (!policyAccepts(a, b, STREAM_MERGE_POLICY)) return { k: "union", variants: [a, b] };
     return mergeObjects(a, b);
   }
 
@@ -292,7 +292,7 @@ function mergeIntoUnion(u: Schema & { k: "union" }, x: Schema): Schema {
   const out: Schema[] = [];
   let placed = false;
   for (const v of u.variants) {
-    if (!placed && compatibleForMerge(v, x)) {
+    if (!placed && policyAccepts(v, x, STREAM_MERGE_POLICY)) {
       const merged = merge(v, x);
       // If merging produced a fresh union, splice its variants in (flatten).
       if (merged.k === "union") {
@@ -391,6 +391,7 @@ type CombineKind =
 type GateKind =
   | "any"
   | "tag-strict"    // for each TAG_CANDIDATES key with literals on either side, sets must overlap
+  | "tag-present"   // both sides have at least one TAG_CANDIDATES key with a literal value
   | "tag-loose"     // same primary (tagKey, tagValue) — TODO
   | "no-tag"        // neither side has any TAG_CANDIDATES (or USER_TAG_KEY) field
   | "name-prefix";  // share PascalCase scope prefix — bucketing-time, not pairwise
@@ -399,6 +400,7 @@ type SimilarKind =
   | "any"
   | "same-keys"
   | "subset-keys"
+  | "alias-keys-compat"             // both objects: every key passes the SAME non-string alias
   | { kind: "overlap-min"; n: number }
   | { kind: "keys-lt"; n: number }   // both objects have fewer than n keys
   | { kind: "keys-gt"; n: number }   // both objects have more than n keys
@@ -423,6 +425,31 @@ interface MergePolicy {
   rules: MergeRule[];     // OR — pair admitted if any rule matches
 }
 
+// Default policy used by the streaming `merge()` / `mergeIntoUnion()` pair.
+// Encodes the legacy invariant: two object IRs may merge iff their tag
+// literals (per TAG_CANDIDATES) agree. `combine`/`pick` are inert for the
+// streaming path (combine is hard-wired to `mergeObjects`; no group picker)
+// but kept so we can route through the same `policyAccepts` predicate.
+const STREAM_MERGE_POLICY: MergePolicy = {
+  combine: "deep",
+  pick: "first",
+  rules: [
+    // Tagged objects: both expose a tag-candidate key with literals AND
+    // those literals overlap (no cross-variant collapse).
+    { gates: ["tag-present", "tag-strict"], similar: ["any"] },
+    // Untagged objects whose keys are all the same alias (e.g., paths, uuids):
+    // record-precursors. Allow the merge to accumulate the key set; a later
+    // post-pass (`applyRecordify`) detects the pattern and converts to Record.
+    { gates: ["no-tag"], similar: ["alias-keys-compat"] },
+    // Untagged objects: only merge when one's keys are a subset of the other's.
+    // This collapses "same shape, different optional fields populated" pairs
+    // (e.g., `{description,name}` ⊆ `{description,name,disambiguation}`)
+    // while keeping disjoint shapes (e.g., `{agent,...}` vs `{message,...}`)
+    // as distinct union variants.
+    { gates: ["no-tag"], similar: ["subset-keys"] },
+  ],
+};
+
 // --- gate predicates -------------------------------------------------
 
 function gateAccepts(a: Schema, b: Schema, gate: GateKind): boolean {
@@ -431,6 +458,12 @@ function gateAccepts(a: Schema, b: Schema, gate: GateKind): boolean {
       return true;
     case "tag-strict":
       return compatibleForMerge(a, b);
+    case "tag-present": {
+      // Both sides must expose a TAG_CANDIDATES key carrying literals (singleton
+      // or enum). Mirrors `pickTagKey`: 100% present, prim, single type, ≥1 literal.
+      if (a.k !== "object" || b.k !== "object") return false;
+      return pickTagKey(a) !== null && pickTagKey(b) !== null;
+    }
     case "tag-loose": {
       if (a.k !== "object" || b.k !== "object") return true;
       const ta = pickTagLiteral(a);
@@ -439,12 +472,15 @@ function gateAccepts(a: Schema, b: Schema, gate: GateKind): boolean {
       return ta.key === tb.key && ta.value === tb.value;
     }
     case "no-tag": {
+      // Object-centric gate: both sides must be objects, neither carrying a
+      // TAG_CANDIDATES (or USER_TAG_KEY) field. Non-object variants must NOT
+      // pass this gate vacuously, otherwise mergeIntoUnion will splice a
+      // mismatched-kind merge result and skip the truly compatible variant.
+      if (a.k !== "object" || b.k !== "object") return false;
       const isTagKey = (k: string) =>
         (TAG_CANDIDATES as readonly string[]).includes(k) || k === USER_TAG_KEY;
-      const obj = (s: Schema) => s.k === "object" ? s : null;
-      const oa = obj(a), ob = obj(b);
-      if (oa) for (const k of oa.props.keys()) if (isTagKey(k)) return false;
-      if (ob) for (const k of ob.props.keys()) if (isTagKey(k)) return false;
+      for (const k of a.props.keys()) if (isTagKey(k)) return false;
+      for (const k of b.props.keys()) if (isTagKey(k)) return false;
       return true;
     }
     case "name-prefix":
@@ -468,6 +504,15 @@ function similarAccepts(a: Schema, b: Schema, kind: SimilarKind): boolean {
     for (const k of smaller.props.keys()) if (!larger.props.has(k)) return false;
     return true;
   }
+  if (kind === "alias-keys-compat") {
+    // Both sides have at least one key, and every key on each side passes
+    // the SAME non-`"string"` alias predicate (e.g., both Path-keyed).
+    if (a.props.size === 0 || b.props.size === 0) return false;
+    const ka = detectKeyAlias([...a.props.keys()]);
+    if (ka === "string") return false;
+    const kb = detectKeyAlias([...b.props.keys()]);
+    return ka === kb;
+  }
   if (kind === "nullable-compat") {
     // TODO: identical types ignoring optional/nullable flags. Stub returns false
     // (conservative) so accidental enabling won't silently widen.
@@ -490,12 +535,13 @@ function similarAccepts(a: Schema, b: Schema, kind: SimilarKind): boolean {
   if (typeof kind === "object" && kind.kind === "keys-gt") {
     return a.props.size > kind.n && b.props.size > kind.n;
   }
-  // types-match — for every shared key, value schemas render identically.
+  // types-match — for every shared key, value schemas are types-compatible
+  // (string aliases compatible with plain string; identical otherwise).
   if (kind === "types-match") {
     for (const [k, pa] of a.props) {
       const pb = b.props.get(k);
       if (!pb) continue;
-      if (dryRender(pa.schema) !== dryRender(pb.schema)) return false;
+      if (!typesCompat(pa.schema, pb.schema)) return false;
     }
     return true;
   }
@@ -507,6 +553,42 @@ function policyAccepts(a: Schema, b: Schema, policy: MergePolicy): boolean {
     r.gates.every((g) => gateAccepts(a, b, g)) &&
     r.similar.every((s) => similarAccepts(a, b, s)),
   );
+}
+
+// Recursive structural compatibility used by `types-match`. Treats string
+// aliases as compatible with plain `string` (the supertype) — merging will
+// widen to the supertype. Two distinct stricter aliases (e.g. Path vs Url)
+// are NOT compatible — they should form a real union.
+function typesCompat(a: Schema, b: Schema): boolean {
+  if (a === b) return true;
+  if (a.k !== b.k) return dryRender(a) === dryRender(b);
+  if (a.k === "prim" && b.k === "prim") {
+    if (a.types.size !== b.types.size) return false;
+    for (const t of a.types) if (!b.types.has(t)) return false;
+    if (a.types.has("string")) {
+      const ra = dryRender(a);
+      const rb = dryRender(b);
+      if (ra === rb) return true;
+      // One side is plain `string` — the other (any alias) is a subtype, so
+      // merging widens to `string`. Compatible.
+      if (ra === "string" || rb === "string") return true;
+      return false;
+    }
+    return dryRender(a) === dryRender(b);
+  }
+  if (a.k === "array" && b.k === "array") return typesCompat(a.item, b.item);
+  if (a.k === "record" && b.k === "record") {
+    return a.key === b.key && typesCompat(a.value, b.value);
+  }
+  if (a.k === "object" && b.k === "object") {
+    for (const [k, pa] of a.props) {
+      const pb = b.props.get(k);
+      if (!pb) continue;
+      if (!typesCompat(pa.schema, pb.schema)) return false;
+    }
+    return true;
+  }
+  return dryRender(a) === dryRender(b);
 }
 
 // --- canonical pickers ------------------------------------------------
@@ -573,13 +655,23 @@ function combineInto(
     }
     case "shallow": {
       // Proper presence accounting: track how many merged instances had each
-      // field. Shared fields bump `present`; canon's schema wins (no recursive
-      // value-merge — that's "deep" combine, cycle-unsafe). Fields only seen
-      // in `other` carry their own presence count from `other`.
+      // field. Shared fields bump `present`; canon's schema wins for non-prim
+      // children (no recursive value-merge — that's "deep" combine, cycle-
+      // unsafe). For shared prim children we DO merge (cycle-safe, no
+      // recursion into objects) so alias accumulation widens correctly:
+      // e.g. canon.text:Path + other.text:string → canon.text:string.
+      // Fields only seen in `other` carry their own presence count.
       for (const [k, p] of other.props) {
         const existing = canon.props.get(k);
-        if (existing) existing.present += p.present;
-        else canon.props.set(k, { schema: p.schema, present: p.present });
+        if (existing) {
+          existing.present += p.present;
+          if (existing.schema.k === "prim" && p.schema.k === "prim") {
+            const merged = merge(existing.schema, p.schema);
+            if (merged.k === "prim" || merged.k === "union") existing.schema = merged;
+          }
+        } else {
+          canon.props.set(k, { schema: p.schema, present: p.present });
+        }
       }
       canon.total += other.total;
       return true;
@@ -699,7 +791,7 @@ function mergeObjects(
       props.set(k, { schema: pb.schema, present: pb.present });
     }
   }
-  return maybeRecordify({ k: "object", total, props });
+  return { k: "object", total, props };
 }
 
 let USER_TAG_KEY: string | null = null;
@@ -1103,6 +1195,38 @@ const HINT_POLICY: MergePolicy = {
   rules: [{ gates: ["tag-strict", "name-prefix"], similar: ["any"] }],
 };
 
+// Phase 0: walk the IR and recordify any object whose every key passes the
+// SAME non-`"string"` alias (e.g., all-Path-keyed). Returns substitution map
+// `object → record` for use with rewriteIR. Runs once on the streamed IR.
+function applyRecordify(root: Schema): Map<Schema, Schema> {
+  const canonicalFor = new Map<Schema, Schema>();
+  const seen = new Set<Schema>();
+  function walk(s: Schema) {
+    if (seen.has(s)) return;
+    seen.add(s);
+    switch (s.k) {
+      case "array": walk(s.item); return;
+      case "record": walk(s.value); return;
+      case "union": for (const v of s.variants) walk(v); return;
+      case "object": {
+        for (const p of s.props.values()) walk(p.schema);
+        if (s.props.size === 0) return;
+        const keys = [...s.props.keys()];
+        const alias = detectKeyAlias(keys);
+        if (alias === "string") return;
+        // Fold all per-key value schemas into a single value schema.
+        let val: Schema = NEVER;
+        for (const { schema } of s.props.values()) val = merge(val, schema);
+        canonicalFor.set(s, { k: "record", key: alias, value: val });
+        return;
+      }
+      default: return;
+    }
+  }
+  walk(root);
+  return canonicalFor;
+}
+
 function applyHintsOnIR(root: Schema, rootName: string): Map<Schema, Schema> {
   const hoists: HoistMeta[] = [];
   collectHoists(root, { old: rootName, pretty: "", field: "" }, hoists, new Set());
@@ -1438,7 +1562,7 @@ function applyInlineSameKeys(root: Schema, rootName: string): SameKeysResult {
   }
 
   for (const [sig, group] of buckets) {
-    if (group.length < 3) continue;
+    if (group.length < 2) continue;
     // Build HoistMeta-like wrappers; use field of each entry; pick most-fields
     // (all are same-keys so all sizes equal; picker is effectively first).
     const metas: HoistMeta[] = group.map((e) => ({
@@ -1585,6 +1709,10 @@ function dedupeDecls(decls: DeclEntry[], rootRendered: string): { decls: DeclEnt
 }
 
 function emit(root: Schema, rootName: string): string {
+  // Phase 0: deferred recordification — collapse alias-keyed objects into
+  // Record<KeyAlias, V>. Runs once on the streamed IR before any phase.
+  const recordCanonical = applyRecordify(root);
+  root = rewriteIR(root, recordCanonical, new Set());
   // Phase 1a: hint-driven IR merging (DEDUP_HINTS).
   const hintCanonical = applyHintsOnIR(root, rootName);
   root = rewriteIR(root, hintCanonical, new Set());

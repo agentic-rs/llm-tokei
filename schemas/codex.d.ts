@@ -48,23 +48,27 @@ export type Payload_UserMessage_1024ed31 = {
   type: "user_message";
 };
 
+/** event_msg.payload -> token_count.info -> Variant.last_token_usage -> Variant */
+export type TotalTokenUsage_Type_2c77a36c = {
+  cached_input_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_output_tokens: number;
+  total_tokens: number;
+};
+
 /** event_msg.payload -> token_count.info -> Variant */
 export type Info_Variant_b8550efc = {
-  last_token_usage: {
-    cached_input_tokens: number;
-    input_tokens: number;
-    output_tokens: number;
-    reasoning_output_tokens: number;
-    total_tokens: number;
-  };
+  last_token_usage: TotalTokenUsage_Type_2c77a36c;
   model_context_window: number;
-  total_token_usage: {
-    cached_input_tokens: number;
-    input_tokens: number;
-    output_tokens: number;
-    reasoning_output_tokens: number;
-    total_tokens: number;
-  };
+  total_token_usage: TotalTokenUsage_Type_2c77a36c;
+};
+
+/** event_msg.payload -> token_count.rate_limits.primary -> Variant */
+export type Primary_Type_aec06b40 = {
+  resets_at: number;
+  used_percent: number;
+  window_minutes: number;
 };
 
 /** event_msg.payload -> token_count */
@@ -79,17 +83,9 @@ export type Payload_TokenCount_ed9cbd7e = {
     limit_id: string;
     limit_name: null;
     plan_type: null;
-    primary: {
-      resets_at: number;
-      used_percent: number;
-      window_minutes: number;
-    };
+    primary: Primary_Type_aec06b40;
     rate_limit_reached_type: null;
-    secondary: {
-      resets_at: number;
-      used_percent: number;
-      window_minutes: number;
-    };
+    secondary: Primary_Type_aec06b40;
   };
   type: "token_count";
 };
@@ -153,6 +149,12 @@ export type Payload_ExecCommandEnd_ce7217dd = {
   type: "exec_command_end";
 };
 
+/** event_msg.payload -> patch_apply_end.changes{} -> add */
+export type Changes_Add_1802d286 = {
+  content: Blob;
+  type: "add";
+};
+
 /** event_msg.payload -> patch_apply_end.changes{} -> update */
 export type Changes_Update_f8d54454 = {
   move_path: null;
@@ -160,16 +162,10 @@ export type Changes_Update_f8d54454 = {
   unified_diff: string;
 };
 
-/** event_msg.payload -> patch_apply_end.changes{} -> add */
-export type Changes_Add_1802d286 = {
-  content: Blob;
-  type: "add";
-};
-
 /** event_msg.payload -> patch_apply_end */
 export type Payload_PatchApplyEnd_2042383b = {
   call_id: string;
-  changes: Record<Path, Changes_Update_f8d54454 | Changes_Add_1802d286>;
+  changes: Record<Path, Changes_Add_1802d286 | Changes_Update_f8d54454>;
   status: string;
   stderr: string;
   stdout: Path;
@@ -218,7 +214,7 @@ export type EventMsg_0bc1a1a1 = {
 
 /** response_item.payload -> message.content[] -> input_text */
 export type Content_InputText_ccb8ea4f = {
-  text: Path;
+  text: string;
   type: "input_text";
 };
 
@@ -293,55 +289,43 @@ export type ResponseItem_0218eace = {
   type: "response_item";
 };
 
-/**
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> path
- * turn_context.payload.permission_profile.file_system.entries[].path -> path
- */
-export type Path_Path_7618260e = {
-  path: Path;
-  type: "path";
-};
-
-/**
- * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> root
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> root
- */
-export type Value_Root_73bc7478 = {
+/** turn_context.payload.file_system_sandbox_policy.entries[] -> Variant.path -> special.value -> root */
+export type Value_Root_128a1081 = {
   kind: "root";
 };
 
-/**
- * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> project_roots
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> project_roots
- */
-export type Value_ProjectRoots_7012ad95 = {
+/** turn_context.payload.file_system_sandbox_policy.entries[] -> Variant.path -> special.value -> project_roots */
+export type Value_ProjectRoots_0ac3801d = {
   kind: "project_roots";
   subpath?: string;
 };
 
-/**
- * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> slash_tmp
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> slash_tmp
- */
-export type Value_SlashTmp_113ccc33 = {
+/** turn_context.payload.file_system_sandbox_policy.entries[] -> Variant.path -> special.value -> slash_tmp */
+export type Value_SlashTmp_2e6fb9db = {
   kind: "slash_tmp";
 };
 
-/**
- * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> tmpdir
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> tmpdir
- */
-export type Value_Tmpdir_1e713077 = {
+/** turn_context.payload.file_system_sandbox_policy.entries[] -> Variant.path -> special.value -> tmpdir */
+export type Value_Tmpdir_7a8a1aa9 = {
   kind: "tmpdir";
 };
 
-/**
- * turn_context.payload.permission_profile.file_system.entries[].path -> special
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> special
- */
-export type Path_Special_103b9549 = {
+/** turn_context.payload.file_system_sandbox_policy.entries[] -> Variant.path -> special */
+export type Path_Special_f14319fa = {
   type: "special";
-  value: Value_Root_73bc7478 | Value_ProjectRoots_7012ad95 | Value_SlashTmp_113ccc33 | Value_Tmpdir_1e713077;
+  value: Value_Root_128a1081 | Value_ProjectRoots_0ac3801d | Value_SlashTmp_2e6fb9db | Value_Tmpdir_7a8a1aa9;
+};
+
+/** turn_context.payload.file_system_sandbox_policy.entries[] -> Variant.path -> path */
+export type Path_Path_ab64f9f9 = {
+  path: Path;
+  type: "path";
+};
+
+/** turn_context.payload.file_system_sandbox_policy.entries[] -> Variant */
+export type Entries_Type_b768ea2a = {
+  access: string;
+  path: Path_Special_f14319fa | Path_Path_ab64f9f9;
 };
 
 /** turn_context */
@@ -360,19 +344,13 @@ export type TurnContext_d55c4b58 = {
     cwd: Path;
     effort: string;
     file_system_sandbox_policy: {
-      entries: {
-        access: string;
-        path: Path_Special_103b9549 | Path_Path_7618260e;
-      }[];
+      entries: Entries_Type_b768ea2a[];
       kind: "restricted";
     };
     model: string;
     permission_profile: {
       file_system: {
-        entries: {
-          access: string;
-          path: Path_Special_103b9549 | Path_Path_7618260e;
-        }[];
+        entries: Entries_Type_b768ea2a[];
         type: "restricted";
       };
       network: string;
