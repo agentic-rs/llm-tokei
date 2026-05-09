@@ -50,7 +50,8 @@ function printHelp() {
   console.log(
     `Usage: bun run scripts/extract-jsonl-schema.ts [--out <path>] [--name <Root>] [--tag <key>] [files...]\n` +
       `\n` +
-      `If no files are given, reads from stdin. .gz/.gzip files are auto-decompressed.\n`,
+      `If no files are given, reads from stdin. .gz/.gzip files are auto-decompressed.\n` +
+      `File arguments support glob patterns (e.g. '~/.codex/sessions/**/*.jsonl').\n`,
   );
 }
 
@@ -89,6 +90,16 @@ const TAG_CANDIDATES = ["type", "kind", "tag", "role", "$type", "$mid", "event",
 const DEDUP_HINTS: readonly [string, string][] = [
   ["CopilotChat_1_V_Variant_Metadata_ToolCallResults_Value_Content", "Children_1"],
   ["CopilotChat_1_V_Variant_Metadata_ToolCallResults_Value_Content", "Children_2"],
+];
+
+// Force `Record<string, V>` for objects whose oldChain (PascalCase) contains
+// one of these segment-runs. Use when keys are arbitrary strings (e.g.
+// user-defined IDs, tool names) that don't match a known alias predicate but
+// should still collapse to a record. Match is "appears as contiguous `_`-
+// separated segments anywhere in the chain" — e.g. hint `"UserSelectedTools"`
+// matches `Foo_Bar_UserSelectedTools` and `X_UserSelectedTools_Y` alike.
+const RECORD_HINTS: readonly string[] = [
+  "UserSelectedTools",
 ];
 
 function isPathLike(key: string): boolean {
@@ -1009,8 +1020,9 @@ function render(s: Schema, ctx: EmitCtx, p: PathCtx): string {
             continue;
           }
           const tag = pickTagLiteral(v);
+          const override = ctx.hoistName.get(v);
           const sub = tag ? descendVariant(p, tag.value) : descendVariantFallback(p);
-          const baseName = tag ? variantTypeName(p, String(tag.value)) : variantTypeName(p, "Variant");
+          const baseName = override ?? (tag ? variantTypeName(p, String(tag.value)) : variantTypeName(p, "Variant"));
           const variantName = uniqueName(ctx, baseName);
           ctx.objCache.set(v, variantName);
           emitNamedObject(v, ctx, variantName, sub);
@@ -1196,24 +1208,39 @@ const HINT_POLICY: MergePolicy = {
 };
 
 // Phase 0: walk the IR and recordify any object whose every key passes the
-// SAME non-`"string"` alias (e.g., all-Path-keyed). Returns substitution map
+// SAME non-`"string"` alias (e.g., all-Path-keyed). Also force-recordifies
+// objects whose oldChain matches a RECORD_HINTS entry — those become
+// `Record<string, V>` regardless of key shape. Returns substitution map
 // `object → record` for use with rewriteIR. Runs once on the streamed IR.
-function applyRecordify(root: Schema): Map<Schema, Schema> {
+function applyRecordify(root: Schema, rootName: string): Map<Schema, Schema> {
   const canonicalFor = new Map<Schema, Schema>();
   const seen = new Set<Schema>();
-  function walk(s: Schema) {
+  function walk(s: Schema, p: PathCtx) {
     if (seen.has(s)) return;
     seen.add(s);
     switch (s.k) {
-      case "array": walk(s.item); return;
-      case "record": walk(s.value); return;
-      case "union": for (const v of s.variants) walk(v); return;
+      case "array": walk(s.item, descendArray(p)); return;
+      case "record": walk(s.value, descendRecord(p)); return;
+      case "union":
+        for (const v of s.variants) {
+          if (v.k === "object") {
+            const tag = pickTagLiteral(v);
+            walk(v, tag ? descendVariant(p, tag.value) : descendVariantFallback(p));
+          } else {
+            walk(v, descendVariantFallback(p));
+          }
+        }
+        return;
       case "object": {
-        for (const p of s.props.values()) walk(p.schema);
+        for (const [k, prop] of s.props) walk(prop.schema, descendField(p, k));
         if (s.props.size === 0) return;
         const keys = [...s.props.keys()];
-        const alias = detectKeyAlias(keys);
-        if (alias === "string") return;
+        const hinted = (() => {
+          const padded = "_" + p.old + "_";
+          return RECORD_HINTS.some((h) => padded.includes("_" + h + "_"));
+        })();
+        const alias = hinted ? "string" : detectKeyAlias(keys);
+        if (!hinted && alias === "string") return;
         // Fold all per-key value schemas into a single value schema.
         let val: Schema = NEVER;
         for (const { schema } of s.props.values()) val = merge(val, schema);
@@ -1223,7 +1250,7 @@ function applyRecordify(root: Schema): Map<Schema, Schema> {
       default: return;
     }
   }
-  walk(root);
+  walk(root, { old: rootName, pretty: "", field: "" });
   return canonicalFor;
 }
 
@@ -1311,6 +1338,26 @@ function cycleSplice(canon: Schema & { k: "object" }, canonicalFor: Map<Schema, 
 // Auto-recursive policy: bucketing by (field, tagKey, tagValue) already enforces
 // tag agreement; reachability filter is applied during component formation.
 // Atomic deep merge mirrors the legacy in-place fold.
+// Tag keys whose literal values designate a GLOBAL shape identity — every
+// object across the whole IR with `<key>: <value>` is treated as the same
+// type (shallow-merged, hoisted as `<key>_<value>_<hash>`). Use for protocol-
+// wide discriminators that recur in many parent contexts (e.g. VS Code's
+// `$mid` marshalling tag).
+const MULTI_TAG_HINTS: readonly string[] = [
+  "$mid",
+];
+
+// Shallow combine — avoids unbounded recursion when bucket members reach each
+// other transitively (cycles through tag-shared substructure are common). The
+// shallow path widens shared prim leaves (added in earlier patch) so alias
+// drift across instances still collapses; deeper non-prim children take
+// canon's schema (acceptable: same tag literal implies same shape).
+const TAG_HINT_POLICY: MergePolicy = {
+  combine: "shallow",
+  pick: "most-fields",
+  rules: [{ gates: [], similar: ["any"] }],
+};
+
 const AUTO_RECURSIVE_POLICY: MergePolicy = {
   combine: "deep",
   pick: "shortest-name",
@@ -1424,6 +1471,126 @@ const INLINE_INLINE_POLICY: MergePolicy = {
     { gates: ["tag-strict"], similar: [{ kind: "overlap-min", n: 3 }] },
   ],
 };
+
+interface TagHintsResult {
+  canonicalFor: Map<Schema, Schema>;
+  newHoists: Set<Schema>;
+  hoistNames: Map<Schema, string>;
+}
+
+// Phase 1b': global tag-value consolidation. For every tag key in
+// MULTI_TAG_HINTS, walk the entire IR and bucket every object whose tag value
+// is a singleton literal. Buckets of ≥2 are deep-merged via
+// AUTO_RECURSIVE_POLICY (combine: deep) and hoisted as `<key>_<value>_<hash>`.
+// Aborts a bucket on any merge collapse to non-object (rolls back canon).
+function applyTagHints(root: Schema, tagKeys: readonly string[]): TagHintsResult {
+  const canonicalFor = new Map<Schema, Schema>();
+  const newHoists = new Set<Schema>();
+  const hoistNames = new Map<Schema, string>();
+  const tagSet = new Set(tagKeys);
+
+  type Entry = { ir: Schema & { k: "object" }; field: string };
+  const buckets = new Map<string, Entry[]>();
+  const seen = new Set<Schema>();
+  function walk(s: Schema, parentField: string) {
+    if (seen.has(s)) return;
+    seen.add(s);
+    switch (s.k) {
+      case "array": walk(s.item, parentField); return;
+      case "record": walk(s.value, parentField); return;
+      case "union": for (const v of s.variants) walk(v, parentField); return;
+      case "object": {
+        for (const tagKey of tagSet) {
+          const prop = s.props.get(tagKey);
+          if (!prop || prop.schema.k !== "prim") continue;
+          const lits = prop.schema.literals ?? prop.schema.numLiterals;
+          if (!lits || lits.size !== 1) continue;
+          const value = [...lits][0];
+          const k = `${tagKey}\x00${String(value)}`;
+          const arr = buckets.get(k) ?? [];
+          arr.push({ ir: s as Schema & { k: "object" }, field: parentField });
+          buckets.set(k, arr);
+          break;
+        }
+        for (const [k, p] of s.props) walk(p.schema, k);
+        return;
+      }
+      default: return;
+    }
+  }
+  walk(root, "");
+
+  for (const [key, group] of buckets) {
+    if (group.length < 1) continue;
+    const metas: HoistMeta[] = group.map((e) => ({
+      ir: e.ir, oldChain: "", leaf: "", field: e.field, pretty: "",
+    }));
+    // Singleton: skip merge, just hoist+rename in place.
+    const canon = group.length === 1 ? metas[0]! : mergeGroup(metas, TAG_HINT_POLICY, canonicalFor);
+    if (!canon) continue;
+    const [tagKey, value] = key.split("\x00");
+    const raw = `${tagKey}_${value}_${sha8(key)}`;
+    const name = /^[0-9]/.test(raw) ? `$${raw}` : raw;
+    newHoists.add(canon.ir);
+    hoistNames.set(canon.ir, name);
+  }
+
+  return { canonicalFor, newHoists, hoistNames };
+}
+
+// Phase 1b'': field-scoped tag consolidation. Walks the entire IR (not just
+// collectHoists' union-variant set) and buckets every tagged object by
+// `(parentField, tagKey, tagValue)`. Buckets of ≥2 are merged via
+// INLINE_INLINE_POLICY (tag-strict + overlap-min/subset-keys gates). Catches
+// non-recursive variants whose IRs share field+tag but drift in optional
+// fields (e.g. `Children_2` shapes with vs without `references?`). Unlike
+// applyTagHints, this DOES NOT hoist or rename — names come from later phases.
+function applyFieldTagConsolidation(root: Schema, tagKeys: readonly string[]): Map<Schema, Schema> {
+  const canonicalFor = new Map<Schema, Schema>();
+  const tagSet = new Set(tagKeys);
+  type Entry = { ir: Schema & { k: "object" }; field: string };
+  const buckets = new Map<string, Entry[]>();
+  const seen = new Set<Schema>();
+  function walk(s: Schema, parentField: string) {
+    if (seen.has(s)) return;
+    seen.add(s);
+    switch (s.k) {
+      case "array": walk(s.item, parentField); return;
+      case "record": walk(s.value, parentField); return;
+      case "union": for (const v of s.variants) walk(v, parentField); return;
+      case "object": {
+        for (const tagKey of tagSet) {
+          const prop = s.props.get(tagKey);
+          if (!prop || prop.schema.k !== "prim") continue;
+          const lits = prop.schema.literals ?? prop.schema.numLiterals;
+          if (!lits || lits.size !== 1) continue;
+          const value = [...lits][0];
+          const k = `${parentField}\x00${tagKey}\x00${String(value)}`;
+          const arr = buckets.get(k) ?? [];
+          arr.push({ ir: s as Schema & { k: "object" }, field: parentField });
+          buckets.set(k, arr);
+          break;
+        }
+        for (const [k, p] of s.props) walk(p.schema, k);
+        return;
+      }
+      default: return;
+    }
+  }
+  walk(root, "");
+
+  for (const [, group] of buckets) {
+    if (group.length < 2) continue;
+    const uniq = new Map<Schema, Entry>();
+    for (const e of group) if (!uniq.has(e.ir)) uniq.set(e.ir, e);
+    if (uniq.size < 2) continue;
+    const metas: HoistMeta[] = [...uniq.values()].map((e) => ({
+      ir: e.ir, oldChain: "", leaf: "", field: e.field, pretty: "",
+    }));
+    mergeGroup(metas, INLINE_INLINE_POLICY, canonicalFor);
+  }
+  return canonicalFor;
+}
 
 function makeInlineMeta(s: Schema & { k: "object" }): HoistMeta {
   // Synthetic HoistMeta for inline objects (no real path context). Only
@@ -1711,7 +1878,7 @@ function dedupeDecls(decls: DeclEntry[], rootRendered: string): { decls: DeclEnt
 function emit(root: Schema, rootName: string): string {
   // Phase 0: deferred recordification — collapse alias-keyed objects into
   // Record<KeyAlias, V>. Runs once on the streamed IR before any phase.
-  const recordCanonical = applyRecordify(root);
+  const recordCanonical = applyRecordify(root, rootName);
   root = rewriteIR(root, recordCanonical, new Set());
   // Phase 1a: hint-driven IR merging (DEDUP_HINTS).
   const hintCanonical = applyHintsOnIR(root, rootName);
@@ -1719,6 +1886,14 @@ function emit(root: Schema, rootName: string): string {
   // Phase 1b: auto-detect recursive types (same tag literal under same field, ancestor-reachable).
   const autoCanonical = applyAutoRecursive(root, rootName);
   root = rewriteIR(root, autoCanonical, new Set());
+  // Phase 1b'': field-scoped tag consolidation across the whole IR.
+  // Catches non-recursive same-(field,tag,value) shapes that collectHoists
+  // (used by autoRecursive) misses because they're not union variants.
+  const fieldTagCanonical = applyFieldTagConsolidation(root, TAG_CANDIDATES);
+  root = rewriteIR(root, fieldTagCanonical, new Set());
+  // Phase 1b': global tag-value consolidation (MULTI_TAG_HINTS).
+  const tagHintsRes = applyTagHints(root, MULTI_TAG_HINTS);
+  root = rewriteIR(root, tagHintsRes.canonicalFor, new Set());
   // Phase 1c: unify inline tagged objects (those NOT in collectHoists) with
   // existing hoisted IRs sharing the tag, then with each other.
   const inlineRes = applyInlineUnify(root, rootName);
@@ -1733,6 +1908,7 @@ function emit(root: Schema, rootName: string): string {
   const hoistedSet = new Set<Schema>();
   for (const c of inlineRes.newHoists) if (c.k === "object") hoistedSet.add(c);
   for (const c of sameKeysRes.newHoists) if (c.k === "object") hoistedSet.add(c);
+  for (const c of tagHintsRes.newHoists) if (c.k === "object") hoistedSet.add(c);
   // Phase 3: render with IR-ref cache so shared canonical IRs emit once.
   const ctx: EmitCtx = {
     decls: [],
@@ -1740,7 +1916,7 @@ function emit(root: Schema, rootName: string): string {
     aliases: new Set(),
     objCache: new Map(),
     hoistedSet,
-    hoistName: sameKeysRes.hoistNames,
+    hoistName: new Map([...sameKeysRes.hoistNames, ...tagHintsRes.hoistNames]),
   };
   const renderedRaw = render(root, ctx, { old: rootName, pretty: "", field: "" });
   // Phase 3: structural dedupe of identical bodies sharing the same name prefix.
@@ -1763,6 +1939,38 @@ function emit(root: Schema, rootName: string): string {
   );
 }
 
+function expandGlobs(patterns: string[]): string[] {
+  const home = process.env.HOME ?? "~";
+  const out: string[] = [];
+  for (const p of patterns) {
+    const expanded = p.startsWith("~/") ? home + p.slice(1) : p;
+    if (!/[*?[{]/.test(expanded)) {
+      out.push(expanded);
+      continue;
+    }
+    // Split into static prefix + glob suffix.
+    const segs = expanded.split("/");
+    let i = 0;
+    while (i < segs.length && !/[*?[{]/.test(segs[i]!)) i++;
+    const prefix = segs.slice(0, i).join("/");
+    const pattern = segs.slice(i).join("/");
+    const cwd = prefix === "" ? (expanded.startsWith("/") ? "/" : ".") : prefix;
+    // @ts-ignore - Bun global
+    const glob = new Bun.Glob(pattern);
+    const matches: string[] = [];
+    for (const m of glob.scanSync({ cwd, onlyFiles: true })) {
+      matches.push(cwd === "/" ? "/" + m : `${cwd}/${m}`);
+    }
+    if (matches.length === 0) {
+      console.error(`warning: no files matched ${p}`);
+    } else {
+      matches.sort();
+      out.push(...matches);
+    }
+  }
+  return out;
+}
+
 // ---------------- Main ----------------
 
 async function main() {
@@ -1776,7 +1984,12 @@ async function main() {
     const webStream = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
     await ingest(webStream, "<stdin>", state);
   } else {
-    for (const f of args.files) {
+    const files = expandGlobs(args.files);
+    if (files.length === 0) {
+      console.error("no input files");
+      process.exit(2);
+    }
+    for (const f of files) {
       await ingest(openSource(f), f, state);
     }
   }
