@@ -216,23 +216,13 @@ export type EventMsg_1de87ddc = {
   type: "event_msg";
 };
 
-/** response_item.payload -> message.content[] -> input_text */
-export type Content_InputText_2f7513c7 = {
-  text: string;
-  type: "input_text";
-};
-
-/** response_item.payload -> message.content[] -> output_text */
-export type Content_OutputText_39a1d803 = {
-  text: Blob;
-  type: "output_text";
-};
-
 /** response_item.payload -> message */
 export type Payload_Message_cdc77562 = {
-  content: Array<Content_InputText_2f7513c7 | Content_OutputText_39a1d803>;
-  phase?: string;
-  role: "assistant" | "developer" | "user";
+  content: {
+    text: string;
+    type: "input_text";
+  }[];
+  role: "developer" | "user";
   type: "message";
 };
 
@@ -242,6 +232,17 @@ export type Payload_Reasoning_af56dde1 = {
   encrypted_content: Blob;
   summary: never[];
   type: "reasoning";
+};
+
+/** response_item.payload -> message */
+export type Payload_Message_cdc77562_2 = {
+  content: {
+    text: Blob;
+    type: "output_text";
+  }[];
+  phase: string;
+  role: "assistant";
+  type: "message";
 };
 
 /** response_item.payload -> function_call */
@@ -277,72 +278,57 @@ export type Payload_CustomToolCallOutput_44a1c09b = {
 
 /** response_item */
 export type ResponseItem_dabbd39e = {
-  payload: Payload_Message_cdc77562 | Payload_Reasoning_af56dde1 | Payload_FunctionCall_177cb5dd | Payload_FunctionCallOutput_030f1d78 | Payload_CustomToolCall_499c3152 | Payload_CustomToolCallOutput_44a1c09b;
+  payload: Payload_Message_cdc77562 | Payload_Reasoning_af56dde1 | Payload_Message_cdc77562_2 | Payload_FunctionCall_177cb5dd | Payload_FunctionCallOutput_030f1d78 | Payload_CustomToolCall_499c3152 | Payload_CustomToolCallOutput_44a1c09b;
   timestamp: IsoDate;
   type: "response_item";
 };
 
-/** turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> root */
+/**
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> root
+ * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> root
+ */
 export type Value_Root_79526242 = {
   kind: "root";
 };
 
-/** turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> project_roots */
+/**
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> project_roots
+ * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> project_roots
+ */
 export type Value_ProjectRoots_3138f058 = {
   kind: "project_roots";
   subpath?: string;
 };
 
-/** turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> slash_tmp */
-export type Value_SlashTmp_fdc62cc2 = {
-  kind: "slash_tmp";
-};
-
-/** turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> tmpdir */
+/**
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> tmpdir
+ * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> tmpdir
+ */
 export type Value_Tmpdir_1573cb88 = {
   kind: "tmpdir";
 };
 
-/** turn_context.payload.file_system_sandbox_policy.entries[].path -> special */
+/**
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> special
+ * turn_context.payload.permission_profile.file_system.entries[].path -> special
+ */
 export type Path_Special_b5394781 = {
   type: "special";
-  value: Value_Root_79526242 | Value_ProjectRoots_3138f058 | Value_SlashTmp_fdc62cc2 | Value_Tmpdir_1573cb88;
+  value: Value_Root_79526242 | Value_ProjectRoots_3138f058 | Value_SlashTmp_cc501f19 | Value_Tmpdir_1573cb88;
 };
 
-/** turn_context.payload.file_system_sandbox_policy.entries[].path -> path */
-export type Path_Path_c3448875 = {
-  path: Path;
-  type: "path";
-};
-
-/** turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> root */
-export type Value_Root_facdfe37 = {
-  kind: "root";
-};
-
-/** turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> project_roots */
-export type Value_ProjectRoots_516e36a9 = {
-  kind: "project_roots";
-  subpath?: string;
-};
-
-/** turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> slash_tmp */
+/**
+ * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> slash_tmp
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> slash_tmp
+ */
 export type Value_SlashTmp_cc501f19 = {
   kind: "slash_tmp";
 };
 
-/** turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> tmpdir */
-export type Value_Tmpdir_fbe60add = {
-  kind: "tmpdir";
-};
-
-/** turn_context.payload.permission_profile.file_system.entries[].path -> special */
-export type Path_Special_fff42b8a = {
-  type: "special";
-  value: Value_Root_facdfe37 | Value_ProjectRoots_516e36a9 | Value_SlashTmp_cc501f19 | Value_Tmpdir_fbe60add;
-};
-
-/** turn_context.payload.permission_profile.file_system.entries[].path -> path */
+/**
+ * turn_context.payload.permission_profile.file_system.entries[].path -> path
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> path
+ */
 export type Path_Path_0ba5161d = {
   path: Path;
   type: "path";
@@ -366,7 +352,7 @@ export type TurnContext_6ab315d9 = {
     file_system_sandbox_policy: {
       entries: {
         access: string;
-        path: Path_Special_b5394781 | Path_Path_c3448875;
+        path: Path_Special_b5394781 | Path_Path_0ba5161d;
       }[];
       kind: "restricted";
     };
@@ -375,7 +361,7 @@ export type TurnContext_6ab315d9 = {
       file_system: {
         entries: {
           access: string;
-          path: Path_Special_fff42b8a | Path_Path_0ba5161d;
+          path: Path_Special_b5394781 | Path_Path_0ba5161d;
         }[];
         type: "restricted";
       };

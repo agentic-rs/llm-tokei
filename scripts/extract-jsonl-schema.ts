@@ -64,7 +64,8 @@ type Schema =
   | {
       k: "prim";
       types: Set<Prim>;
-      literals?: Set<string>; // literals only for strings
+      literals?: Set<string>; // string literal tag values
+      numLiterals?: Set<number>; // numeric literal tag values
       // String-value aggregates (only meaningful when 'string' is in `types`):
       seenString?: boolean;
       // AND-merged "all observed strings match this alias predicate":
@@ -80,7 +81,15 @@ type Schema =
 
 const NEVER: Schema = { k: "never" };
 
-const TAG_CANDIDATES = ["type", "kind", "tag", "role", "$type", "event", "op"] as const;
+const TAG_CANDIDATES = ["type", "kind", "tag", "role", "$type", "$mid", "event", "op"] as const;
+
+// Dedup hints: [scopePrefix on the legacy old-chain (PascalCase), namePrefix without _hash].
+// First entry: copilot-chat — Children_1 (kind:1) prompt-tsx tree nodes deep under
+// CopilotChat.v -> Variant.metadata.toolCallResults{}.content[] -> $mid:23.value.node.children[].
+const DEDUP_HINTS: readonly [string, string][] = [
+  ["CopilotChat_1_V_Variant_Metadata_ToolCallResults_Value_Content", "Children_1"],
+  ["CopilotChat_1_V_Variant_Metadata_ToolCallResults_Value_Content", "Children_2"],
+];
 
 function isPathLike(key: string): boolean {
   if (!key) return false;
@@ -105,6 +114,7 @@ interface AliasDef {
 }
 
 const ALIASES: AliasDef[] = [
+  { name: "VscodeCallId", predicate: (s) => /^call_[A-Za-z0-9]+__vscode-\d+$/.test(s) },
   { name: "Uuid", predicate: (s) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) },
   { name: "Sha256", predicate: (s) => /^[0-9a-f]{64}$/i.test(s) },
   { name: "Sha1", predicate: (s) => /^[0-9a-f]{40}$/i.test(s) },
@@ -146,11 +156,12 @@ function detectKeyAlias(keys: string[]): string {
 
 function maybeRecordify(o: Schema & { k: "object" }): Schema {
   if (o.props.size < 2) return o;
-  for (const k of o.props.keys()) if (!isPathLike(k)) return o;
+  const keys = [...o.props.keys()];
+  const key = detectKeyAlias(keys);
+  if (key === "string") return o;
   // Collapse: fold all per-key schemas into a single value schema.
   let val: Schema = NEVER;
   for (const { schema } of o.props.values()) val = merge(val, schema);
-  const key = detectKeyAlias([...o.props.keys()]);
   return { k: "record", key, value: val };
 }
 
@@ -173,7 +184,11 @@ function fromValue(v: unknown, isTagField = false): Schema {
     if (isTagField) (s as any).literals = new Set([str]);
     return s;
   }
-  if (t === "number") return { k: "prim", types: new Set(["number"]) };
+  if (t === "number") {
+    const s: Schema = { k: "prim", types: new Set(["number"]) };
+    if (isTagField) (s as any).numLiterals = new Set([v as number]);
+    return s;
+  }
   if (t === "boolean") return { k: "prim", types: new Set(["boolean"]) };
   if (Array.isArray(v)) {
     let item: Schema = NEVER;
@@ -210,8 +225,18 @@ function merge(a: Schema, b: Schema): Schema {
       literals = new Set<string>([...(a.literals ?? []), ...(b.literals ?? [])]);
       if (literals.size > 64) literals = undefined; // bail on cardinality blow-up
     }
+    let numLiterals: Set<number> | undefined;
+    if (a.numLiterals || b.numLiterals) {
+      numLiterals = new Set<number>([...(a.numLiterals ?? []), ...(b.numLiterals ?? [])]);
+      if (numLiterals.size > 64) numLiterals = undefined;
+    }
     const seenString = !!(a.seenString || b.seenString);
-    const out: Schema = { k: "prim", types, ...(literals ? { literals } : {}) };
+    const out: Schema = {
+      k: "prim",
+      types,
+      ...(literals ? { literals } : {}),
+      ...(numLiterals ? { numLiterals } : {}),
+    };
     if (seenString) {
       out.seenString = true;
       // alias only flags: AND across observed string sources only.
@@ -285,25 +310,46 @@ function mergeIntoUnion(u: Schema & { k: "union" }, x: Schema): Schema {
 function compatibleForMerge(a: Schema, b: Schema): boolean {
   if (a.k !== b.k) return false;
   if (a.k === "object" && b.k === "object") {
-    // Same tag value → compatible (same variant).
-    const tagA = pickTagLiteral(a);
-    const tagB = pickTagLiteral(b as typeof a);
-    if (tagA && tagB) return tagA.key === tagB.key && tagA.value === tagB.value;
+    // Use raw literal sets per tag key (regardless of presence): if either side
+    // has a tag literal at any TAG_CANDIDATE key, both sides must agree on it,
+    // otherwise these are different variants and must NOT be merged.
+    for (const key of TAG_CANDIDATES) {
+      const sa = a.props.get(key)?.schema as any;
+      const sb = b.props.get(key)?.schema as any;
+      const litsA: Set<string | number> | undefined =
+        (sa?.literals as Set<string> | undefined) ?? (sa?.numLiterals as Set<number> | undefined);
+      const litsB: Set<string | number> | undefined =
+        (sb?.literals as Set<string> | undefined) ?? (sb?.numLiterals as Set<number> | undefined);
+      if (!litsA && !litsB) continue;
+      // One side has tag literals here, the other doesn't → incompatible.
+      if (!litsA || !litsB) return false;
+      // Both have literal sets → must overlap (i.e., share at least one tag value).
+      let overlap = false;
+      for (const v of litsA) if (litsB.has(v)) { overlap = true; break; }
+      if (!overlap) return false;
+    }
     return true;
   }
   return true;
 }
 
-function pickTagLiteral(o: Schema & { k: "object" }): { key: string; value: string } | null {
+function pickTagLiteral(o: Schema & { k: "object" }): { key: string; value: string | number } | null {
   for (const key of TAG_CANDIDATES) {
     const p = o.props.get(key);
     if (!p || p.present !== o.total) continue;
     if (p.schema.k !== "prim") continue;
     const types = p.schema.types;
-    if (types.size !== 1 || !types.has("string")) continue;
-    const lits = p.schema.literals;
-    if (!lits || lits.size !== 1) continue;
-    return { key, value: [...lits][0]! };
+    if (types.size !== 1) continue;
+    if (types.has("string")) {
+      const lits = p.schema.literals;
+      if (!lits || lits.size !== 1) continue;
+      return { key, value: [...lits][0]! };
+    }
+    if (types.has("number")) {
+      const lits = p.schema.numLiterals;
+      if (!lits || lits.size !== 1) continue;
+      return { key, value: [...lits][0]! };
+    }
   }
   return null;
 }
@@ -313,9 +359,10 @@ function pickTagKey(o: Schema & { k: "object" }): string | null {
     const p = o.props.get(key);
     if (!p || p.present !== o.total) continue;
     if (p.schema.k !== "prim") continue;
-    if (p.schema.types.size !== 1 || !p.schema.types.has("string")) continue;
-    if (!p.schema.literals || p.schema.literals.size === 0) continue;
-    return key;
+    const types = p.schema.types;
+    if (types.size !== 1) continue;
+    if (types.has("string") && p.schema.literals && p.schema.literals.size > 0) return key;
+    if (types.has("number") && p.schema.numLiterals && p.schema.numLiterals.size > 0) return key;
   }
   return null;
 }
@@ -345,8 +392,12 @@ function mergeObjects(
   const keyB = pickTagKey(b);
   if (USER_TAG_KEY || (keyA && keyA === keyB)) {
     const key = USER_TAG_KEY ?? keyA!;
-    const litsA = (a.props.get(key)?.schema as any)?.literals as Set<string> | undefined;
-    const litsB = (b.props.get(key)?.schema as any)?.literals as Set<string> | undefined;
+    const propA = a.props.get(key)?.schema as any;
+    const propB = b.props.get(key)?.schema as any;
+    const litsA: Set<string | number> | undefined =
+      (propA?.literals as Set<string> | undefined) ?? (propA?.numLiterals as Set<number> | undefined);
+    const litsB: Set<string | number> | undefined =
+      (propB?.literals as Set<string> | undefined) ?? (propB?.numLiterals as Set<number> | undefined);
     if (litsA && litsB) {
       // If literal sets are disjoint AND each has 1 value → clear different variants.
       const interSize = [...litsA].filter((x) => litsB.has(x)).length;
@@ -435,10 +486,19 @@ function isSafeIdent(k: string): boolean {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k);
 }
 
+interface DeclEntry {
+  name: string;
+  body: string;
+  doc: string[];
+  oldChain: string;
+  ir: Schema & { k: "object" };
+}
+
 interface EmitCtx {
-  decls: string[];
+  decls: DeclEntry[];
   used: Set<string>;
   aliases: Set<string>; // e.g., "Path", "Blob"
+  objCache: Map<Schema, string>; // IR-ref -> emitted hoisted type name
 }
 
 interface PathCtx {
@@ -468,11 +528,12 @@ function descendField(p: PathCtx, key: string): PathCtx {
   };
 }
 
-function descendVariant(p: PathCtx, tagValue: string): PathCtx {
-  const seg = pascal(tagValue);
+function descendVariant(p: PathCtx, tagValue: string | number): PathCtx {
+  const sv = String(tagValue);
+  const seg = pascal(sv);
   return {
     old: child(p.old, seg),
-    pretty: p.pretty ? `${p.pretty} -> ${tagValue}` : tagValue,
+    pretty: p.pretty ? `${p.pretty} -> ${sv}` : sv,
     field: p.field,
   };
 }
@@ -509,7 +570,8 @@ function variantTypeName(p: PathCtx, leaf: string): string {
   const hash = sha8(child(p.old, leaf));
   const leafSeg = pascal(leaf);
   const fieldSeg = p.field ? pascal(p.field) : "";
-  return fieldSeg ? `${fieldSeg}_${leafSeg}_${hash}` : `${leafSeg}_${hash}`;
+  const raw = fieldSeg ? `${fieldSeg}_${leafSeg}_${hash}` : `${leafSeg}_${hash}`;
+  return /^[0-9]/.test(raw) ? `$${raw}` : raw;
 }
 
 function render(s: Schema, ctx: EmitCtx, p: PathCtx): string {
@@ -521,8 +583,10 @@ function render(s: Schema, ctx: EmitCtx, p: PathCtx): string {
     case "prim": {
       const parts: string[] = [];
       const lits = s.literals;
+      const nlits = s.numLiterals;
       const hasString = s.types.has("string");
-      const onlyStringNonNull = hasString && !s.types.has("number") && !s.types.has("boolean");
+      const hasNumber = s.types.has("number");
+      const onlyStringNonNull = hasString && !hasNumber && !s.types.has("boolean");
       if (hasString && lits && lits.size > 0) {
         for (const l of [...lits].sort()) parts.push(JSON.stringify(l));
       } else if (hasString) {
@@ -545,7 +609,11 @@ function render(s: Schema, ctx: EmitCtx, p: PathCtx): string {
         }
         parts.push(stringRepr);
       }
-      if (s.types.has("number")) parts.push("number");
+      if (hasNumber && nlits && nlits.size > 0) {
+        for (const l of [...nlits].sort((x, y) => x - y)) parts.push(String(l));
+      } else if (hasNumber) {
+        parts.push("number");
+      }
       if (s.types.has("boolean")) parts.push("boolean");
       if (s.types.has("null")) parts.push("null");
       return parts.length ? parts.join(" | ") : "never";
@@ -563,17 +631,26 @@ function render(s: Schema, ctx: EmitCtx, p: PathCtx): string {
       const parts: string[] = [];
       for (const v of s.variants) {
         if (v.k === "object") {
+          const cached = ctx.objCache.get(v);
+          if (cached) {
+            parts.push(cached);
+            continue;
+          }
           const tag = pickTagLiteral(v);
           const sub = tag ? descendVariant(p, tag.value) : descendVariantFallback(p);
-          const baseName = tag ? variantTypeName(p, tag.value) : variantTypeName(p, "Variant");
+          const baseName = tag ? variantTypeName(p, String(tag.value)) : variantTypeName(p, "Variant");
           const variantName = uniqueName(ctx, baseName);
+          ctx.objCache.set(v, variantName);
           emitNamedObject(v, ctx, variantName, sub);
           parts.push(variantName);
         } else {
           parts.push(render(v, ctx, descendVariantFallback(p)));
         }
       }
-      return parts.join(" | ");
+      // Dedupe by reference (canonical-merged IRs may appear multiple times).
+      const seen = new Set<string>();
+      const uniq = parts.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
+      return uniq.join(" | ");
     }
     case "object": {
       return renderObjectInline(s, ctx, p);
@@ -582,7 +659,10 @@ function render(s: Schema, ctx: EmitCtx, p: PathCtx): string {
 }
 
 function needsParens(s: Schema): boolean {
-  return s.k === "union" || (s.k === "prim" && (s.types.size + (s.literals?.size ?? 0)) > 1);
+  return (
+    s.k === "union" ||
+    (s.k === "prim" && (s.types.size + (s.literals?.size ?? 0) + (s.numLiterals?.size ?? 0)) > 1)
+  );
 }
 
 function renderObjectInline(o: Schema & { k: "object" }, ctx: EmitCtx, p: PathCtx): string {
@@ -602,17 +682,407 @@ function renderObjectInline(o: Schema & { k: "object" }, ctx: EmitCtx, p: PathCt
 
 function emitNamedObject(o: Schema & { k: "object" }, ctx: EmitCtx, name: string, p: PathCtx): void {
   const body = renderObjectInline(o, ctx, p);
-  const doc = p.pretty ? `/** ${p.pretty} */\n` : "";
-  ctx.decls.push(`${doc}export type ${name} = ${body};`);
+  const doc = p.pretty ? [p.pretty] : [];
+  // oldChain is the PARENT old-chain, used for hint matching.
+  ctx.decls.push({ name, body, doc, oldChain: p.old, ir: o });
 }
 
 function indent(s: string): string {
   return s.replace(/\n/g, "\n  ");
 }
 
+function parseDecl(decl: string): { doc: string[]; name: string; body: string } | null {
+  // doc may be either single-line `/** path */` or multi-line `/**\n * a\n * b\n */`.
+  const m = decl.match(/^(?:(\/\*\*[\s\S]*?\*\/)\n)?export type ([\w$]+) = ([\s\S]+);\s*$/);
+  if (!m) return null;
+  const [, rawDoc, name, body] = m;
+  let doc: string[] = [];
+  if (rawDoc) {
+    const inner = rawDoc.replace(/^\/\*\*\s*/, "").replace(/\s*\*\/$/, "");
+    if (inner.includes("\n")) {
+      for (const line of inner.split("\n")) {
+        const t = line.replace(/^\s*\*\s?/, "").trim();
+        if (t) doc.push(t);
+      }
+    } else {
+      const t = inner.trim();
+      if (t) doc.push(t);
+    }
+  }
+  return { doc, name: name!, body: body! };
+}
+
+function formatDoc(paths: string[]): string {
+  if (paths.length === 0) return "";
+  if (paths.length === 1) return `/** ${paths[0]} */\n`;
+  return `/**\n${paths.map((p) => ` * ${p}`).join("\n")}\n */\n`;
+}
+
+function substAll(s: string, rename: Map<string, string>): string {
+  let out = s;
+  for (const [from, to] of rename) {
+    if (from === to) continue;
+    out = out.replace(new RegExp(`(?<!\\w)${from.replace(/\$/g, "\\$")}(?!\\w)`, "g"), to);
+  }
+  return out;
+}
+
+interface HoistMeta {
+  ir: Schema & { k: "object" };
+  oldChain: string; // == sub.old at the point emitNamedObject would store it
+  leaf: string; // tag string or "Variant"
+  field: string; // p.field at parent
+  pretty: string;
+}
+
+function collectHoists(s: Schema, p: PathCtx, out: HoistMeta[], seen: Set<Schema>): void {
+  if (seen.has(s)) return;
+  seen.add(s);
+  switch (s.k) {
+    case "array":
+      collectHoists(s.item, descendArray(p), out, seen);
+      return;
+    case "record":
+      collectHoists(s.value, descendRecord(p), out, seen);
+      return;
+    case "object":
+      for (const [k, { schema }] of s.props) collectHoists(schema, descendField(p, k), out, seen);
+      return;
+    case "union":
+      for (const v of s.variants) {
+        if (v.k === "object") {
+          const tag = pickTagLiteral(v);
+          const sub = tag ? descendVariant(p, tag.value) : descendVariantFallback(p);
+          const leaf = tag ? String(tag.value) : "Variant";
+          out.push({ ir: v, oldChain: sub.old, leaf, field: p.field, pretty: sub.pretty });
+          for (const [k, { schema }] of v.props) collectHoists(schema, descendField(sub, k), out, seen);
+        } else {
+          collectHoists(v, descendVariantFallback(p), out, seen);
+        }
+      }
+      return;
+  }
+}
+
+function namePrefixOf(h: HoistMeta): string {
+  const fieldSeg = h.field ? pascal(h.field) : "";
+  const leafSeg = pascal(h.leaf);
+  const raw = fieldSeg ? `${fieldSeg}_${leafSeg}` : leafSeg;
+  return /^[0-9]/.test(raw) ? `$${raw}` : raw;
+}
+
+function applyHintsOnIR(root: Schema, rootName: string): Map<Schema, Schema> {
+  const hoists: HoistMeta[] = [];
+  collectHoists(root, { old: rootName, pretty: "", field: "" }, hoists, new Set());
+
+  const canonicalFor = new Map<Schema, Schema>();
+
+  for (const [scope, namePrefix] of DEDUP_HINTS) {
+    const candidates = hoists.filter((h) => h.oldChain.startsWith(scope) && namePrefixOf(h) === namePrefix);
+    if (candidates.length < 2) continue;
+
+    // Adjacency: edge iff schemas share ≥1 prop name.
+    const n = candidates.length;
+    const adj: Set<number>[] = Array.from({ length: n }, () => new Set());
+    for (let a = 0; a < n; a++) {
+      const ka = new Set(candidates[a]!.ir.props.keys());
+      for (let b = a + 1; b < n; b++) {
+        let shared = false;
+        for (const k of candidates[b]!.ir.props.keys()) if (ka.has(k)) { shared = true; break; }
+        if (shared) {
+          adj[a]!.add(b);
+          adj[b]!.add(a);
+        }
+      }
+    }
+    const seen = new Set<number>();
+    for (let root = 0; root < n; root++) {
+      if (seen.has(root)) continue;
+      const comp: number[] = [];
+      const stack = [root];
+      while (stack.length) {
+        const x = stack.pop()!;
+        if (seen.has(x)) continue;
+        seen.add(x);
+        comp.push(x);
+        for (const y of adj[x]!) if (!seen.has(y)) stack.push(y);
+      }
+      if (comp.length < 2) continue;
+      comp.sort((x, y) => {
+        const dx = candidates[x]!, dy = candidates[y]!;
+        if (dx.oldChain.length !== dy.oldChain.length) return dx.oldChain.length - dy.oldChain.length;
+        return dx.pretty < dy.pretty ? -1 : dx.pretty > dy.pretty ? 1 : 0;
+      });
+      const canon = candidates[comp[0]!]!;
+      // Merge IRs into the canonical IR (mutates canon.ir.props by reassign).
+      let mergedIr: Schema = canon.ir;
+      for (let k = 1; k < comp.length; k++) mergedIr = merge(mergedIr, candidates[comp[k]!]!.ir);
+      if (mergedIr.k !== "object") continue;
+      // Mutate canon.ir to take the merged props/total so its identity remains stable.
+      (canon.ir as any).props = mergedIr.props;
+      (canon.ir as any).total = mergedIr.total;
+      // Map non-canonicals to canonical IR.
+      for (let k = 1; k < comp.length; k++) {
+        canonicalFor.set(candidates[comp[k]!]!.ir, canon.ir);
+      }
+      // Cycle detection inside canon.
+      cycleSplice(canon.ir, canonicalFor);
+    }
+  }
+  return canonicalFor;
+}
+
+// Walk `canon`'s substructure and substitute any nested object IR sharing the same
+// (tagKey, tagValue) with canon ref. Mutates union.variants in place and updates
+// `canonicalFor` so other tree references rewrite to canon too.
+function cycleSplice(canon: Schema & { k: "object" }, canonicalFor: Map<Schema, Schema>): void {
+  const canonTag = pickTagLiteral(canon);
+  if (!canonTag) return;
+  const stack: Schema[] = [canon];
+  const visited = new Set<Schema>([canon]);
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (cur.k === "object") {
+      for (const p of cur.props.values()) {
+        if (visited.has(p.schema)) continue;
+        visited.add(p.schema);
+        stack.push(p.schema);
+      }
+    } else if (cur.k === "array") {
+      if (!visited.has(cur.item)) { visited.add(cur.item); stack.push(cur.item); }
+    } else if (cur.k === "record") {
+      if (!visited.has(cur.value)) { visited.add(cur.value); stack.push(cur.value); }
+    } else if (cur.k === "union") {
+      for (let vi = 0; vi < cur.variants.length; vi++) {
+        const v = cur.variants[vi]!;
+        if (v.k === "object" && v !== canon) {
+          const tag = pickTagLiteral(v);
+          if (tag && tag.key === canonTag.key && tag.value === canonTag.value) {
+            canonicalFor.set(v, canon);
+            cur.variants[vi] = canon;
+            continue;
+          }
+        }
+        if (!visited.has(v)) { visited.add(v); stack.push(v); }
+      }
+    }
+  }
+}
+
+// Auto-detect recursive types: any object IR with a tag literal that contains
+// (transitively) another object IR with the same tag literal under the same field
+// is treated as one recursive type. Operates after hint merge so it sees its IR tree.
+function applyAutoRecursive(root: Schema, rootName: string): Map<Schema, Schema> {
+  const hoists: HoistMeta[] = [];
+  collectHoists(root, { old: rootName, pretty: "", field: "" }, hoists, new Set());
+
+  const canonicalFor = new Map<Schema, Schema>();
+
+  // Bucket by (field, tagKey, tagValue).
+  const buckets = new Map<string, HoistMeta[]>();
+  for (const h of hoists) {
+    const tag = pickTagLiteral(h.ir);
+    if (!tag) continue;
+    const key = `${h.field}\x00${tag.key}\x00${String(tag.value)}`;
+    const arr = buckets.get(key) ?? [];
+    arr.push(h);
+    buckets.set(key, arr);
+  }
+
+  for (const [, group] of buckets) {
+    if (group.length < 2) continue;
+
+    // Build directed reachability: edge a→b if b.ir is reachable from a.ir's substructure.
+    const n = group.length;
+    const reach: boolean[][] = Array.from({ length: n }, () => Array(n).fill(false));
+    for (let i = 0; i < n; i++) {
+      const targets = new Set<Schema>();
+      for (let j = 0; j < n; j++) if (i !== j) targets.add(group[j]!.ir);
+      if (targets.size === 0) continue;
+      const found = new Set<Schema>();
+      const stack: Schema[] = [];
+      const seen = new Set<Schema>([group[i]!.ir]);
+      // Seed children of i.ir (don't count i itself).
+      pushChildren(group[i]!.ir, stack, seen);
+      while (stack.length) {
+        const cur = stack.pop()!;
+        if (targets.has(cur)) found.add(cur);
+        pushChildren(cur, stack, seen);
+      }
+      for (let j = 0; j < n; j++) if (i !== j && found.has(group[j]!.ir)) reach[i]![j] = true;
+    }
+
+    // Undirected reachability closure → connected components.
+    const adj: Set<number>[] = Array.from({ length: n }, () => new Set());
+    for (let i = 0; i < n; i++)
+      for (let j = i + 1; j < n; j++)
+        if (reach[i]![j] || reach[j]![i]) {
+          adj[i]!.add(j);
+          adj[j]!.add(i);
+        }
+    const seen = new Set<number>();
+    for (let r = 0; r < n; r++) {
+      if (seen.has(r)) continue;
+      const comp: number[] = [];
+      const stack = [r];
+      while (stack.length) {
+        const x = stack.pop()!;
+        if (seen.has(x)) continue;
+        seen.add(x);
+        comp.push(x);
+        for (const y of adj[x]!) if (!seen.has(y)) stack.push(y);
+      }
+      if (comp.length < 2) continue;
+      // Canonical = shortest oldChain.
+      comp.sort((x, y) => {
+        const dx = group[x]!, dy = group[y]!;
+        if (dx.oldChain.length !== dy.oldChain.length) return dx.oldChain.length - dy.oldChain.length;
+        return dx.pretty < dy.pretty ? -1 : dx.pretty > dy.pretty ? 1 : 0;
+      });
+      const canon = group[comp[0]!]!;
+      let mergedIr: Schema = canon.ir;
+      for (let k = 1; k < comp.length; k++) mergedIr = merge(mergedIr, group[comp[k]!]!.ir);
+      if (mergedIr.k !== "object") continue;
+      (canon.ir as any).props = mergedIr.props;
+      (canon.ir as any).total = mergedIr.total;
+      for (let k = 1; k < comp.length; k++) {
+        canonicalFor.set(group[comp[k]!]!.ir, canon.ir);
+      }
+      cycleSplice(canon.ir, canonicalFor);
+    }
+  }
+  return canonicalFor;
+}
+
+function pushChildren(s: Schema, stack: Schema[], seen: Set<Schema>): void {
+  switch (s.k) {
+    case "object":
+      for (const p of s.props.values()) {
+        if (seen.has(p.schema)) continue;
+        seen.add(p.schema);
+        stack.push(p.schema);
+      }
+      return;
+    case "array":
+      if (!seen.has(s.item)) { seen.add(s.item); stack.push(s.item); }
+      return;
+    case "record":
+      if (!seen.has(s.value)) { seen.add(s.value); stack.push(s.value); }
+      return;
+    case "union":
+      for (const v of s.variants) {
+        if (seen.has(v)) continue;
+        seen.add(v);
+        stack.push(v);
+      }
+      return;
+  }
+}
+
+function rewriteIR(s: Schema, canonicalFor: Map<Schema, Schema>, seen: Set<Schema>): Schema {
+  const replaced = (canonicalFor.get(s) as Schema | undefined) ?? s;
+  if (seen.has(replaced)) return replaced;
+  seen.add(replaced);
+  switch (replaced.k) {
+    case "array":
+      replaced.item = rewriteIR(replaced.item, canonicalFor, seen);
+      return replaced;
+    case "record":
+      replaced.value = rewriteIR(replaced.value, canonicalFor, seen);
+      return replaced;
+    case "object":
+      for (const p of replaced.props.values()) p.schema = rewriteIR(p.schema, canonicalFor, seen);
+      return replaced;
+    case "union": {
+      const newVariants: Schema[] = [];
+      const refSeen = new Set<Schema>();
+      for (const v of replaced.variants) {
+        const w = rewriteIR(v, canonicalFor, seen);
+        if (refSeen.has(w)) continue;
+        refSeen.add(w);
+        newVariants.push(w);
+      }
+      replaced.variants = newVariants;
+      return replaced;
+    }
+    default:
+      return replaced;
+  }
+}
+
+function dedupeDecls(decls: DeclEntry[], rootRendered: string): { decls: DeclEntry[]; root: string } {
+  let parsed = decls.map((d) => ({ name: d.name, body: d.body, doc: [...d.doc] }));
+
+  while (true) {
+    type Item = (typeof parsed)[number] & { prefix: string; hash: string };
+    const items: Item[] = parsed.map((d) => {
+      const m = d.name.match(/^(.*)_([0-9a-f]{8})$/);
+      const prefix = m ? m[1]! : d.name;
+      const hash = m ? m[2]! : "";
+      return { ...d, prefix, hash };
+    });
+
+    const groups = new Map<string, Item[]>();
+    for (const it of items) {
+      if (!it.hash) continue;
+      const key = `${it.prefix}\x00${it.body}`;
+      const arr = groups.get(key) ?? [];
+      arr.push(it);
+      groups.set(key, arr);
+    }
+
+    const rename = new Map<string, string>();
+    const mergedDocs = new Map<string, string[]>();
+    let changed = false;
+    for (const [, group] of groups) {
+      if (group.length < 2) continue;
+      changed = true;
+      group.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
+      const canon = group[0]!;
+      const allDocs: string[] = [];
+      for (const m of group) for (const p of m.doc) if (!allDocs.includes(p)) allDocs.push(p);
+      mergedDocs.set(canon.name, allDocs);
+      for (let i = 1; i < group.length; i++) rename.set(group[i]!.name, canon.name);
+    }
+    if (!changed) {
+      const out: DeclEntry[] = parsed.map((p) => {
+        const orig = decls.find((d) => d.name === p.name);
+        return {
+          name: p.name,
+          body: p.body,
+          doc: p.doc,
+          oldChain: orig?.oldChain ?? "",
+          ir: orig?.ir ?? ({ k: "object", total: 0, props: new Map() } as any),
+        };
+      });
+      return { decls: out, root: rootRendered };
+    }
+
+    const next: typeof parsed = [];
+    for (const d of parsed) {
+      if (rename.has(d.name)) continue;
+      const newDoc = mergedDocs.get(d.name) ?? d.doc;
+      next.push({ name: d.name, body: substAll(d.body, rename), doc: newDoc });
+    }
+    parsed = next;
+    rootRendered = substAll(rootRendered, rename);
+  }
+}
+
 function emit(root: Schema, rootName: string): string {
-  const ctx: EmitCtx = { decls: [], used: new Set([rootName]), aliases: new Set() };
-  const rendered = render(root, ctx, { old: rootName, pretty: "", field: "" });
+  // Phase 1a: hint-driven IR merging (DEDUP_HINTS).
+  const hintCanonical = applyHintsOnIR(root, rootName);
+  root = rewriteIR(root, hintCanonical, new Set());
+  // Phase 1b: auto-detect recursive types (same tag literal under same field, ancestor-reachable).
+  const autoCanonical = applyAutoRecursive(root, rootName);
+  root = rewriteIR(root, autoCanonical, new Set());
+  // Phase 2: render with IR-ref cache so shared canonical IRs emit once.
+  const ctx: EmitCtx = { decls: [], used: new Set([rootName]), aliases: new Set(), objCache: new Map() };
+  const renderedRaw = render(root, ctx, { old: rootName, pretty: "", field: "" });
+  // Phase 3: structural dedupe of identical bodies sharing the same name prefix.
+  const afterDedup = dedupeDecls(ctx.decls, renderedRaw);
+  const renderedFinal = afterDedup.root;
+  const declStrings = afterDedup.decls.map((d) => `${formatDoc(d.doc)}export type ${d.name} = ${d.body};`);
   const header = `// AUTO-GENERATED by scripts/extract-jsonl-schema.ts — do not edit by hand.\n`;
   const aliasDecls: string[] = [];
   for (const def of ALIASES) {
@@ -623,9 +1093,9 @@ function emit(root: Schema, rootName: string): string {
   return (
     header +
     aliasBlock +
-    ctx.decls.join("\n\n") +
-    (ctx.decls.length ? "\n\n" : "") +
-    `export type ${rootName} = ${rendered};\n`
+    declStrings.join("\n\n") +
+    (declStrings.length ? "\n\n" : "") +
+    `export type ${rootName} = ${renderedFinal};\n`
   );
 }
 
