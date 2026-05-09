@@ -54,7 +54,11 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
         a.input.saturating_sub(a.cache_read).saturating_sub(a.cache_write)
       }
     } else {
-      if opts.bytes { a.input_bytes } else { a.input }
+      if opts.bytes {
+        a.input_bytes
+      } else {
+        a.input
+      }
     };
     row.push(Col::num(&fmt_est_avg(
       shown_input,

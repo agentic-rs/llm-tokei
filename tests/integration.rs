@@ -261,9 +261,12 @@ fn bytes_mode_switches_input_output_units_only() {
     .args(base_args)
     .output()
     .expect("run llm-tokei token mode");
-  assert!(token_out.status.success(), "stderr: {}", String::from_utf8_lossy(&token_out.stderr));
-  let token_v: serde_json::Value =
-    serde_json::from_slice(&token_out.stdout).expect("valid json in token mode");
+  assert!(
+    token_out.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&token_out.stderr)
+  );
+  let token_v: serde_json::Value = serde_json::from_slice(&token_out.stdout).expect("valid json in token mode");
   let token_row = token_v
     .as_array()
     .unwrap()
@@ -276,9 +279,12 @@ fn bytes_mode_switches_input_output_units_only() {
     .arg("--bytes")
     .output()
     .expect("run llm-tokei bytes mode");
-  assert!(bytes_out.status.success(), "stderr: {}", String::from_utf8_lossy(&bytes_out.stderr));
-  let bytes_v: serde_json::Value =
-    serde_json::from_slice(&bytes_out.stdout).expect("valid json in bytes mode");
+  assert!(
+    bytes_out.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&bytes_out.stderr)
+  );
+  let bytes_v: serde_json::Value = serde_json::from_slice(&bytes_out.stdout).expect("valid json in bytes mode");
   let bytes_row = bytes_v
     .as_array()
     .unwrap()
