@@ -56,17 +56,14 @@ export type Response_ProgressTaskSerialized_f7bc608c = {
   progress: never[];
 };
 
-/** 0.v.requests[].response[] -> thinking.metadata -> Variant */
-export type Metadata_Type_8ea244cb = {
-  stopReason: string;
-  vscodeReasoningDone: boolean;
-};
-
 /** 0.v.requests[].response[] -> thinking */
 export type Response_Thinking_8de6614a = {
   id: string;
   kind: "thinking";
-  metadata?: Metadata_Type_8ea244cb;
+  metadata?: {
+    stopReason: string;
+    vscodeReasoningDone: boolean;
+  };
   value: never[] | string;
 };
 
@@ -396,41 +393,21 @@ export type $1_a2c6e3e4 = {
   v: V_Variant_9dcab11c | never[] | string | number | boolean;
 };
 
-/** 2.v[] -> Variant */
-export type V_Variant_ca258acf = {
-  baseUri?: BaseUri_1_6148a1b9;
-  done?: boolean;
-  edits?: {
-    range: {
-      endColumn: number;
-      endLineNumber: number;
-      startColumn: number;
-      startLineNumber: number;
-    };
-    text: Path;
-  }[][];
+/** 2.v[] -> toolInvocationSerialized */
+export type V_ToolInvocationSerialized_d70cc2ca = {
   generatedTitle?: string;
-  id?: string;
-  invocationMessage?: InvocationMessage_Type_d84d1caa | string;
-  isComplete?: boolean;
+  invocationMessage: InvocationMessage_Type_d84d1caa | string;
+  isComplete: boolean;
   isConfirmed?: {
     type: 1;
   };
-  isEdit?: boolean;
-  kind?: "codeblockUri" | "textEditGroup" | "thinking" | "toolInvocationSerialized" | "undoStop";
-  metadata?: Metadata_Type_8ea244cb;
+  kind: "toolInvocationSerialized";
   pastTenseMessage?: InvocationMessage_Type_d84d1caa;
   presentation?: string;
   resultDetails?: never[];
-  source?: Source_Internal_cd45aa03;
-  supportAlertSyntax?: boolean;
-  supportHtml?: boolean;
-  supportThemeIcons?: boolean;
-  toolCallId?: string;
-  toolId?: string;
-  uri?: BaseUri_1_6148a1b9;
-  uris?: Record<string, unknown>;
-  value?: string;
+  source: Source_Internal_cd45aa03;
+  toolCallId: string;
+  toolId: string;
 };
 
 /** 2.v[] -> thinking */
@@ -438,7 +415,10 @@ export type V_Thinking_0d8c201c = {
   generatedTitle?: string;
   id: string;
   kind: "thinking";
-  metadata?: Metadata_Type_8ea244cb;
+  metadata?: {
+    stopReason: string;
+    vscodeReasoningDone: boolean;
+  };
   value: never[] | string;
 };
 
@@ -458,7 +438,7 @@ export type Response_ToolInvocationSerialized_f9d74c88 = {
 };
 
 /** 2.v[] -> Variant */
-export type V_Variant_ca258acf_2 = {
+export type V_Variant_ca258acf = {
   agent?: {
     description: string;
     disambiguation: never[];
@@ -536,12 +516,41 @@ export type V_InlineReference_3f1ce092 = {
   name?: string;
 };
 
+/** 2.v[] -> undoStop */
+export type V_UndoStop_d2a847c5 = {
+  id: Uuid;
+  kind: "undoStop";
+};
+
+/** 2.v[] -> codeblockUri */
+export type V_CodeblockUri_d78e5a97 = {
+  isEdit: boolean;
+  kind: "codeblockUri";
+  uri: BaseUri_1_6148a1b9;
+};
+
+/** 2.v[] -> textEditGroup */
+export type V_TextEditGroup_f858d8c6 = {
+  done: boolean;
+  edits: {
+    range: {
+      endColumn: number;
+      endLineNumber: number;
+      startColumn: number;
+      startLineNumber: number;
+    };
+    text: Path;
+  }[][];
+  kind: "textEditGroup";
+  uri: BaseUri_1_6148a1b9;
+};
+
 /** 2 */
 export type $2_3da03859 = {
   i?: number;
   k: Array<string | number>;
   kind: 2;
-  v: Array<V_Variant_ca258acf | V_Thinking_0d8c201c | V_Variant_ca258acf_2 | V_InlineReference_3f1ce092>;
+  v: Array<V_ToolInvocationSerialized_d70cc2ca | V_Thinking_0d8c201c | V_Variant_ca258acf | V_InlineReference_3f1ce092 | V_UndoStop_d2a847c5 | V_CodeblockUri_d78e5a97 | V_TextEditGroup_f858d8c6>;
 };
 
 export type CopilotChat = $0_801eaa31 | $1_a2c6e3e4 | $2_3da03859;

@@ -216,13 +216,23 @@ export type EventMsg_0bc1a1a1 = {
   type: "event_msg";
 };
 
+/** response_item.payload -> message.content[] -> input_text */
+export type Content_InputText_ccb8ea4f = {
+  text: Path;
+  type: "input_text";
+};
+
 /** response_item.payload -> message */
 export type Payload_Message_81e18e21 = {
-  content: {
-    text: string;
-    type: "input_text";
-  }[];
-  role: "developer" | "user";
+  content: Content_InputText_ccb8ea4f[];
+  role: "developer";
+  type: "message";
+};
+
+/** response_item.payload -> message */
+export type Payload_Message_81e18e21_2 = {
+  content: Content_InputText_ccb8ea4f[];
+  role: "user";
   type: "message";
 };
 
@@ -235,7 +245,7 @@ export type Payload_Reasoning_82ea41c5 = {
 };
 
 /** response_item.payload -> message */
-export type Payload_Message_81e18e21_2 = {
+export type Payload_Message_81e18e21_3 = {
   content: {
     text: Blob;
     type: "output_text";
@@ -278,7 +288,7 @@ export type Payload_CustomToolCallOutput_e3c1bb6b = {
 
 /** response_item */
 export type ResponseItem_0218eace = {
-  payload: Payload_Message_81e18e21 | Payload_Reasoning_82ea41c5 | Payload_Message_81e18e21_2 | Payload_FunctionCall_2fb2ebf2 | Payload_FunctionCallOutput_ee54e611 | Payload_CustomToolCall_fd33fb92 | Payload_CustomToolCallOutput_e3c1bb6b;
+  payload: Payload_Message_81e18e21 | Payload_Message_81e18e21_2 | Payload_Reasoning_82ea41c5 | Payload_Message_81e18e21_3 | Payload_FunctionCall_2fb2ebf2 | Payload_FunctionCallOutput_ee54e611 | Payload_CustomToolCall_fd33fb92 | Payload_CustomToolCallOutput_e3c1bb6b;
   timestamp: IsoDate;
   type: "response_item";
 };

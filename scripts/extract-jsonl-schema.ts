@@ -273,6 +273,7 @@ function merge(a: Schema, b: Schema): Schema {
   if (b.k === "record" && a.k === "object") return mergeRecordWithObject(b, a);
 
   if (a.k === "object" && b.k === "object") {
+    if (!compatibleForMerge(a, b)) return { k: "union", variants: [a, b] };
     return mergeObjects(a, b);
   }
 
