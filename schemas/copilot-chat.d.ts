@@ -6,6 +6,37 @@ export type Url = string;
 export type Path = string;
 export type Blob = string;
 
+/** 0.v.inputState.selectedModel.metadata.extension -> Variant */
+export type ExtensionId_Type_5b6f8a91 = {
+  _lower: string;
+  value: string;
+};
+
+/** 0.v.requests[].message.parts[] -> text */
+export type Parts_Text_587c1dc1 = {
+  editorRange: {
+    endColumn: number;
+    endLineNumber: number;
+    startColumn: number;
+    startLineNumber: number;
+  };
+  kind: "text";
+  range: {
+    endExclusive: number;
+    start: number;
+  };
+  text: Path;
+};
+
+/** 0.v.requests[].modeInfo -> agent */
+export type ModeInfo_Agent_b665cdab = {
+  isBuiltin: boolean;
+  kind: "agent";
+  modeId: string;
+  modeName: string;
+  permissionLevel: string;
+};
+
 /**
  * 0.v.requests[].response[] -> mcpServersStarting
  * 2.v[] -> Variant.response[] -> mcpServersStarting
@@ -25,25 +56,34 @@ export type Response_ProgressTaskSerialized_f7bc608c = {
   progress: never[];
 };
 
+/** 0.v.requests[].response[] -> thinking.metadata -> Variant */
+export type Metadata_Type_8ea244cb = {
+  stopReason: string;
+  vscodeReasoningDone: boolean;
+};
+
 /** 0.v.requests[].response[] -> thinking */
 export type Response_Thinking_8de6614a = {
   id: string;
   kind: "thinking";
-  metadata?: {
-    stopReason: string;
-    vscodeReasoningDone: boolean;
-  };
+  metadata?: Metadata_Type_8ea244cb;
   value: never[] | string;
+};
+
+/** 0.v.requests[].response[] -> Variant.baseUri -> 1 */
+export type BaseUri_1_6148a1b9 = {
+  $mid: 1;
+  _sep?: number;
+  authority: string;
+  external?: Url;
+  fsPath?: Path;
+  path: Path;
+  scheme: string;
 };
 
 /** 0.v.requests[].response[] -> Variant */
 export type Response_Variant_b9ca791d = {
-  baseUri: {
-    $mid: 1;
-    authority: string;
-    path: Path;
-    scheme: string;
-  };
+  baseUri: BaseUri_1_6148a1b9;
   supportHtml: boolean;
   supportThemeIcons: boolean;
   value: string;
@@ -51,51 +91,35 @@ export type Response_Variant_b9ca791d = {
 
 /** 0.v.requests[].response[] -> inlineReference */
 export type Response_InlineReference_bb5730f5 = {
-  inlineReference: {
-    $mid: 1;
-    authority: string;
-    external: Url;
-    path: Path;
-    scheme: string;
-  };
+  inlineReference: BaseUri_1_6148a1b9;
   kind: "inlineReference";
+};
+
+/** 0.v.requests[].response[] -> toolInvocationSerialized.invocationMessage -> Variant */
+export type InvocationMessage_Type_d84d1caa = {
+  supportAlertSyntax: boolean;
+  supportHtml: boolean;
+  supportThemeIcons: boolean;
+  uris: Record<Url, BaseUri_1_6148a1b9>;
+  value: Path;
+};
+
+/** 0.v.requests[].response[] -> toolInvocationSerialized.source -> internal */
+export type Source_Internal_cd45aa03 = {
+  label: string;
+  type: "internal";
 };
 
 /** 0.v.requests[].response[] -> toolInvocationSerialized */
 export type Response_ToolInvocationSerialized_9634f614 = {
-  invocationMessage: {
-    supportAlertSyntax: boolean;
-    supportHtml: boolean;
-    supportThemeIcons: boolean;
-    uris: Record<Url, {
-      $mid: 1;
-      authority: string;
-      path: Path;
-      scheme: string;
-    }>;
-    value: Path;
-  };
+  invocationMessage: InvocationMessage_Type_d84d1caa;
   isComplete: boolean;
   isConfirmed: {
     type: 1;
   };
   kind: "toolInvocationSerialized";
-  pastTenseMessage: {
-    supportAlertSyntax: boolean;
-    supportHtml: boolean;
-    supportThemeIcons: boolean;
-    uris: Record<Url, {
-      $mid: 1;
-      authority: string;
-      path: Path;
-      scheme: string;
-    }>;
-    value: Path;
-  };
-  source: {
-    label: string;
-    type: "internal";
-  };
+  pastTenseMessage: InvocationMessage_Type_d84d1caa;
+  source: Source_Internal_cd45aa03;
   toolCallId: string;
   toolId: string;
 };
@@ -144,10 +168,7 @@ export type $0_801eaa31 = {
               };
             };
           };
-          extension: {
-            _lower: string;
-            value: string;
-          };
+          extension: ExtensionId_Type_5b6f8a91;
           family: string;
           id: string;
           isDefaultForLocation: {
@@ -188,10 +209,7 @@ export type $0_801eaa31 = {
         description: string;
         disambiguation: never[];
         extensionDisplayName: string;
-        extensionId: {
-          _lower: string;
-          value: string;
-        };
+        extensionId: ExtensionId_Type_5b6f8a91;
         extensionPublisherId: string;
         extensionVersion: Semver;
         fullName: string;
@@ -226,29 +244,10 @@ export type $0_801eaa31 = {
       completionTokens: number;
       contentReferences: never[];
       message: {
-        parts: {
-          editorRange: {
-            endColumn: number;
-            endLineNumber: number;
-            startColumn: number;
-            startLineNumber: number;
-          };
-          kind: "text";
-          range: {
-            endExclusive: number;
-            start: number;
-          };
-          text: Path;
-        }[];
+        parts: Parts_Text_587c1dc1[];
         text: Path;
       };
-      modeInfo: {
-        isBuiltin: boolean;
-        kind: "agent";
-        modeId: string;
-        modeName: string;
-        permissionLevel: string;
-      };
+      modeInfo: ModeInfo_Agent_b665cdab;
       modelId: Path;
       modelState: {
         value: number;
@@ -300,12 +299,7 @@ export type Children_2_55534c6b = {
   lineBreakBefore: boolean;
   priority: number;
   references?: {
-    anchor: {
-      $mid: 1;
-      authority: string;
-      path: Path;
-      scheme: string;
-    };
+    anchor: BaseUri_1_6148a1b9;
     options: {
       isFromTool: boolean;
     };
@@ -402,28 +396,9 @@ export type $1_a2c6e3e4 = {
   v: V_Variant_9dcab11c | never[] | string | number | boolean;
 };
 
-/** 2.v[] -> Variant.invocationMessage -> Variant */
-export type InvocationMessage_Variant_f69ab120 = {
-  supportAlertSyntax: boolean;
-  supportHtml: boolean;
-  supportThemeIcons: boolean;
-  uris: Record<Url, {
-    $mid: 1;
-    authority: string;
-    path: Path;
-    scheme: string;
-  }>;
-  value: string;
-};
-
 /** 2.v[] -> Variant */
 export type V_Variant_ca258acf = {
-  baseUri?: {
-    $mid: 1;
-    authority: string;
-    path: Path;
-    scheme: string;
-  };
+  baseUri?: BaseUri_1_6148a1b9;
   done?: boolean;
   edits?: {
     range: {
@@ -436,50 +411,24 @@ export type V_Variant_ca258acf = {
   }[][];
   generatedTitle?: string;
   id?: string;
-  invocationMessage?: InvocationMessage_Variant_f69ab120 | string;
+  invocationMessage?: InvocationMessage_Type_d84d1caa | string;
   isComplete?: boolean;
   isConfirmed?: {
     type: 1;
   };
   isEdit?: boolean;
   kind?: "codeblockUri" | "textEditGroup" | "thinking" | "toolInvocationSerialized" | "undoStop";
-  metadata?: {
-    stopReason: string;
-    vscodeReasoningDone: boolean;
-  };
-  pastTenseMessage?: {
-    supportAlertSyntax: boolean;
-    supportHtml: boolean;
-    supportThemeIcons: boolean;
-    uris: Record<Url, {
-      $mid: 1;
-      authority: string;
-      external?: Url;
-      path: Path;
-      scheme: string;
-    }>;
-    value: string;
-  };
+  metadata?: Metadata_Type_8ea244cb;
+  pastTenseMessage?: InvocationMessage_Type_d84d1caa;
   presentation?: string;
   resultDetails?: never[];
-  source?: {
-    label: string;
-    type: "internal";
-  };
+  source?: Source_Internal_cd45aa03;
   supportAlertSyntax?: boolean;
   supportHtml?: boolean;
   supportThemeIcons?: boolean;
   toolCallId?: string;
   toolId?: string;
-  uri?: {
-    $mid: 1;
-    _sep: number;
-    authority: string;
-    external: Url;
-    fsPath: Path;
-    path: Path;
-    scheme: string;
-  };
+  uri?: BaseUri_1_6148a1b9;
   uris?: Record<string, unknown>;
   value?: string;
 };
@@ -489,39 +438,21 @@ export type V_Thinking_0d8c201c = {
   generatedTitle?: string;
   id: string;
   kind: "thinking";
-  metadata?: {
-    stopReason: string;
-    vscodeReasoningDone: boolean;
-  };
+  metadata?: Metadata_Type_8ea244cb;
   value: never[] | string;
 };
 
 /** 2.v[] -> Variant.response[] -> toolInvocationSerialized */
 export type Response_ToolInvocationSerialized_f9d74c88 = {
-  invocationMessage: {
-    supportAlertSyntax: boolean;
-    supportHtml: boolean;
-    supportThemeIcons: boolean;
-    uris: Record<string, unknown>;
-    value: string;
-  };
+  invocationMessage: InvocationMessage_Type_d84d1caa;
   isComplete: boolean;
   isConfirmed: {
     type: 1;
   };
   kind: "toolInvocationSerialized";
-  pastTenseMessage: {
-    supportAlertSyntax: boolean;
-    supportHtml: boolean;
-    supportThemeIcons: boolean;
-    uris: Record<string, unknown>;
-    value: string;
-  };
+  pastTenseMessage: InvocationMessage_Type_d84d1caa;
   resultDetails: never[];
-  source: {
-    label: string;
-    type: "internal";
-  };
+  source: Source_Internal_cd45aa03;
   toolCallId: Uuid;
   toolId: string;
 };
@@ -532,10 +463,7 @@ export type V_Variant_ca258acf_2 = {
     description: string;
     disambiguation: never[];
     extensionDisplayName: string;
-    extensionId: {
-      _lower: string;
-      value: string;
-    };
+    extensionId: ExtensionId_Type_5b6f8a91;
     extensionPublisherId: string;
     extensionVersion: Semver;
     fullName: string;
@@ -566,38 +494,14 @@ export type V_Variant_ca258acf_2 = {
     }[];
     when: string;
   };
-  baseUri?: {
-    $mid: 1;
-    authority: string;
-    path: Path;
-    scheme: string;
-  };
+  baseUri?: BaseUri_1_6148a1b9;
   codeCitations?: never[];
   contentReferences?: never[];
   message?: {
-    parts: {
-      editorRange: {
-        endColumn: number;
-        endLineNumber: number;
-        startColumn: number;
-        startLineNumber: number;
-      };
-      kind: "text";
-      range: {
-        endExclusive: number;
-        start: number;
-      };
-      text: string;
-    }[];
+    parts: Parts_Text_587c1dc1[];
     text: string;
   };
-  modeInfo?: {
-    isBuiltin: boolean;
-    kind: "agent";
-    modeId: string;
-    modeName: string;
-    permissionLevel: string;
-  };
+  modeInfo?: ModeInfo_Agent_b665cdab;
   modelId?: Path;
   modelState?: {
     value: number;
@@ -627,13 +531,7 @@ export type V_Variant_ca258acf_2 = {
 
 /** 2.v[] -> inlineReference */
 export type V_InlineReference_3f1ce092 = {
-  inlineReference: {
-    $mid: 1;
-    authority: string;
-    external: Url;
-    path: Path;
-    scheme: string;
-  };
+  inlineReference: BaseUri_1_6148a1b9;
   kind: "inlineReference";
   name?: string;
 };

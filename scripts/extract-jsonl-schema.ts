@@ -367,6 +367,283 @@ function pickTagKey(o: Schema & { k: "object" }): string | null {
   return null;
 }
 
+// =====================================================================
+// Merge policy taxonomy
+// =====================================================================
+// A `MergePolicy` declares how a phase unifies object IRs. It composes
+// four orthogonal axes:
+//   - combine: HOW values are merged into the canonical IR
+//   - gates:   OUTER admission tests (tags, naming, scope) — AND-composed
+//   - similar: INNER admission tests (field-set / value compatibility) — AND-composed
+//   - pick:    WHICH member of a group becomes canonical
+//
+// All current phases default `similar: ["any"]`, preserving today's behavior
+// where the only field check is the tag-literal agreement performed by
+// `gateAccepts(_, _, "tag-strict")` (the body of the legacy `compatibleForMerge`).
+
+type CombineKind =
+  | "deep"          // recurse into values; cycle-unsafe; delegates to mergeObjects via merge()
+  | "shallow"       // top-level field union; missing fields → {present:0}; cycle-safe
+  | "structural"    // identical bodies only — no mutation
+  | "rename-only";  // share name; keep distinct shapes
+
+type GateKind =
+  | "any"
+  | "tag-strict"    // for each TAG_CANDIDATES key with literals on either side, sets must overlap
+  | "tag-loose"     // same primary (tagKey, tagValue) — TODO
+  | "no-tag"        // neither side has any TAG_CANDIDATES (or USER_TAG_KEY) field
+  | "name-prefix";  // share PascalCase scope prefix — bucketing-time, not pairwise
+
+type SimilarKind =
+  | "any"
+  | "same-keys"
+  | "subset-keys"
+  | { kind: "overlap-min"; n: number }
+  | { kind: "keys-lt"; n: number }   // both objects have fewer than n keys
+  | { kind: "keys-gt"; n: number }   // both objects have more than n keys
+  | "types-match"                    // shared keys' value schemas render identically
+  | "nullable-compat";
+
+type PickerKind =
+  | "first"
+  | "most-fields"
+  | "shortest-name"
+  | "highest-occur"
+  | "max-overlap";
+
+interface MergeRule {
+  gates: GateKind[];      // AND
+  similar: SimilarKind[]; // AND
+}
+
+interface MergePolicy {
+  combine: CombineKind;
+  pick: PickerKind;
+  rules: MergeRule[];     // OR — pair admitted if any rule matches
+}
+
+// --- gate predicates -------------------------------------------------
+
+function gateAccepts(a: Schema, b: Schema, gate: GateKind): boolean {
+  switch (gate) {
+    case "any":
+      return true;
+    case "tag-strict":
+      return compatibleForMerge(a, b);
+    case "tag-loose": {
+      if (a.k !== "object" || b.k !== "object") return true;
+      const ta = pickTagLiteral(a);
+      const tb = pickTagLiteral(b);
+      if (!ta || !tb) return false;
+      return ta.key === tb.key && ta.value === tb.value;
+    }
+    case "no-tag": {
+      const isTagKey = (k: string) =>
+        (TAG_CANDIDATES as readonly string[]).includes(k) || k === USER_TAG_KEY;
+      const obj = (s: Schema) => s.k === "object" ? s : null;
+      const oa = obj(a), ob = obj(b);
+      if (oa) for (const k of oa.props.keys()) if (isTagKey(k)) return false;
+      if (ob) for (const k of ob.props.keys()) if (isTagKey(k)) return false;
+      return true;
+    }
+    case "name-prefix":
+      // Bucketing-time gate; pairwise call always passes (caller handles bucketing).
+      return true;
+  }
+}
+
+// --- similarity predicates -------------------------------------------
+
+function similarAccepts(a: Schema, b: Schema, kind: SimilarKind): boolean {
+  if (a.k !== "object" || b.k !== "object") return true;
+  if (kind === "any") return true;
+  if (kind === "same-keys") {
+    if (a.props.size !== b.props.size) return false;
+    for (const k of a.props.keys()) if (!b.props.has(k)) return false;
+    return true;
+  }
+  if (kind === "subset-keys") {
+    const [smaller, larger] = a.props.size <= b.props.size ? [a, b] : [b, a];
+    for (const k of smaller.props.keys()) if (!larger.props.has(k)) return false;
+    return true;
+  }
+  if (kind === "nullable-compat") {
+    // TODO: identical types ignoring optional/nullable flags. Stub returns false
+    // (conservative) so accidental enabling won't silently widen.
+    return false;
+  }
+  // overlap-min:N — at least N shared field names.
+  if (typeof kind === "object" && kind.kind === "overlap-min") {
+    let n = 0;
+    for (const k of a.props.keys()) if (b.props.has(k)) {
+      n++;
+      if (n >= kind.n) return true;
+    }
+    return n >= kind.n;
+  }
+  // keys-lt:N — both objects have strictly fewer than N keys.
+  if (typeof kind === "object" && kind.kind === "keys-lt") {
+    return a.props.size < kind.n && b.props.size < kind.n;
+  }
+  // keys-gt:N — both objects have strictly more than N keys.
+  if (typeof kind === "object" && kind.kind === "keys-gt") {
+    return a.props.size > kind.n && b.props.size > kind.n;
+  }
+  // types-match — for every shared key, value schemas render identically.
+  if (kind === "types-match") {
+    for (const [k, pa] of a.props) {
+      const pb = b.props.get(k);
+      if (!pb) continue;
+      if (dryRender(pa.schema) !== dryRender(pb.schema)) return false;
+    }
+    return true;
+  }
+  return true;
+}
+
+function policyAccepts(a: Schema, b: Schema, policy: MergePolicy): boolean {
+  return policy.rules.some((r) =>
+    r.gates.every((g) => gateAccepts(a, b, g)) &&
+    r.similar.every((s) => similarAccepts(a, b, s)),
+  );
+}
+
+// --- canonical pickers ------------------------------------------------
+
+function pickCanonIndex(group: HoistMeta[], pick: PickerKind, target?: Schema & { k: "object" }): number {
+  // Returns the index of the chosen canonical within `group`.
+  if (group.length === 1) return 0;
+  switch (pick) {
+    case "first":
+      return 0;
+    case "shortest-name": {
+      let best = 0;
+      for (let i = 1; i < group.length; i++) {
+        const cur = group[i]!;
+        const winner = group[best]!;
+        if (cur.oldChain.length < winner.oldChain.length) { best = i; continue; }
+        if (cur.oldChain.length === winner.oldChain.length && cur.pretty < winner.pretty) best = i;
+      }
+      return best;
+    }
+    case "most-fields": {
+      let best = 0;
+      for (let i = 1; i < group.length; i++) {
+        if (group[i]!.ir.props.size > group[best]!.ir.props.size) best = i;
+      }
+      return best;
+    }
+    case "highest-occur":
+      // No occurrence counts tracked yet; fall back to first.
+      return 0;
+    case "max-overlap": {
+      if (!target) return 0;
+      const tk = new Set(target.props.keys());
+      let best = 0;
+      let bestOverlap = -1;
+      for (let i = 0; i < group.length; i++) {
+        let n = 0;
+        for (const k of group[i]!.ir.props.keys()) if (tk.has(k)) n++;
+        if (n > bestOverlap) { bestOverlap = n; best = i; }
+      }
+      return best;
+    }
+  }
+}
+
+// --- combine implementations -----------------------------------------
+
+// Returns true on success, false if the merge could not produce an object IR
+// (only meaningful for "deep"). Callers using "deep" should abort the whole
+// group on failure, mirroring the legacy behavior where a tagged-union split
+// during merge caused the entire connected-component to be skipped.
+function combineInto(
+  canon: Schema & { k: "object" },
+  other: Schema & { k: "object" },
+  combine: CombineKind,
+): boolean {
+  switch (combine) {
+    case "deep": {
+      const merged = merge(canon, other);
+      if (merged.k !== "object") return false;
+      canon.props = merged.props;
+      canon.total = merged.total;
+      return true;
+    }
+    case "shallow": {
+      // Proper presence accounting: track how many merged instances had each
+      // field. Shared fields bump `present`; canon's schema wins (no recursive
+      // value-merge — that's "deep" combine, cycle-unsafe). Fields only seen
+      // in `other` carry their own presence count from `other`.
+      for (const [k, p] of other.props) {
+        const existing = canon.props.get(k);
+        if (existing) existing.present += p.present;
+        else canon.props.set(k, { schema: p.schema, present: p.present });
+      }
+      canon.total += other.total;
+      return true;
+    }
+    case "structural":
+    case "rename-only":
+      return true;
+  }
+}
+
+// --- group merger -----------------------------------------------------
+
+// Merge `group` according to `policy`. Returns mapping non-canon → canon.
+//
+// Semantics by combine kind:
+//   - "deep":    ATOMIC — gates/similar are NOT pair-pre-checked; instead the
+//                whole group is folded into canon and aborted if the merge
+//                collapses canon.k away from "object". Mirrors legacy
+//                applyHintsOnIR / applyAutoRecursive behavior.
+//   - "shallow": PER-PAIR gated — each (canon, member) pair is admitted via
+//                policyAccepts; failures are silently skipped, others extend
+//                canon shallowly.
+function mergeGroup(
+  group: HoistMeta[],
+  policy: MergePolicy,
+  canonicalFor: Map<Schema, Schema>,
+): HoistMeta | null {
+  if (group.length < 2) return null;
+  const canonIdx = pickCanonIndex(group, policy.pick);
+  const canon = group[canonIdx]!;
+
+  if (policy.combine === "deep") {
+    // Trust the bucketing; attempt atomic fold. On any non-object collapse
+    // restore canon to its pre-merge state (best-effort: snapshot props+total).
+    const snapshotProps = new Map(canon.ir.props);
+    const snapshotTotal = canon.ir.total;
+    const pendingMap: Array<Schema & { k: "object" }> = [];
+    for (let k = 0; k < group.length; k++) {
+      if (k === canonIdx) continue;
+      const ok = combineInto(canon.ir, group[k]!.ir, "deep");
+      if (!ok) {
+        // Roll back canon and abort the whole group (legacy `continue`).
+        canon.ir.props = snapshotProps;
+        canon.ir.total = snapshotTotal;
+        return null;
+      }
+      pendingMap.push(group[k]!.ir);
+    }
+    for (const o of pendingMap) canonicalFor.set(o, canon.ir);
+    cycleSplice(canon.ir, canonicalFor);
+    return canon;
+  }
+
+  // shallow / structural / rename-only — per-pair gated.
+  for (let k = 0; k < group.length; k++) {
+    if (k === canonIdx) continue;
+    const other = group[k]!;
+    if (!policyAccepts(canon.ir, other.ir, policy)) continue;
+    if (!combineInto(canon.ir, other.ir, policy.combine)) continue;
+    canonicalFor.set(other.ir, canon.ir);
+  }
+  cycleSplice(canon.ir, canonicalFor);
+  return canon;
+}
+
 function mergeRecordWithObject(rec: Schema & { k: "record" }, obj: Schema & { k: "object" }): Schema {
   // If the object's keys are also all path-like, fold its values into the record's value.
   const allPath = obj.props.size === 0 || [...obj.props.keys()].every(isPathLike);
@@ -499,6 +776,8 @@ interface EmitCtx {
   used: Set<string>;
   aliases: Set<string>; // e.g., "Path", "Blob"
   objCache: Map<Schema, string>; // IR-ref -> emitted hoisted type name
+  hoistedSet: Set<Schema>; // object IRs that should be emitted as named decls
+  hoistName: Map<Schema, string>; // optional pre-assigned name override (e.g., from same-keys phase)
 }
 
 interface PathCtx {
@@ -653,6 +932,27 @@ function render(s: Schema, ctx: EmitCtx, p: PathCtx): string {
       return uniq.join(" | ");
     }
     case "object": {
+      // If this inline object was elevated to a hoisted canon (e.g., by
+      // applyInlineUnify), emit/reuse a named decl instead of inlining.
+      if (ctx.hoistedSet.has(s)) {
+        const cached = ctx.objCache.get(s);
+        if (cached) return cached;
+        const override = ctx.hoistName.get(s);
+        let baseName: string;
+        let sub: PathCtx;
+        if (override) {
+          baseName = override;
+          sub = descendVariantFallback(p);
+        } else {
+          const tag = pickTagLiteral(s);
+          sub = tag ? descendVariant(p, tag.value) : descendVariantFallback(p);
+          baseName = tag ? variantTypeName(p, String(tag.value)) : variantTypeName(p, "Variant");
+        }
+        const variantName = uniqueName(ctx, baseName);
+        ctx.objCache.set(s, variantName);
+        emitNamedObject(s, ctx, variantName, sub);
+        return variantName;
+      }
       return renderObjectInline(s, ctx, p);
     }
   }
@@ -685,6 +985,28 @@ function emitNamedObject(o: Schema & { k: "object" }, ctx: EmitCtx, name: string
   const doc = p.pretty ? [p.pretty] : [];
   // oldChain is the PARENT old-chain, used for hint matching.
   ctx.decls.push({ name, body, doc, oldChain: p.old, ir: o });
+}
+
+// Cache rendered-string form of a schema for "types-match" similarity. Uses a
+// throwaway EmitCtx with empty hoistedSet so all sub-schemas inline. Memoized
+// per-schema-IR; safe across a single phase (schemas don't mutate during 1d).
+const _dryRenderCache = new WeakMap<object, string>();
+function dryRender(s: Schema): string {
+  if (typeof s === "object" && s !== null) {
+    const hit = _dryRenderCache.get(s);
+    if (hit !== undefined) return hit;
+  }
+  const tmp: EmitCtx = {
+    decls: [],
+    used: new Set(),
+    aliases: new Set(),
+    objCache: new Map(),
+    hoistedSet: new Set(),
+    hoistName: new Map(),
+  };
+  const out = render(s, tmp, { old: "", pretty: "", field: "" });
+  if (typeof s === "object" && s !== null) _dryRenderCache.set(s, out);
+  return out;
 }
 
 function indent(s: string): string {
@@ -771,6 +1093,15 @@ function namePrefixOf(h: HoistMeta): string {
   return /^[0-9]/.test(raw) ? `$${raw}` : raw;
 }
 
+// Hint pass policy: bucketing by (scope, namePrefix) acts as the `name-prefix` gate;
+// adjacency by shared field names is a structural pre-filter; merge admission for
+// each canon←member pair uses tag-strict; canonical = shortest oldChain.
+const HINT_POLICY: MergePolicy = {
+  combine: "deep",
+  pick: "shortest-name",
+  rules: [{ gates: ["tag-strict", "name-prefix"], similar: ["any"] }],
+};
+
 function applyHintsOnIR(root: Schema, rootName: string): Map<Schema, Schema> {
   const hoists: HoistMeta[] = [];
   collectHoists(root, { old: rootName, pretty: "", field: "" }, hoists, new Set());
@@ -808,25 +1139,8 @@ function applyHintsOnIR(root: Schema, rootName: string): Map<Schema, Schema> {
         for (const y of adj[x]!) if (!seen.has(y)) stack.push(y);
       }
       if (comp.length < 2) continue;
-      comp.sort((x, y) => {
-        const dx = candidates[x]!, dy = candidates[y]!;
-        if (dx.oldChain.length !== dy.oldChain.length) return dx.oldChain.length - dy.oldChain.length;
-        return dx.pretty < dy.pretty ? -1 : dx.pretty > dy.pretty ? 1 : 0;
-      });
-      const canon = candidates[comp[0]!]!;
-      // Merge IRs into the canonical IR (mutates canon.ir.props by reassign).
-      let mergedIr: Schema = canon.ir;
-      for (let k = 1; k < comp.length; k++) mergedIr = merge(mergedIr, candidates[comp[k]!]!.ir);
-      if (mergedIr.k !== "object") continue;
-      // Mutate canon.ir to take the merged props/total so its identity remains stable.
-      (canon.ir as any).props = mergedIr.props;
-      (canon.ir as any).total = mergedIr.total;
-      // Map non-canonicals to canonical IR.
-      for (let k = 1; k < comp.length; k++) {
-        canonicalFor.set(candidates[comp[k]!]!.ir, canon.ir);
-      }
-      // Cycle detection inside canon.
-      cycleSplice(canon.ir, canonicalFor);
+      const group = comp.map((i) => candidates[i]!);
+      mergeGroup(group, HINT_POLICY, canonicalFor);
     }
   }
   return canonicalFor;
@@ -868,6 +1182,15 @@ function cycleSplice(canon: Schema & { k: "object" }, canonicalFor: Map<Schema, 
     }
   }
 }
+
+// Auto-recursive policy: bucketing by (field, tagKey, tagValue) already enforces
+// tag agreement; reachability filter is applied during component formation.
+// Atomic deep merge mirrors the legacy in-place fold.
+const AUTO_RECURSIVE_POLICY: MergePolicy = {
+  combine: "deep",
+  pick: "shortest-name",
+  rules: [{ gates: ["tag-strict"], similar: ["any"] }],
+};
 
 // Auto-detect recursive types: any object IR with a tag literal that contains
 // (transitively) another object IR with the same tag literal under the same field
@@ -933,26 +1256,217 @@ function applyAutoRecursive(root: Schema, rootName: string): Map<Schema, Schema>
         for (const y of adj[x]!) if (!seen.has(y)) stack.push(y);
       }
       if (comp.length < 2) continue;
-      // Canonical = shortest oldChain.
-      comp.sort((x, y) => {
-        const dx = group[x]!, dy = group[y]!;
-        if (dx.oldChain.length !== dy.oldChain.length) return dx.oldChain.length - dy.oldChain.length;
-        return dx.pretty < dy.pretty ? -1 : dx.pretty > dy.pretty ? 1 : 0;
-      });
-      const canon = group[comp[0]!]!;
-      let mergedIr: Schema = canon.ir;
-      for (let k = 1; k < comp.length; k++) mergedIr = merge(mergedIr, group[comp[k]!]!.ir);
-      if (mergedIr.k !== "object") continue;
-      (canon.ir as any).props = mergedIr.props;
-      (canon.ir as any).total = mergedIr.total;
-      for (let k = 1; k < comp.length; k++) {
-        canonicalFor.set(group[comp[k]!]!.ir, canon.ir);
-      }
-      cycleSplice(canon.ir, canonicalFor);
+      const compGroup = comp.map((i) => group[i]!);
+      mergeGroup(compGroup, AUTO_RECURSIVE_POLICY, canonicalFor);
     }
   }
   return canonicalFor;
 }
+
+// =====================================================================
+// Phase 1c: inline-unify
+// =====================================================================
+// After hint + auto-recursive passes, many union-variant tagged objects are
+// already hoisted (collectHoists targets union variants). But the same shape
+// may also appear *inline* — e.g., as a field value `uri: {$mid:1, ...}` —
+// where it cannot be reached by collectHoists. Phase 1c finds those inline
+// occurrences and either folds them into an existing hoisted IR sharing the
+// same tag (pass A) or unifies them among themselves (pass B), producing a
+// single shared IR per tag literal.
+
+// Pass A: an inline tagged object is shallow-extended into the existing
+// hoisted IR with the same tag. Group is always [hoisted, inline]; canonical
+// is `pick: "first"` (= the hoisted, placed at index 0 by the caller).
+// `overlap-min:3` requires ≥3 shared field names (tag counts as one) to
+// guard against merging objects that share only the tag plus one other key.
+const INLINE_VS_HOISTED_POLICY: MergePolicy = {
+  combine: "shallow",
+  pick: "first",
+  rules: [
+    { gates: ["tag-strict"], similar: [{ kind: "overlap-min", n: 2 }, "subset-keys", { kind: "keys-lt", n: 5 }] },
+    { gates: ["tag-strict"], similar: [{ kind: "overlap-min", n: 3 }] },
+  ],
+};
+
+// Pass B: inline candidates with the same tag literal but no hoisted match.
+// Pick canon by "most-fields" so the most complete shape survives; remaining
+// members shallow-extend into it.
+const INLINE_INLINE_POLICY: MergePolicy = {
+  combine: "shallow",
+  pick: "most-fields",
+  rules: [
+    { gates: ["tag-strict"], similar: [{ kind: "overlap-min", n: 2 }, "subset-keys", { kind: "keys-lt", n: 5 }] },
+    { gates: ["tag-strict"], similar: [{ kind: "overlap-min", n: 3 }] },
+  ],
+};
+
+function makeInlineMeta(s: Schema & { k: "object" }): HoistMeta {
+  // Synthetic HoistMeta for inline objects (no real path context). Only
+  // `ir` and `oldChain`/`pretty` are read by mergeGroup picker logic.
+  return { ir: s, oldChain: "", leaf: "", field: "", pretty: "" };
+}
+
+function applyInlineUnify(
+  root: Schema,
+  rootName: string,
+): { canonicalFor: Map<Schema, Schema>; newHoists: Set<Schema> } {
+  const canonicalFor = new Map<Schema, Schema>();
+  const newHoists = new Set<Schema>();
+
+  // Index existing hoisted IRs by tag literal.
+  const hoists: HoistMeta[] = [];
+  collectHoists(root, { old: rootName, pretty: "", field: "" }, hoists, new Set());
+  const hoistedSet = new Set<Schema>(hoists.map((h) => h.ir));
+  const tagIndex = new Map<string, HoistMeta>();
+  for (const h of hoists) {
+    const t = pickTagLiteral(h.ir);
+    if (!t) continue;
+    const key = `${t.key}\x00${String(t.value)}`;
+    if (!tagIndex.has(key)) tagIndex.set(key, h);
+  }
+
+  // Walk the IR; collect every tagged object that is NOT already hoisted.
+  const inlineCandidates: Array<Schema & { k: "object" }> = [];
+  const visited = new Set<Schema>();
+  const walk = (s: Schema): void => {
+    if (visited.has(s)) return;
+    visited.add(s);
+    if (s.k === "object") {
+      if (!hoistedSet.has(s) && pickTagLiteral(s)) inlineCandidates.push(s);
+      for (const p of s.props.values()) walk(p.schema);
+    } else if (s.k === "array") {
+      walk(s.item);
+    } else if (s.k === "record") {
+      walk(s.value);
+    } else if (s.k === "union") {
+      for (const v of s.variants) walk(v);
+    }
+  };
+  walk(root);
+
+  // Pass A: each inline → fold into matching hoisted (if any).
+  const remainingByKey = new Map<string, Array<Schema & { k: "object" }>>();
+  for (const inline of inlineCandidates) {
+    if (canonicalFor.has(inline)) continue;
+    const t = pickTagLiteral(inline)!;
+    const key = `${t.key}\x00${String(t.value)}`;
+    const hoisted = tagIndex.get(key);
+    if (hoisted) {
+      mergeGroup([hoisted, makeInlineMeta(inline)], INLINE_VS_HOISTED_POLICY, canonicalFor);
+    } else {
+      const arr = remainingByKey.get(key) ?? [];
+      arr.push(inline);
+      remainingByKey.set(key, arr);
+    }
+  }
+
+  // Pass B: remaining inline-only buckets unify among themselves.
+  for (const [, group] of remainingByKey) {
+    if (group.length < 2) continue;
+    const metas = group.map(makeInlineMeta);
+    const canon = mergeGroup(metas, INLINE_INLINE_POLICY, canonicalFor);
+    if (canon) newHoists.add(canon.ir);
+  }
+
+  return { canonicalFor, newHoists };
+}
+
+// Phase 1d policy: untagged inline objects with identical key sets fold together.
+// Bucketing is global (cross-field) by sorted-keys signature; rule then enforces
+// no-tag (defensive) and keys-gt:2 (skip small/trivial shapes).
+const INLINE_SAMEKEYS_POLICY: MergePolicy = {
+  combine: "shallow",
+  pick: "most-fields",
+  rules: [
+    { gates: ["no-tag"], similar: ["same-keys", { kind: "keys-gt", n: 3 }] },
+    { gates: ["no-tag"], similar: ["same-keys", { kind: "keys-gt", n: 1 }, "types-match"] },
+  ],
+};
+
+interface SameKeysResult {
+  canonicalFor: Map<Schema, Schema>;
+  newHoists: Set<Schema>;
+  hoistNames: Map<Schema, string>;
+}
+
+function applyInlineSameKeys(root: Schema, rootName: string): SameKeysResult {
+  const canonicalFor = new Map<Schema, Schema>();
+  const newHoists = new Set<Schema>();
+  const hoistNames = new Map<Schema, string>();
+
+  // Collect existing hoists so we can include already-named untagged objects in
+  // bucketing (so a hoisted untagged decl absorbs inline duplicates by becoming
+  // the canonical for its bucket).
+  const hoists: HoistMeta[] = [];
+  collectHoists(root, { old: rootName, pretty: "", field: "" }, hoists, new Set());
+  const hoistedSet = new Set<Schema>(hoists.map((h) => h.ir));
+
+  // Walk; gather every untagged object IR with > 2 props, with parent field context.
+  type Entry = { ir: Schema & { k: "object" }; field: string };
+  const entries: Entry[] = [];
+  const seen = new Set<Schema>();
+  const walk = (s: Schema, parentField: string): void => {
+    if (seen.has(s)) return;
+    seen.add(s);
+    if (s.k === "object") {
+      if (
+        s.props.size > 1 &&
+        !pickTagLiteral(s) &&
+        !hasTagKey(s)
+      ) {
+        entries.push({ ir: s, field: parentField });
+      }
+      for (const [k, p] of s.props) walk(p.schema, k);
+    } else if (s.k === "array") {
+      walk(s.item, parentField);
+    } else if (s.k === "record") {
+      walk(s.value, parentField);
+    } else if (s.k === "union") {
+      for (const v of s.variants) walk(v, parentField);
+    }
+  };
+  walk(root, "");
+
+  // Bucket globally by sorted-keys signature.
+  const buckets = new Map<string, Entry[]>();
+  for (const e of entries) {
+    const sig = [...e.ir.props.keys()].sort().join("\x00");
+    const arr = buckets.get(sig) ?? [];
+    arr.push(e);
+    buckets.set(sig, arr);
+  }
+
+  for (const [sig, group] of buckets) {
+    if (group.length < 3) continue;
+    // Build HoistMeta-like wrappers; use field of each entry; pick most-fields
+    // (all are same-keys so all sizes equal; picker is effectively first).
+    const metas: HoistMeta[] = group.map((e) => ({
+      ir: e.ir, oldChain: "", leaf: "", field: e.field, pretty: "",
+    }));
+    const canon = mergeGroup(metas, INLINE_SAMEKEYS_POLICY, canonicalFor);
+    if (!canon) continue;
+    // If canon is already a real hoist, keep its existing name; else assign one.
+    if (!hoistedSet.has(canon.ir)) {
+      newHoists.add(canon.ir);
+      const fieldSeg = canon.field ? pascal(canon.field) : "";
+      const hash = sha8(sig);
+      const raw = fieldSeg ? `${fieldSeg}_Type_${hash}` : `Type_${hash}`;
+      const name = /^[0-9]/.test(raw) ? `$${raw}` : raw;
+      hoistNames.set(canon.ir, name);
+    }
+  }
+
+  return { canonicalFor, newHoists, hoistNames };
+}
+
+function hasTagKey(o: Schema & { k: "object" }): boolean {
+  for (const k of o.props.keys()) {
+    if ((TAG_CANDIDATES as readonly string[]).includes(k)) return true;
+    if (k === USER_TAG_KEY) return true;
+  }
+  return false;
+}
+
 
 function pushChildren(s: Schema, stack: Schema[], seen: Set<Schema>): void {
   switch (s.k) {
@@ -1076,8 +1590,29 @@ function emit(root: Schema, rootName: string): string {
   // Phase 1b: auto-detect recursive types (same tag literal under same field, ancestor-reachable).
   const autoCanonical = applyAutoRecursive(root, rootName);
   root = rewriteIR(root, autoCanonical, new Set());
-  // Phase 2: render with IR-ref cache so shared canonical IRs emit once.
-  const ctx: EmitCtx = { decls: [], used: new Set([rootName]), aliases: new Set(), objCache: new Map() };
+  // Phase 1c: unify inline tagged objects (those NOT in collectHoists) with
+  // existing hoisted IRs sharing the tag, then with each other.
+  const inlineRes = applyInlineUnify(root, rootName);
+  root = rewriteIR(root, inlineRes.canonicalFor, new Set());
+  // Phase 1d: same-keys consolidation for untagged inline objects (cross-field,
+  // ≥3 occurrences, ≥3 keys, no TAG_CANDIDATES key present).
+  const sameKeysRes = applyInlineSameKeys(root, rootName);
+  root = rewriteIR(root, sameKeysRes.canonicalFor, new Set());
+  // Phase 2: build hoistedSet so render emits named refs for canon IRs that
+  // were elevated by inline-unify pass B (these aren't union variants so
+  // collectHoists won't find them; we add them explicitly).
+  const hoistedSet = new Set<Schema>();
+  for (const c of inlineRes.newHoists) if (c.k === "object") hoistedSet.add(c);
+  for (const c of sameKeysRes.newHoists) if (c.k === "object") hoistedSet.add(c);
+  // Phase 3: render with IR-ref cache so shared canonical IRs emit once.
+  const ctx: EmitCtx = {
+    decls: [],
+    used: new Set([rootName]),
+    aliases: new Set(),
+    objCache: new Map(),
+    hoistedSet,
+    hoistName: sameKeysRes.hoistNames,
+  };
   const renderedRaw = render(root, ctx, { old: rootName, pretty: "", field: "" });
   // Phase 3: structural dedupe of identical bodies sharing the same name prefix.
   const afterDedup = dedupeDecls(ctx.decls, renderedRaw);

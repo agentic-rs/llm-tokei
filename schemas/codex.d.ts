@@ -8,7 +8,7 @@ export type Path = string;
 export type Blob = string;
 
 /** session_meta */
-export type SessionMeta_d46e830c = {
+export type SessionMeta_e98689a8 = {
   payload: {
     base_instructions: {
       text: Path;
@@ -31,7 +31,7 @@ export type SessionMeta_d46e830c = {
 };
 
 /** event_msg.payload -> task_started */
-export type Payload_TaskStarted_45880111 = {
+export type Payload_TaskStarted_b07888eb = {
   collaboration_mode_kind: string;
   model_context_window: number;
   started_at: number;
@@ -40,7 +40,7 @@ export type Payload_TaskStarted_45880111 = {
 };
 
 /** event_msg.payload -> user_message */
-export type Payload_UserMessage_199e6c69 = {
+export type Payload_UserMessage_1024ed31 = {
   images: never[];
   local_images: never[];
   message: string;
@@ -49,7 +49,7 @@ export type Payload_UserMessage_199e6c69 = {
 };
 
 /** event_msg.payload -> token_count.info -> Variant */
-export type Info_Variant_ca24c77d = {
+export type Info_Variant_b8550efc = {
   last_token_usage: {
     cached_input_tokens: number;
     input_tokens: number;
@@ -68,8 +68,8 @@ export type Info_Variant_ca24c77d = {
 };
 
 /** event_msg.payload -> token_count */
-export type Payload_TokenCount_3307a0d0 = {
-  info: null | Info_Variant_ca24c77d;
+export type Payload_TokenCount_ed9cbd7e = {
+  info: null | Info_Variant_b8550efc;
   rate_limits: {
     credits: {
       balance: null;
@@ -95,7 +95,7 @@ export type Payload_TokenCount_3307a0d0 = {
 };
 
 /** event_msg.payload -> agent_message */
-export type Payload_AgentMessage_6e19ddd2 = {
+export type Payload_AgentMessage_60d7ed19 = {
   memory_citation: null;
   message: Blob;
   phase: string;
@@ -103,14 +103,14 @@ export type Payload_AgentMessage_6e19ddd2 = {
 };
 
 /** event_msg.payload -> exec_command_end.parsed_cmd[] -> list_files */
-export type ParsedCmd_ListFiles_62acb15a = {
+export type ParsedCmd_ListFiles_7775f28f = {
   cmd: string;
   path: string;
   type: "list_files";
 };
 
 /** event_msg.payload -> exec_command_end.parsed_cmd[] -> search */
-export type ParsedCmd_Search_6ea11871 = {
+export type ParsedCmd_Search_09476b88 = {
   cmd: string;
   path: string;
   query: string;
@@ -118,7 +118,7 @@ export type ParsedCmd_Search_6ea11871 = {
 };
 
 /** event_msg.payload -> exec_command_end.parsed_cmd[] -> read */
-export type ParsedCmd_Read_62984596 = {
+export type ParsedCmd_Read_2f1ac1fc = {
   cmd: string;
   name: string;
   path: string;
@@ -126,13 +126,13 @@ export type ParsedCmd_Read_62984596 = {
 };
 
 /** event_msg.payload -> exec_command_end.parsed_cmd[] -> unknown */
-export type ParsedCmd_Unknown_5f6eaed3 = {
+export type ParsedCmd_Unknown_0d6c552b = {
   cmd: string;
   type: "unknown";
 };
 
 /** event_msg.payload -> exec_command_end */
-export type Payload_ExecCommandEnd_80f61ef9 = {
+export type Payload_ExecCommandEnd_ce7217dd = {
   aggregated_output: string;
   call_id: string;
   command: string[];
@@ -143,7 +143,7 @@ export type Payload_ExecCommandEnd_80f61ef9 = {
   };
   exit_code: number;
   formatted_output: string;
-  parsed_cmd: Array<ParsedCmd_ListFiles_62acb15a | ParsedCmd_Search_6ea11871 | ParsedCmd_Read_62984596 | ParsedCmd_Unknown_5f6eaed3>;
+  parsed_cmd: Array<ParsedCmd_ListFiles_7775f28f | ParsedCmd_Search_09476b88 | ParsedCmd_Read_2f1ac1fc | ParsedCmd_Unknown_0d6c552b>;
   process_id: string;
   source: string;
   status: string;
@@ -154,22 +154,22 @@ export type Payload_ExecCommandEnd_80f61ef9 = {
 };
 
 /** event_msg.payload -> patch_apply_end.changes{} -> update */
-export type Changes_Update_2f313ccf = {
+export type Changes_Update_f8d54454 = {
   move_path: null;
   type: "update";
   unified_diff: string;
 };
 
 /** event_msg.payload -> patch_apply_end.changes{} -> add */
-export type Changes_Add_43e127d8 = {
+export type Changes_Add_1802d286 = {
   content: Blob;
   type: "add";
 };
 
 /** event_msg.payload -> patch_apply_end */
-export type Payload_PatchApplyEnd_27bdf4c7 = {
+export type Payload_PatchApplyEnd_2042383b = {
   call_id: string;
-  changes: Record<Path, Changes_Update_2f313ccf | Changes_Add_43e127d8>;
+  changes: Record<Path, Changes_Update_f8d54454 | Changes_Add_1802d286>;
   status: string;
   stderr: string;
   stdout: Path;
@@ -179,7 +179,7 @@ export type Payload_PatchApplyEnd_27bdf4c7 = {
 };
 
 /** event_msg.payload -> task_complete */
-export type Payload_TaskComplete_845a0bc8 = {
+export type Payload_TaskComplete_4f8df77f = {
   completed_at: number;
   duration_ms: number;
   last_agent_message: Blob | null;
@@ -189,7 +189,7 @@ export type Payload_TaskComplete_845a0bc8 = {
 };
 
 /** event_msg.payload -> turn_aborted */
-export type Payload_TurnAborted_a558d1c1 = {
+export type Payload_TurnAborted_9f451e06 = {
   completed_at: number;
   duration_ms: number;
   reason: string;
@@ -198,7 +198,7 @@ export type Payload_TurnAborted_a558d1c1 = {
 };
 
 /** event_msg.payload -> item_completed */
-export type Payload_ItemCompleted_46c96b41 = {
+export type Payload_ItemCompleted_b2a6746d = {
   item: {
     id: string;
     text: Path;
@@ -210,14 +210,14 @@ export type Payload_ItemCompleted_46c96b41 = {
 };
 
 /** event_msg */
-export type EventMsg_1de87ddc = {
-  payload: Payload_TaskStarted_45880111 | Payload_UserMessage_199e6c69 | Payload_TokenCount_3307a0d0 | Payload_AgentMessage_6e19ddd2 | Payload_ExecCommandEnd_80f61ef9 | Payload_PatchApplyEnd_27bdf4c7 | Payload_TaskComplete_845a0bc8 | Payload_TurnAborted_a558d1c1 | Payload_ItemCompleted_46c96b41;
+export type EventMsg_0bc1a1a1 = {
+  payload: Payload_TaskStarted_b07888eb | Payload_UserMessage_1024ed31 | Payload_TokenCount_ed9cbd7e | Payload_AgentMessage_60d7ed19 | Payload_ExecCommandEnd_ce7217dd | Payload_PatchApplyEnd_2042383b | Payload_TaskComplete_4f8df77f | Payload_TurnAborted_9f451e06 | Payload_ItemCompleted_b2a6746d;
   timestamp: IsoDate;
   type: "event_msg";
 };
 
 /** response_item.payload -> message */
-export type Payload_Message_cdc77562 = {
+export type Payload_Message_81e18e21 = {
   content: {
     text: string;
     type: "input_text";
@@ -227,7 +227,7 @@ export type Payload_Message_cdc77562 = {
 };
 
 /** response_item.payload -> reasoning */
-export type Payload_Reasoning_af56dde1 = {
+export type Payload_Reasoning_82ea41c5 = {
   content: null;
   encrypted_content: Blob;
   summary: never[];
@@ -235,7 +235,7 @@ export type Payload_Reasoning_af56dde1 = {
 };
 
 /** response_item.payload -> message */
-export type Payload_Message_cdc77562_2 = {
+export type Payload_Message_81e18e21_2 = {
   content: {
     text: Blob;
     type: "output_text";
@@ -246,7 +246,7 @@ export type Payload_Message_cdc77562_2 = {
 };
 
 /** response_item.payload -> function_call */
-export type Payload_FunctionCall_177cb5dd = {
+export type Payload_FunctionCall_2fb2ebf2 = {
   arguments: Blob;
   call_id: string;
   name: string;
@@ -254,14 +254,14 @@ export type Payload_FunctionCall_177cb5dd = {
 };
 
 /** response_item.payload -> function_call_output */
-export type Payload_FunctionCallOutput_030f1d78 = {
+export type Payload_FunctionCallOutput_ee54e611 = {
   call_id: string;
   output: Blob;
   type: "function_call_output";
 };
 
 /** response_item.payload -> custom_tool_call */
-export type Payload_CustomToolCall_499c3152 = {
+export type Payload_CustomToolCall_fd33fb92 = {
   call_id: string;
   input: Path;
   name: string;
@@ -270,72 +270,72 @@ export type Payload_CustomToolCall_499c3152 = {
 };
 
 /** response_item.payload -> custom_tool_call_output */
-export type Payload_CustomToolCallOutput_44a1c09b = {
+export type Payload_CustomToolCallOutput_e3c1bb6b = {
   call_id: string;
   output: Path;
   type: "custom_tool_call_output";
 };
 
 /** response_item */
-export type ResponseItem_dabbd39e = {
-  payload: Payload_Message_cdc77562 | Payload_Reasoning_af56dde1 | Payload_Message_cdc77562_2 | Payload_FunctionCall_177cb5dd | Payload_FunctionCallOutput_030f1d78 | Payload_CustomToolCall_499c3152 | Payload_CustomToolCallOutput_44a1c09b;
+export type ResponseItem_0218eace = {
+  payload: Payload_Message_81e18e21 | Payload_Reasoning_82ea41c5 | Payload_Message_81e18e21_2 | Payload_FunctionCall_2fb2ebf2 | Payload_FunctionCallOutput_ee54e611 | Payload_CustomToolCall_fd33fb92 | Payload_CustomToolCallOutput_e3c1bb6b;
   timestamp: IsoDate;
   type: "response_item";
 };
 
 /**
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> root
- * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> root
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> path
+ * turn_context.payload.permission_profile.file_system.entries[].path -> path
  */
-export type Value_Root_79526242 = {
+export type Path_Path_7618260e = {
+  path: Path;
+  type: "path";
+};
+
+/**
+ * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> root
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> root
+ */
+export type Value_Root_73bc7478 = {
   kind: "root";
 };
 
 /**
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> project_roots
  * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> project_roots
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> project_roots
  */
-export type Value_ProjectRoots_3138f058 = {
+export type Value_ProjectRoots_7012ad95 = {
   kind: "project_roots";
   subpath?: string;
-};
-
-/**
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> tmpdir
- * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> tmpdir
- */
-export type Value_Tmpdir_1573cb88 = {
-  kind: "tmpdir";
-};
-
-/**
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> special
- * turn_context.payload.permission_profile.file_system.entries[].path -> special
- */
-export type Path_Special_b5394781 = {
-  type: "special";
-  value: Value_Root_79526242 | Value_ProjectRoots_3138f058 | Value_SlashTmp_cc501f19 | Value_Tmpdir_1573cb88;
 };
 
 /**
  * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> slash_tmp
  * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> slash_tmp
  */
-export type Value_SlashTmp_cc501f19 = {
+export type Value_SlashTmp_113ccc33 = {
   kind: "slash_tmp";
 };
 
 /**
- * turn_context.payload.permission_profile.file_system.entries[].path -> path
- * turn_context.payload.file_system_sandbox_policy.entries[].path -> path
+ * turn_context.payload.permission_profile.file_system.entries[].path -> special.value -> tmpdir
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> special.value -> tmpdir
  */
-export type Path_Path_0ba5161d = {
-  path: Path;
-  type: "path";
+export type Value_Tmpdir_1e713077 = {
+  kind: "tmpdir";
+};
+
+/**
+ * turn_context.payload.permission_profile.file_system.entries[].path -> special
+ * turn_context.payload.file_system_sandbox_policy.entries[].path -> special
+ */
+export type Path_Special_103b9549 = {
+  type: "special";
+  value: Value_Root_73bc7478 | Value_ProjectRoots_7012ad95 | Value_SlashTmp_113ccc33 | Value_Tmpdir_1e713077;
 };
 
 /** turn_context */
-export type TurnContext_6ab315d9 = {
+export type TurnContext_d55c4b58 = {
   payload: {
     approval_policy: string;
     collaboration_mode: {
@@ -352,7 +352,7 @@ export type TurnContext_6ab315d9 = {
     file_system_sandbox_policy: {
       entries: {
         access: string;
-        path: Path_Special_b5394781 | Path_Path_0ba5161d;
+        path: Path_Special_103b9549 | Path_Path_7618260e;
       }[];
       kind: "restricted";
     };
@@ -361,7 +361,7 @@ export type TurnContext_6ab315d9 = {
       file_system: {
         entries: {
           access: string;
-          path: Path_Special_b5394781 | Path_Path_0ba5161d;
+          path: Path_Special_103b9549 | Path_Path_7618260e;
         }[];
         type: "restricted";
       };
@@ -389,4 +389,4 @@ export type TurnContext_6ab315d9 = {
   type: "turn_context";
 };
 
-export type Codex = SessionMeta_d46e830c | EventMsg_1de87ddc | ResponseItem_dabbd39e | TurnContext_6ab315d9;
+export type Root = SessionMeta_e98689a8 | EventMsg_0bc1a1a1 | ResponseItem_0218eace | TurnContext_d55c4b58;
