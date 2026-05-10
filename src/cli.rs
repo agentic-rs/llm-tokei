@@ -157,15 +157,17 @@ pub struct Args {
 pub enum Cmd {
   /// Dump per-session JSONL transcripts of user-side messages.
   ///
-  /// Writes one `<session-id>.jsonl` per session into `--out`. Each line is
-  /// `{"role":"user","text":"...","call_id":"..."}` where `call_id` is set
-  /// only for tool-result messages.
+  /// With `--out`, writes one `<session-id>.jsonl` per session. Without
+  /// `--out`, writes comment headers plus JSONL records to stdout.
   Dump {
+    /// Dump GitHub Copilot Chat sessions.
+    #[arg(long)]
+    copilot: bool,
+    /// Input session JSONL files. If omitted, sessions are discovered from
+    /// `--copilot-dir` / known VS Code workspaceStorage defaults.
+    files: Vec<PathBuf>,
     /// Output directory (created if missing).
     #[arg(long, short = 'o')]
-    out: PathBuf,
-    /// Source to dump (currently only `copilot`).
-    #[arg(long, default_value = "copilot")]
-    source: String,
+    out: Option<PathBuf>,
   },
 }

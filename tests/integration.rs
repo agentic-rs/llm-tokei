@@ -449,17 +449,18 @@ fn copilot_dump_fixture_bytes_cover_schema_variants() {
   // Inputs:
   //   r1 message.text fallback "fallback prompt" = 15
   //   r2 renderedUserMessage "hi" (2) + tool result "result body" (11) = 13
-  //   r3 renderedUserMessage "tool call please" = 16
+  //   r3 renderedUserMessage "tool call please" (16) + tool result "file body" (9) = 25
   //   r4 renderedUserMessage "think" = 5
-  // Total = 49.
-  assert_eq!(row["input"], 49);
+  // Total = 58.
+  assert_eq!(row["input"], 58);
   // Outputs:
   //   r1 text "ack" = 3
   //   r2 progressTaskSerialized.content.value "progress text" (13) + tool args "{}" (2) = 15
-  //   r3 invocationMessage "Reading files" (13) + pastTenseMessage.value "Read files" (10) = 23
+  //   r3 invocationMessage "Reading files" (13) + pastTenseMessage.value "Read files" (10)
+  //     + tool args "{\"path\":\"file\"}" (15) = 38
   //   r4 thinking "secret reasoning" → 0 (must not leak into output) + text "done" (4) = 4
-  // Total = 45.
-  assert_eq!(row["output"], 45);
+  // Total = 60.
+  assert_eq!(row["output"], 60);
   // reasoning comes from toolCallRounds.thinking.tokens (exact, not bytes).
   assert_eq!(row["reasoning"], 7);
 }
@@ -479,6 +480,7 @@ fn copilot_dump_subcommand_writes_role_user_jsonl() {
       "--copilot-dir",
       fixtures.to_str().unwrap(),
       "dump",
+      "--copilot",
       "--out",
       out_dir.to_str().unwrap(),
     ])
@@ -489,41 +491,106 @@ fn copilot_dump_subcommand_writes_role_user_jsonl() {
   let dest = out_dir.join("sess-dump-1.jsonl");
   let body = std::fs::read_to_string(&dest).expect("dump file written");
   let lines: Vec<&str> = body.lines().collect();
-  assert_eq!(lines.len(), 5);
+  assert_eq!(lines.len(), 11);
   let parsed: Vec<serde_json::Value> = lines
     .iter()
     .map(|l| serde_json::from_str(l).expect("valid jsonl"))
     .collect();
 
-  // Every record uses role:"user".
-  for rec in &parsed {
-    assert_eq!(rec["role"], "user");
-  }
-  // Order: prompt, prompt, tool result (with call_id), prompt, prompt.
+  // Order: prompt/assistant response pairs, with tool calls/results preserving call_id.
+  assert_eq!(
+    parsed
+      .iter()
+      .map(|rec| rec["role"].as_str().unwrap())
+      .collect::<Vec<_>>(),
+    vec![
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "tool_call",
+      "tool_call_result",
+      "user",
+      "tool_call",
+      "tool_call_result",
+      "user",
+      "assistant",
+    ]
+  );
   assert_eq!(parsed[0]["text"], "fallback prompt");
   assert!(parsed[0].get("call_id").is_none());
-  assert_eq!(parsed[1]["text"], "hi");
-  assert_eq!(parsed[2]["text"], "result body");
-  assert_eq!(parsed[2]["call_id"], "c1");
-  assert_eq!(parsed[3]["text"], "tool call please");
-  assert_eq!(parsed[4]["text"], "think");
+  assert_eq!(parsed[1]["text"], "ack");
+  assert_eq!(parsed[2]["text"], "hi");
+  assert_eq!(parsed[3]["text"], "progress text");
+  assert_eq!(parsed[4]["role"], "tool_call");
+  assert_eq!(parsed[4]["text"], "read: {}");
+  assert_eq!(parsed[4]["call_id"], "c1");
+  assert_eq!(parsed[5]["role"], "tool_call_result");
+  assert_eq!(parsed[5]["text"], "result body");
+  assert_eq!(parsed[5]["display"], "ok");
+  assert_eq!(parsed[5]["call_id"], "c1");
+  assert_eq!(parsed[6]["text"], "tool call please");
+  assert_eq!(parsed[7]["role"], "tool_call");
+  assert_eq!(parsed[7]["text"], "read");
+  assert_eq!(parsed[7]["display"], "Reading files\nRead files");
+  assert_eq!(parsed[7]["call_id"], "c2");
+  assert_eq!(parsed[8]["role"], "tool_call_result");
+  assert_eq!(parsed[8]["text"], "file body");
+  assert_eq!(parsed[8]["display"], "Reading files\nRead files");
+  assert_eq!(parsed[8]["call_id"], "c2");
+  assert_eq!(parsed[9]["text"], "think");
+  assert_eq!(parsed[10]["text"], "done");
 
   let _ = std::fs::remove_dir_all(&out_dir);
 }
 
 #[test]
-fn copilot_dump_subcommand_rejects_unsupported_source() {
+fn copilot_dump_subcommand_writes_positional_file_to_stdout() {
+  let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    .join("tests/fixtures/copilot_dump/workspaceStorage/ws/chatSessions/sess-dump-1.jsonl");
+  let out = Command::new(bin())
+    .args(["dump", "--copilot", fixture.to_str().unwrap()])
+    .output()
+    .expect("run llm-tokei dump");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+
+  let body = String::from_utf8_lossy(&out.stdout);
+  let lines: Vec<&str> = body.lines().collect();
+  assert_eq!(lines.len(), 12);
+  assert_eq!(lines[0], format!("# {}", fixture.display()));
+  let parsed: Vec<serde_json::Value> = lines[1..]
+    .iter()
+    .map(|line| serde_json::from_str(line).expect("valid jsonl"))
+    .collect();
+  assert_eq!(parsed[0]["text"], "fallback prompt");
+  assert_eq!(parsed[4]["role"], "tool_call");
+  assert_eq!(parsed[4]["text"], "read: {}");
+  assert_eq!(parsed[4]["call_id"], "c1");
+  assert_eq!(parsed[5]["role"], "tool_call_result");
+  assert_eq!(parsed[5]["text"], "result body");
+  assert_eq!(parsed[5]["display"], "ok");
+  assert_eq!(parsed[5]["call_id"], "c1");
+  assert_eq!(parsed[7]["role"], "tool_call");
+  assert_eq!(parsed[7]["text"], "read");
+  assert_eq!(parsed[7]["display"], "Reading files\nRead files");
+  assert_eq!(parsed[8]["role"], "tool_call_result");
+  assert_eq!(parsed[8]["display"], "Reading files\nRead files");
+  assert_eq!(parsed[10]["text"], "done");
+}
+
+#[test]
+fn copilot_dump_subcommand_requires_copilot_flag() {
   let nanos = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
     .unwrap()
     .as_nanos();
   let out_dir = std::env::temp_dir().join(format!("llm-tokei-dump-bad-{nanos}"));
   let out = Command::new(bin())
-    .args(["dump", "--out", out_dir.to_str().unwrap(), "--source", "codex"])
+    .args(["dump", "--out", out_dir.to_str().unwrap()])
     .output()
     .expect("run llm-tokei dump");
   assert!(!out.status.success());
   let stderr = String::from_utf8_lossy(&out.stderr);
-  assert!(stderr.contains("only `copilot`"), "stderr: {stderr}");
+  assert!(stderr.contains("select a source with `--copilot`"), "stderr: {stderr}");
   let _ = std::fs::remove_dir_all(&out_dir);
 }

@@ -497,6 +497,8 @@ pub struct DumpRecord {
   pub role: &'static str,
   pub text: String,
   #[serde(skip_serializing_if = "Option::is_none")]
+  pub display: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub call_id: Option<String>,
 }
 
@@ -608,15 +610,40 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
       out.push(DumpRecord {
         role: "user",
         text: prompt,
+        display: None,
         call_id: None,
       });
     }
 
-    // 2) Tool results: walk toolCallRounds in order and emit results keyed by
-    //    each toolCalls[].id, looking them up in toolCallResults.
     let tool_call_results = req
       .pointer("/result/metadata/toolCallResults")
       .and_then(|v| v.as_object());
+    let mut emitted_tool_call_ids: HashSet<String> = HashSet::new();
+
+    // 2) Assistant response: visible text/progress messages. Tool invocation
+    //    records are emitted as tool_call/tool_call_result pairs.
+    if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
+      for item in resp {
+        if item.get("kind").and_then(|v| v.as_str()) == Some("toolInvocationSerialized") {
+          if let Some(id) = emit_tool_invocation_pair(item, tool_call_results, &mut out) {
+            emitted_tool_call_ids.insert(id);
+          }
+          continue;
+        }
+        let text = collect_response_item_text(item);
+        if !text.is_empty() {
+          out.push(DumpRecord {
+            role: "assistant",
+            text,
+            display: None,
+            call_id: item.get("toolCallId").and_then(|v| v.as_str()).map(str::to_string),
+          });
+        }
+      }
+    }
+
+    // 3) Tool call rounds: emit tool_call/tool_call_result pairs with matching
+    //    call_id so consumers can replay round-trips exactly.
     if let Some(rounds) = req
       .pointer("/result/metadata/toolCallRounds")
       .and_then(|v| v.as_array())
@@ -627,6 +654,20 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
             let Some(id) = call.get("id").and_then(|v| v.as_str()) else {
               continue;
             };
+            if emitted_tool_call_ids.contains(id) {
+              continue;
+            }
+            if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
+              if !args.is_empty() {
+                let name = call.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+                out.push(DumpRecord {
+                  role: "tool_call",
+                  text: format!("{name}: {args}"),
+                  display: None,
+                  call_id: Some(id.to_string()),
+                });
+              }
+            }
             let text = match tool_call_results.and_then(|m| m.get(id)) {
               Some(result) => collect_tool_result_text(result),
               None => round
@@ -636,9 +677,15 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
                 .unwrap_or_default(),
             };
             if !text.is_empty() {
+              let display = round
+                .get("response")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
               out.push(DumpRecord {
-                role: "user",
+                role: "tool_call_result",
                 text,
+                display,
                 call_id: Some(id.to_string()),
               });
             }
@@ -671,6 +718,123 @@ fn collect_text_array(node: Option<&Value>) -> String {
       }
       buf.push_str(s);
     }
+  }
+  buf
+}
+
+fn emit_tool_invocation_pair(
+  item: &Value,
+  tool_call_results: Option<&serde_json::Map<String, Value>>,
+  out: &mut Vec<DumpRecord>,
+) -> Option<String> {
+  let id = item.get("toolCallId").and_then(|v| v.as_str())?;
+  let display = tool_invocation_display(item);
+  let name = item
+    .get("toolId")
+    .and_then(|v| v.as_str())
+    .or_else(|| item.pointer("/source/label").and_then(|v| v.as_str()))
+    .unwrap_or("tool");
+  let args = item
+    .pointer("/toolSpecificData/prompt")
+    .and_then(|v| v.as_str())
+    .or_else(|| item.pointer("/toolSpecificData/description").and_then(|v| v.as_str()))
+    .unwrap_or_default();
+
+  out.push(DumpRecord {
+    role: "tool_call",
+    text: if args.is_empty() {
+      name.to_string()
+    } else {
+      format!("{name}: {args}")
+    },
+    display: if display.is_empty() {
+      None
+    } else {
+      Some(display.clone())
+    },
+    call_id: Some(id.to_string()),
+  });
+
+  if let Some(text) = tool_call_results
+    .and_then(|results| results.get(id))
+    .map(collect_tool_result_text)
+  {
+    if !text.is_empty() {
+      out.push(DumpRecord {
+        role: "tool_call_result",
+        text,
+        display: if display.is_empty() { None } else { Some(display) },
+        call_id: Some(id.to_string()),
+      });
+    }
+  }
+
+  Some(id.to_string())
+}
+
+fn tool_invocation_display(item: &Value) -> String {
+  join_non_empty([
+    collect_text_like(item.get("invocationMessage")),
+    collect_text_like(item.get("pastTenseMessage")),
+  ])
+}
+
+fn collect_response_item_text(item: &Value) -> String {
+  let kind = item.get("kind").and_then(|v| v.as_str());
+  if kind == Some("toolInvocationSerialized") {
+    return join_non_empty([
+      collect_text_like(item.get("invocationMessage")),
+      collect_text_like(item.get("pastTenseMessage")),
+    ]);
+  }
+  if kind == Some("progressTaskSerialized") {
+    return collect_text_like(item.get("content"));
+  }
+  if matches!(
+    kind,
+    Some("codeblockUri")
+      | Some("textEditGroup")
+      | Some("undoStop")
+      | Some("inlineReference")
+      | Some("reference")
+      | Some("mcpServersStarting")
+      | Some("promptFile")
+      | Some("agent")
+      | Some("thinking")
+  ) {
+    return String::new();
+  }
+  item
+    .get("value")
+    .and_then(|v| v.as_str())
+    .map(str::to_string)
+    .unwrap_or_default()
+}
+
+fn collect_text_like(value: Option<&Value>) -> String {
+  match value {
+    Some(Value::String(s)) => s.clone(),
+    Some(Value::Object(map)) => map
+      .get("text")
+      .or_else(|| map.get("value"))
+      .and_then(|v| v.as_str())
+      .map(str::to_string)
+      .unwrap_or_default(),
+    Some(Value::Array(items)) => join_non_empty(items.iter().map(|item| collect_text_like(Some(item)))),
+    _ => String::new(),
+  }
+}
+
+fn join_non_empty(parts: impl IntoIterator<Item = String>) -> String {
+  let mut buf = String::new();
+  for part in parts {
+    if part.is_empty() {
+      continue;
+    }
+    if !buf.is_empty() {
+      buf.push('\n');
+    }
+    buf.push_str(&part);
   }
   buf
 }

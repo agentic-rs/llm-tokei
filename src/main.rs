@@ -479,24 +479,36 @@ fn init_tracing(verbose: bool) {
 
 fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
   match cmd {
-    Cmd::Dump { out, source } => run_dump(out, source, args),
+    Cmd::Dump { copilot, files, out } => run_dump(*copilot, files, out.as_deref(), args),
   }
 }
 
-fn run_dump(out: &Path, source: &str, args: &Args) -> Result<()> {
-  let src = source.to_lowercase();
-  if src != "copilot" {
-    anyhow::bail!("dump: only `copilot` source is supported (got `{source}`)");
+fn run_dump(copilot: bool, files: &[PathBuf], out: Option<&Path>, args: &Args) -> Result<()> {
+  if !copilot {
+    anyhow::bail!("dump: select a source with `--copilot`");
   }
-  std::fs::create_dir_all(out).with_context(|| format!("creating output dir {}", out.display()))?;
 
-  let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
-  let copilot = CopilotSource::new(roots);
-  let files = copilot.discover_files();
+  if let Some(out) = out {
+    std::fs::create_dir_all(out).with_context(|| format!("creating output dir {}", out.display()))?;
+  }
+
+  let discovered;
+  let paths: &[PathBuf] = if files.is_empty() {
+    let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
+    let source = CopilotSource::new(roots);
+    discovered = source.discover_files();
+    &discovered
+  } else {
+    files
+  };
 
   let mut written: usize = 0;
   let mut total_records: usize = 0;
-  for path in files {
+  let stdout = std::io::stdout();
+  let mut stdout = std::io::BufWriter::new(stdout.lock());
+  use std::io::Write;
+
+  for path in paths {
     let dumped = match CopilotSource::dump_session_messages(&path) {
       Ok(Some(d)) => d,
       Ok(None) => continue,
@@ -510,24 +522,38 @@ fn run_dump(out: &Path, source: &str, args: &Args) -> Result<()> {
     if dumped.records.is_empty() {
       continue;
     }
-    let dest = out.join(format!("{}.jsonl", sanitize_filename(&dumped.session_id)));
-    let f = std::fs::File::create(&dest).with_context(|| format!("writing {}", dest.display()))?;
-    let mut writer = std::io::BufWriter::new(f);
-    use std::io::Write;
-    for rec in &dumped.records {
-      serde_json::to_writer(&mut writer, rec)?;
-      writeln!(writer)?;
-    }
-    writer.flush()?;
-    total_records += dumped.records.len();
-    written += 1;
-  }
 
-  if args.verbose || written == 0 {
-    eprintln!(
-      "dump: wrote {written} session file(s), {total_records} record(s) to {}",
-      out.display()
-    );
+    if let Some(out) = out {
+      let dest = out.join(format!("{}.jsonl", sanitize_filename(&dumped.session_id)));
+      let f = std::fs::File::create(&dest).with_context(|| format!("writing {}", dest.display()))?;
+      let mut writer = std::io::BufWriter::new(f);
+      for rec in &dumped.records {
+        serde_json::to_writer(&mut writer, rec)?;
+        writeln!(writer)?;
+      }
+      writer.flush()?;
+      written += 1;
+    } else {
+      writeln!(stdout, "# {}", path.display())?;
+      for rec in &dumped.records {
+        serde_json::to_writer(&mut stdout, rec)?;
+        writeln!(stdout)?;
+      }
+      written += 1;
+    }
+    total_records += dumped.records.len();
+  }
+  stdout.flush()?;
+
+  if let Some(out) = out {
+    if args.verbose || written == 0 {
+      eprintln!(
+        "dump: wrote {written} session file(s), {total_records} record(s) to {}",
+        out.display()
+      );
+    }
+  } else if args.verbose || written == 0 {
+    eprintln!("dump: wrote {written} session stream(s), {total_records} record(s) to stdout");
   }
   Ok(())
 }
