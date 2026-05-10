@@ -492,13 +492,18 @@ mod tests {
       records.iter().map(|r| r.output_bytes).collect::<Vec<_>>(),
       vec![20, 4, 5, 5]
     );
+    // `input` stores the uncached portion (input_tokens - cached_input_tokens).
     assert_eq!(
       records.iter().map(|r| r.input).collect::<Vec<_>>(),
-      vec![100, 100, 200, 100]
+      vec![60, 60, 120, 60]
     );
     assert_eq!(
       records.iter().map(|r| r.output).collect::<Vec<_>>(),
       vec![50, 40, 90, 40]
+    );
+    assert_eq!(
+      records.iter().map(|r| r.cache_read).collect::<Vec<_>>(),
+      vec![40, 40, 80, 40]
     );
   }
 

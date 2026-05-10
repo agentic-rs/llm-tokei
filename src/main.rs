@@ -17,7 +17,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
-use crate::cli::{Args, Format, Period};
+use crate::cli::{Args, Cmd, Format, Period};
 use crate::format::{json::render_json, table::render_table};
 use crate::model::UsageRecord;
 use crate::pricing::PricingTable;
@@ -29,6 +29,11 @@ use crate::sources::{
 fn main() -> Result<()> {
   let args = Args::parse();
   init_tracing(args.verbose);
+
+  if let Some(cmd) = args.cmd.as_ref() {
+    return run_subcommand(cmd, &args);
+  }
+
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
   let cache = if args.no_cache {
     None
@@ -469,4 +474,69 @@ fn init_tracing(verbose: bool) {
     Err(_) => EnvFilter::new("warn"),
   };
   let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+}
+
+fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
+  match cmd {
+    Cmd::Dump { out, source } => run_dump(out, source, args),
+  }
+}
+
+fn run_dump(out: &Path, source: &str, args: &Args) -> Result<()> {
+  let src = source.to_lowercase();
+  if src != "copilot" {
+    anyhow::bail!("dump: only `copilot` source is supported (got `{source}`)");
+  }
+  std::fs::create_dir_all(out).with_context(|| format!("creating output dir {}", out.display()))?;
+
+  let roots = args
+    .copilot_dir
+    .clone()
+    .unwrap_or_else(CopilotSource::default_paths);
+  let copilot = CopilotSource::new(roots);
+  let files = copilot.discover_files();
+
+  let mut written: usize = 0;
+  let mut total_records: usize = 0;
+  for path in files {
+    let dumped = match CopilotSource::dump_session_messages(&path) {
+      Ok(Some(d)) => d,
+      Ok(None) => continue,
+      Err(e) => {
+        if args.verbose {
+          eprintln!("dump: error reading {}: {e:#}", path.display());
+        }
+        continue;
+      }
+    };
+    if dumped.records.is_empty() {
+      continue;
+    }
+    let dest = out.join(format!("{}.jsonl", sanitize_filename(&dumped.session_id)));
+    let f = std::fs::File::create(&dest).with_context(|| format!("writing {}", dest.display()))?;
+    let mut writer = std::io::BufWriter::new(f);
+    use std::io::Write;
+    for rec in &dumped.records {
+      serde_json::to_writer(&mut writer, rec)?;
+      writeln!(writer)?;
+    }
+    writer.flush()?;
+    total_records += dumped.records.len();
+    written += 1;
+  }
+
+  if args.verbose || written == 0 {
+    eprintln!("dump: wrote {written} session file(s), {total_records} record(s) to {}", out.display());
+  }
+  Ok(())
+}
+
+fn sanitize_filename(name: &str) -> String {
+  name
+    .chars()
+    .map(|c| match c {
+      '/' | '\\' | '\0' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+      _ => c,
+    })
+    .collect()
 }

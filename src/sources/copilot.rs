@@ -97,6 +97,16 @@ impl CopilotSource {
     }
   }
 
+  /// Replay a copilot session JSONL into per-message dump records.
+  /// Returns `None` for transcript files (no replayable state) or if the file
+  /// has no parseable state.
+  pub fn dump_session_messages(path: &Path) -> Result<Option<DumpedSession>> {
+    if is_transcript_file(path) {
+      return Ok(None);
+    }
+    dump_session(path)
+  }
+
   pub fn dedupe_exact_sessions(records: &mut Vec<UsageRecord>) {
     let exact: HashSet<String> = records
       .iter()
@@ -359,10 +369,27 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
     // --- Input estimate ---
     let mut input_chars: u64 = 0;
     let mut input_bytes: u64 = 0;
-    input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedUserMessage")));
+    let rendered_user_chars = sum_text_chars(req.pointer("/result/metadata/renderedUserMessage"));
+    let rendered_user_bytes = sum_text_bytes(req.pointer("/result/metadata/renderedUserMessage"));
+    input_chars = input_chars.saturating_add(rendered_user_chars);
+    input_bytes = input_bytes.saturating_add(rendered_user_bytes);
     input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedGlobalContext")));
-    input_bytes = input_bytes.saturating_add(sum_text_bytes(req.pointer("/result/metadata/renderedUserMessage")));
     input_bytes = input_bytes.saturating_add(sum_text_bytes(req.pointer("/result/metadata/renderedGlobalContext")));
+    // Fallback to request.message.text when no rendered user message is present
+    // (older session shapes / queued-but-unsent prompts).
+    if rendered_user_chars == 0 {
+      if let Some(text) = req.pointer("/message/text").and_then(|v| v.as_str()) {
+        input_chars = input_chars.saturating_add(text.chars().count() as u64);
+        input_bytes = input_bytes.saturating_add(text.len() as u64);
+      } else if let Some(parts) = req.pointer("/message/parts").and_then(|v| v.as_array()) {
+        for part in parts {
+          if let Some(t) = part.get("text").and_then(|v| v.as_str()) {
+            input_chars = input_chars.saturating_add(t.chars().count() as u64);
+            input_bytes = input_bytes.saturating_add(t.len() as u64);
+          }
+        }
+      }
+    }
 
     // --- Output estimate ---
     let mut output_chars: u64 = 0;
@@ -473,6 +500,253 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
   Ok(Some(records))
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DumpRecord {
+  pub role: &'static str,
+  pub text: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub call_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DumpedSession {
+  pub session_id: String,
+  pub records: Vec<DumpRecord>,
+}
+
+fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
+  let f = File::open(path)?;
+  let reader = BufReader::new(f);
+  let mut state: Value = Value::Null;
+  let mut requests_by_id: HashMap<String, Value> = HashMap::new();
+
+  for line in reader.lines() {
+    let line = match line {
+      Ok(l) => l,
+      Err(_) => continue,
+    };
+    if line.trim().is_empty() {
+      continue;
+    }
+    let rec: Value = match serde_json::from_str(&line) {
+      Ok(v) => v,
+      Err(_) => continue,
+    };
+    let kind = rec.get("kind").and_then(|v| v.as_i64()).unwrap_or(-1);
+    match kind {
+      0 => {
+        if let Some(v) = rec.get("v") {
+          state = v.clone();
+          capture_requests_from_state(&state, &mut requests_by_id);
+        }
+      }
+      1 | 2 => {
+        let v = match rec.get("v") {
+          Some(v) => v.clone(),
+          None => continue,
+        };
+        let path_arr = match rec.get("k").and_then(|v| v.as_array()) {
+          Some(a) => a.clone(),
+          None => continue,
+        };
+        let segments: Vec<PathSeg> = path_arr.iter().filter_map(PathSeg::from_value).collect();
+        apply_patch(&mut state, &segments, v);
+        capture_request_patch(&state, &path_arr, &mut requests_by_id);
+      }
+      _ => {}
+    }
+  }
+
+  if state.is_null() {
+    return Ok(None);
+  }
+
+  let session_id = state
+    .get("sessionId")
+    .and_then(|v| v.as_str())
+    .map(|s| s.to_string())
+    .unwrap_or_else(|| {
+      path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string()
+    });
+
+  // Use the deduped per-id request map when available; fall back to
+  // state.requests for sessions emitted as a single snapshot.
+  let mut requests: Vec<Value> = if requests_by_id.is_empty() {
+    state
+      .get("requests")
+      .and_then(|v| v.as_array())
+      .cloned()
+      .unwrap_or_default()
+  } else {
+    requests_by_id.into_values().collect()
+  };
+  // Stable order by timestamp where present (HashMap iteration is undefined).
+  requests.sort_by_key(|r| r.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0));
+
+  let mut out: Vec<DumpRecord> = Vec::new();
+  for req in &requests {
+    if !req.is_object() {
+      continue;
+    }
+
+    // 1) User prompt: prefer renderedUserMessage (post-template), fall back to
+    //    the raw `message.text` / `message.parts[].text`.
+    let mut prompt = collect_text_array(req.pointer("/result/metadata/renderedUserMessage"));
+    if prompt.is_empty() {
+      if let Some(t) = req.pointer("/message/text").and_then(|v| v.as_str()) {
+        prompt = t.to_string();
+      } else if let Some(parts) = req.pointer("/message/parts").and_then(|v| v.as_array()) {
+        let mut buf = String::new();
+        for p in parts {
+          if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
+            if !buf.is_empty() {
+              buf.push('\n');
+            }
+            buf.push_str(t);
+          }
+        }
+        prompt = buf;
+      }
+    }
+    if !prompt.is_empty() {
+      out.push(DumpRecord {
+        role: "user",
+        text: prompt,
+        call_id: None,
+      });
+    }
+
+    // 2) Tool results: walk toolCallRounds in order and emit results keyed by
+    //    each toolCalls[].id, looking them up in toolCallResults.
+    let tool_call_results = req
+      .pointer("/result/metadata/toolCallResults")
+      .and_then(|v| v.as_object());
+    if let Some(rounds) = req
+      .pointer("/result/metadata/toolCallRounds")
+      .and_then(|v| v.as_array())
+    {
+      for round in rounds {
+        if let Some(calls) = round.get("toolCalls").and_then(|v| v.as_array()) {
+          for call in calls {
+            let Some(id) = call.get("id").and_then(|v| v.as_str()) else {
+              continue;
+            };
+            let text = match tool_call_results.and_then(|m| m.get(id)) {
+              Some(result) => collect_tool_result_text(result),
+              None => round
+                .get("response")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            };
+            if !text.is_empty() {
+              out.push(DumpRecord {
+                role: "user",
+                text,
+                call_id: Some(id.to_string()),
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  Ok(Some(DumpedSession {
+    session_id,
+    records: out,
+  }))
+}
+
+fn collect_text_array(node: Option<&Value>) -> String {
+  let arr = match node.and_then(|v| v.as_array()) {
+    Some(a) => a,
+    None => return String::new(),
+  };
+  let mut buf = String::new();
+  for item in arr {
+    let chunk = item
+      .get("text")
+      .and_then(|v| v.as_str())
+      .or_else(|| item.get("value").and_then(|v| v.as_str()));
+    if let Some(s) = chunk {
+      if !buf.is_empty() {
+        buf.push('\n');
+      }
+      buf.push_str(s);
+    }
+  }
+  buf
+}
+
+fn collect_tool_result_text(result: &Value) -> String {
+  let mut buf = String::new();
+  if let Some(items) = result.get("content").and_then(|v| v.as_array()) {
+    for item in items {
+      let s = collect_rich_text(item.get("value").unwrap_or(item));
+      if !s.is_empty() {
+        if !buf.is_empty() {
+          buf.push('\n');
+        }
+        buf.push_str(&s);
+      }
+    }
+  }
+  buf
+}
+
+fn collect_rich_text(value: &Value) -> String {
+  match value {
+    Value::String(s) => s.clone(),
+    Value::Array(items) => {
+      let mut buf = String::new();
+      for it in items {
+        let s = collect_rich_text(it);
+        if !s.is_empty() {
+          if !buf.is_empty() {
+            buf.push('\n');
+          }
+          buf.push_str(&s);
+        }
+      }
+      buf
+    }
+    Value::Object(map) => {
+      let mut buf = String::new();
+      if let Some(t) = map.get("text").and_then(|v| v.as_str()) {
+        buf.push_str(t);
+      }
+      if let Some(children) = map.get("children").and_then(|v| v.as_array()) {
+        for c in children {
+          let s = collect_rich_text(c);
+          if !s.is_empty() {
+            if !buf.is_empty() {
+              buf.push('\n');
+            }
+            buf.push_str(&s);
+          }
+        }
+      }
+      if let Some(node) = map.get("node") {
+        let s = collect_rich_text(node);
+        if !s.is_empty() {
+          if !buf.is_empty() {
+            buf.push('\n');
+          }
+          buf.push_str(&s);
+        }
+      }
+      buf
+    }
+    _ => String::new(),
+  }
+}
+
+
 #[derive(Debug, Clone)]
 enum PathSeg {
   Key(String),
@@ -537,35 +811,61 @@ fn placeholder_for(seg: &PathSeg) -> Value {
 }
 
 fn sum_text_chars(node: Option<&Value>) -> u64 {
-  let arr = match node.and_then(|v| v.as_array()) {
-    Some(a) => a,
+  let value = match node {
+    Some(v) => v,
     None => return 0,
   };
-  let mut total: u64 = 0;
-  for item in arr {
-    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-      total = total.saturating_add(t.chars().count() as u64);
-    } else if let Some(t) = item.get("value").and_then(|v| v.as_str()) {
-      total = total.saturating_add(t.chars().count() as u64);
+  match value {
+    // Plain string (e.g. invocationMessage as a markdown string).
+    Value::String(s) => s.chars().count() as u64,
+    // Single object form, e.g. invocationMessage as { value: "..." }.
+    Value::Object(map) => map
+      .get("text")
+      .or_else(|| map.get("value"))
+      .and_then(|v| v.as_str())
+      .map(|s| s.chars().count() as u64)
+      .unwrap_or(0),
+    Value::Array(arr) => {
+      let mut total: u64 = 0;
+      for item in arr {
+        if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
+          total = total.saturating_add(t.chars().count() as u64);
+        } else if let Some(t) = item.get("value").and_then(|v| v.as_str()) {
+          total = total.saturating_add(t.chars().count() as u64);
+        }
+      }
+      total
     }
+    _ => 0,
   }
-  total
 }
 
 fn sum_text_bytes(node: Option<&Value>) -> u64 {
-  let arr = match node.and_then(|v| v.as_array()) {
-    Some(a) => a,
+  let value = match node {
+    Some(v) => v,
     None => return 0,
   };
-  let mut total: u64 = 0;
-  for item in arr {
-    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-      total = total.saturating_add(t.len() as u64);
-    } else if let Some(t) = item.get("value").and_then(|v| v.as_str()) {
-      total = total.saturating_add(t.len() as u64);
+  match value {
+    Value::String(s) => s.len() as u64,
+    Value::Object(map) => map
+      .get("text")
+      .or_else(|| map.get("value"))
+      .and_then(|v| v.as_str())
+      .map(|s| s.len() as u64)
+      .unwrap_or(0),
+    Value::Array(arr) => {
+      let mut total: u64 = 0;
+      for item in arr {
+        if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
+          total = total.saturating_add(t.len() as u64);
+        } else if let Some(t) = item.get("value").and_then(|v| v.as_str()) {
+          total = total.saturating_add(t.len() as u64);
+        }
+      }
+      total
     }
+    _ => 0,
   }
-  total
 }
 
 fn tool_result_chars(result: &Value) -> u64 {
@@ -653,6 +953,10 @@ fn response_item_chars(item: &Value) -> u64 {
     total = total.saturating_add(sum_text_chars(item.pointer("/pastTenseMessage")));
     return total;
   }
+  if kind == Some("progressTaskSerialized") {
+    // content can be {value: "..."} or {value: "...", uris: {...}}; recurse.
+    return sum_text_chars(item.get("content"));
+  }
   if matches!(
     kind,
     Some("codeblockUri")
@@ -663,7 +967,9 @@ fn response_item_chars(item: &Value) -> u64 {
       | Some("mcpServersStarting")
       | Some("promptFile")
       | Some("agent")
+      | Some("thinking")
   ) {
+    // Thinking is reasoning content, accounted for via toolCallRounds.thinking.tokens.
     return 0;
   }
   if let Some(s) = item.get("value").and_then(|v| v.as_str()) {
@@ -681,6 +987,9 @@ fn response_item_bytes(item: &Value) -> u64 {
     total = total.saturating_add(sum_text_bytes(item.pointer("/pastTenseMessage")));
     return total;
   }
+  if kind == Some("progressTaskSerialized") {
+    return sum_text_bytes(item.get("content"));
+  }
   if matches!(
     kind,
     Some("codeblockUri")
@@ -691,6 +1000,7 @@ fn response_item_bytes(item: &Value) -> u64 {
       | Some("mcpServersStarting")
       | Some("promptFile")
       | Some("agent")
+      | Some("thinking")
   ) {
     return 0;
   }

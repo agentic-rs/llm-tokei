@@ -419,3 +419,119 @@ fn explicit_zero_cache_write_price_stays_zero() {
   let base = row["cost_base"].as_f64().unwrap();
   assert!((base - 0.000013).abs() < 1e-9, "got {base}");
 }
+
+#[test]
+fn copilot_dump_fixture_bytes_cover_schema_variants() {
+  // Exercises schema-driven bytes paths: message.text fallback,
+  // progressTaskSerialized.content.value, toolInvocationSerialized
+  // invocationMessage as string and as { value }, and thinking value
+  // (which must NOT count as output bytes).
+  let fixtures =
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_dump/workspaceStorage");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "copilot",
+      "--copilot-dir",
+      fixtures.to_str().unwrap(),
+      "--format",
+      "json",
+      "--bytes",
+      "--group-by",
+      "source,model,project",
+    ])
+    .output()
+    .expect("run llm-tokei");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  let arr = v.as_array().unwrap();
+  assert_eq!(arr.len(), 1);
+  let row = &arr[0];
+  // Inputs:
+  //   r1 message.text fallback "fallback prompt" = 15
+  //   r2 renderedUserMessage "hi" (2) + tool result "result body" (11) = 13
+  //   r3 renderedUserMessage "tool call please" = 16
+  //   r4 renderedUserMessage "think" = 5
+  // Total = 49.
+  assert_eq!(row["input"], 49);
+  // Outputs:
+  //   r1 text "ack" = 3
+  //   r2 progressTaskSerialized.content.value "progress text" (13) + tool args "{}" (2) = 15
+  //   r3 invocationMessage "Reading files" (13) + pastTenseMessage.value "Read files" (10) = 23
+  //   r4 thinking "secret reasoning" → 0 (must not leak into output) + text "done" (4) = 4
+  // Total = 45.
+  assert_eq!(row["output"], 45);
+  // reasoning comes from toolCallRounds.thinking.tokens (exact, not bytes).
+  assert_eq!(row["reasoning"], 7);
+}
+
+#[test]
+fn copilot_dump_subcommand_writes_role_user_jsonl() {
+  let fixtures =
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_dump/workspaceStorage");
+  let nanos = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap()
+    .as_nanos();
+  let out_dir = std::env::temp_dir().join(format!("llm-tokei-dump-{nanos}"));
+  let _ = std::fs::remove_dir_all(&out_dir);
+
+  let status = Command::new(bin())
+    .args([
+      "--copilot-dir",
+      fixtures.to_str().unwrap(),
+      "dump",
+      "--out",
+      out_dir.to_str().unwrap(),
+    ])
+    .status()
+    .expect("run llm-tokei dump");
+  assert!(status.success());
+
+  let dest = out_dir.join("sess-dump-1.jsonl");
+  let body = std::fs::read_to_string(&dest).expect("dump file written");
+  let lines: Vec<&str> = body.lines().collect();
+  assert_eq!(lines.len(), 5);
+  let parsed: Vec<serde_json::Value> = lines
+    .iter()
+    .map(|l| serde_json::from_str(l).expect("valid jsonl"))
+    .collect();
+
+  // Every record uses role:"user".
+  for rec in &parsed {
+    assert_eq!(rec["role"], "user");
+  }
+  // Order: prompt, prompt, tool result (with call_id), prompt, prompt.
+  assert_eq!(parsed[0]["text"], "fallback prompt");
+  assert!(parsed[0].get("call_id").is_none());
+  assert_eq!(parsed[1]["text"], "hi");
+  assert_eq!(parsed[2]["text"], "result body");
+  assert_eq!(parsed[2]["call_id"], "c1");
+  assert_eq!(parsed[3]["text"], "tool call please");
+  assert_eq!(parsed[4]["text"], "think");
+
+  let _ = std::fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn copilot_dump_subcommand_rejects_unsupported_source() {
+  let nanos = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap()
+    .as_nanos();
+  let out_dir = std::env::temp_dir().join(format!("llm-tokei-dump-bad-{nanos}"));
+  let out = Command::new(bin())
+    .args([
+      "dump",
+      "--out",
+      out_dir.to_str().unwrap(),
+      "--source",
+      "codex",
+    ])
+    .output()
+    .expect("run llm-tokei dump");
+  assert!(!out.status.success());
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(stderr.contains("only `copilot`"), "stderr: {stderr}");
+  let _ = std::fs::remove_dir_all(&out_dir);
+}

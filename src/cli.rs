@@ -1,4 +1,4 @@
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -148,4 +148,24 @@ pub struct Args {
   /// Print parsing warnings.
   #[arg(short, long)]
   pub verbose: bool,
+
+  #[command(subcommand)]
+  pub cmd: Option<Cmd>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Cmd {
+  /// Dump per-session JSONL transcripts of user-side messages.
+  ///
+  /// Writes one `<session-id>.jsonl` per session into `--out`. Each line is
+  /// `{"role":"user","text":"...","call_id":"..."}` where `call_id` is set
+  /// only for tool-result messages.
+  Dump {
+    /// Output directory (created if missing).
+    #[arg(long, short = 'o')]
+    out: PathBuf,
+    /// Source to dump (currently only `copilot`).
+    #[arg(long, default_value = "copilot")]
+    source: String,
+  },
 }
