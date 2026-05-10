@@ -426,8 +426,7 @@ fn copilot_dump_fixture_bytes_cover_schema_variants() {
   // progressTaskSerialized.content.value, toolInvocationSerialized
   // invocationMessage as string and as { value }, and thinking value
   // (which must NOT count as output bytes).
-  let fixtures =
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_dump/workspaceStorage");
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_dump/workspaceStorage");
   let out = Command::new(bin())
     .args([
       "--source",
@@ -467,8 +466,7 @@ fn copilot_dump_fixture_bytes_cover_schema_variants() {
 
 #[test]
 fn copilot_dump_subcommand_writes_role_user_jsonl() {
-  let fixtures =
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_dump/workspaceStorage");
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_dump/workspaceStorage");
   let nanos = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
     .unwrap()
@@ -521,13 +519,7 @@ fn copilot_dump_subcommand_rejects_unsupported_source() {
     .as_nanos();
   let out_dir = std::env::temp_dir().join(format!("llm-tokei-dump-bad-{nanos}"));
   let out = Command::new(bin())
-    .args([
-      "dump",
-      "--out",
-      out_dir.to_str().unwrap(),
-      "--source",
-      "codex",
-    ])
+    .args(["dump", "--out", out_dir.to_str().unwrap(), "--source", "codex"])
     .output()
     .expect("run llm-tokei dump");
   assert!(!out.status.success());

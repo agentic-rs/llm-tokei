@@ -3,6 +3,7 @@ use crate::sources::copilot_shutdown::{
   normalize_copilot_model, records_from_shutdown_model_metrics, timestamp_from_event, ShutdownRecordArgs,
 };
 use crate::sources::UsageSource;
+use crate::text_count::{count_value, Bytes, Chars};
 use anyhow::Result;
 use serde_json::Value;
 use std::fs::File;
@@ -252,21 +253,11 @@ fn rough_tokens(value: &Value) -> u64 {
 }
 
 fn rough_bytes(value: &Value) -> u64 {
-  match value {
-    Value::String(s) => s.len() as u64,
-    Value::Array(items) => items.iter().map(rough_bytes).sum(),
-    Value::Object(map) => map.values().map(rough_bytes).sum(),
-    _ => 0,
-  }
+  count_value(&Bytes, value)
 }
 
 fn rough_chars(value: &Value) -> u64 {
-  match value {
-    Value::String(s) => s.chars().count() as u64,
-    Value::Array(items) => items.iter().map(rough_chars).sum(),
-    Value::Object(map) => map.values().map(rough_chars).sum(),
-    _ => 0,
-  }
+  count_value(&Chars, value)
 }
 
 fn token_alias(value: &Value, primary: &str, fallback: &str) -> u64 {

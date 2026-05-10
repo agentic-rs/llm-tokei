@@ -3,6 +3,7 @@ use crate::sources::copilot_shutdown::{
   normalize_copilot_model, records_from_shutdown_model_metrics, ShutdownRecordArgs,
 };
 use crate::sources::UsageSource;
+use crate::text_count::{Bytes, Chars, Counter};
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
@@ -378,17 +379,8 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
     // Fallback to request.message.text when no rendered user message is present
     // (older session shapes / queued-but-unsent prompts).
     if rendered_user_chars == 0 {
-      if let Some(text) = req.pointer("/message/text").and_then(|v| v.as_str()) {
-        input_chars = input_chars.saturating_add(text.chars().count() as u64);
-        input_bytes = input_bytes.saturating_add(text.len() as u64);
-      } else if let Some(parts) = req.pointer("/message/parts").and_then(|v| v.as_array()) {
-        for part in parts {
-          if let Some(t) = part.get("text").and_then(|v| v.as_str()) {
-            input_chars = input_chars.saturating_add(t.chars().count() as u64);
-            input_bytes = input_bytes.saturating_add(t.len() as u64);
-          }
-        }
-      }
+      input_chars = input_chars.saturating_add(message_text(&Chars, req));
+      input_bytes = input_bytes.saturating_add(message_text(&Bytes, req));
     }
 
     // --- Output estimate ---
@@ -428,15 +420,15 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
               }
             }
             if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
-              output_chars = output_chars.saturating_add(args.chars().count() as u64);
-              output_bytes = output_bytes.saturating_add(args.len() as u64);
+              output_chars = output_chars.saturating_add(Chars.count(args));
+              output_bytes = output_bytes.saturating_add(Bytes.count(args));
             }
           }
         }
         if round_result_chars == 0 {
           if let Some(resp) = round.get("response").and_then(|v| v.as_str()) {
-            round_result_chars = round_result_chars.saturating_add(resp.chars().count() as u64);
-            input_bytes = input_bytes.saturating_add(resp.len() as u64);
+            round_result_chars = round_result_chars.saturating_add(Chars.count(resp));
+            input_bytes = input_bytes.saturating_add(Bytes.count(resp));
           }
         }
         input_chars = input_chars.saturating_add(round_result_chars);
@@ -746,7 +738,6 @@ fn collect_rich_text(value: &Value) -> String {
   }
 }
 
-
 #[derive(Debug, Clone)]
 enum PathSeg {
   Key(String),
@@ -810,56 +801,53 @@ fn placeholder_for(seg: &PathSeg) -> Value {
   }
 }
 
+fn message_text<C: Counter>(counter: &C, req: &Value) -> u64 {
+  if let Some(text) = req.pointer("/message/text").and_then(|v| v.as_str()) {
+    return counter.count(text);
+  }
+  req
+    .pointer("/message/parts")
+    .and_then(|v| v.as_array())
+    .map(|parts| {
+      parts
+        .iter()
+        .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
+        .map(|text| counter.count(text))
+        .sum()
+    })
+    .unwrap_or(0)
+}
+
 fn sum_text_chars(node: Option<&Value>) -> u64 {
+  sum_text(&Chars, node)
+}
+
+fn sum_text_bytes(node: Option<&Value>) -> u64 {
+  sum_text(&Bytes, node)
+}
+
+fn sum_text<C: Counter>(counter: &C, node: Option<&Value>) -> u64 {
   let value = match node {
     Some(v) => v,
     None => return 0,
   };
   match value {
     // Plain string (e.g. invocationMessage as a markdown string).
-    Value::String(s) => s.chars().count() as u64,
+    Value::String(s) => counter.count(s),
     // Single object form, e.g. invocationMessage as { value: "..." }.
     Value::Object(map) => map
       .get("text")
       .or_else(|| map.get("value"))
       .and_then(|v| v.as_str())
-      .map(|s| s.chars().count() as u64)
+      .map(|s| counter.count(s))
       .unwrap_or(0),
     Value::Array(arr) => {
       let mut total: u64 = 0;
       for item in arr {
         if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-          total = total.saturating_add(t.chars().count() as u64);
+          total = total.saturating_add(counter.count(t));
         } else if let Some(t) = item.get("value").and_then(|v| v.as_str()) {
-          total = total.saturating_add(t.chars().count() as u64);
-        }
-      }
-      total
-    }
-    _ => 0,
-  }
-}
-
-fn sum_text_bytes(node: Option<&Value>) -> u64 {
-  let value = match node {
-    Some(v) => v,
-    None => return 0,
-  };
-  match value {
-    Value::String(s) => s.len() as u64,
-    Value::Object(map) => map
-      .get("text")
-      .or_else(|| map.get("value"))
-      .and_then(|v| v.as_str())
-      .map(|s| s.len() as u64)
-      .unwrap_or(0),
-    Value::Array(arr) => {
-      let mut total: u64 = 0;
-      for item in arr {
-        if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-          total = total.saturating_add(t.len() as u64);
-        } else if let Some(t) = item.get("value").and_then(|v| v.as_str()) {
-          total = total.saturating_add(t.len() as u64);
+          total = total.saturating_add(counter.count(t));
         }
       }
       total
@@ -869,72 +857,43 @@ fn sum_text_bytes(node: Option<&Value>) -> u64 {
 }
 
 fn tool_result_chars(result: &Value) -> u64 {
-  result
-    .get("content")
-    .and_then(|v| v.as_array())
-    .map(|items| items.iter().map(tool_result_content_chars).sum())
-    .unwrap_or(0)
+  tool_result(&Chars, result)
 }
 
 fn tool_result_bytes(result: &Value) -> u64 {
+  tool_result(&Bytes, result)
+}
+
+fn tool_result<C: Counter>(counter: &C, result: &Value) -> u64 {
   result
     .get("content")
     .and_then(|v| v.as_array())
-    .map(|items| items.iter().map(tool_result_content_bytes).sum())
+    .map(|items| items.iter().map(|item| tool_result_content(counter, item)).sum())
     .unwrap_or(0)
 }
 
-fn tool_result_content_chars(item: &Value) -> u64 {
+fn tool_result_content<C: Counter>(counter: &C, item: &Value) -> u64 {
   if let Some(value) = item.get("value") {
-    return rich_text_chars(value);
+    return rich_text(counter, value);
   }
-  rich_text_chars(item)
+  rich_text(counter, item)
 }
 
-fn tool_result_content_bytes(item: &Value) -> u64 {
-  if let Some(value) = item.get("value") {
-    return rich_text_bytes(value);
-  }
-  rich_text_bytes(item)
-}
-
-fn rich_text_chars(value: &Value) -> u64 {
+fn rich_text<C: Counter>(counter: &C, value: &Value) -> u64 {
   match value {
-    Value::String(s) => s.chars().count() as u64,
-    Value::Array(items) => items.iter().map(rich_text_chars).sum(),
+    Value::String(s) => counter.count(s),
+    Value::Array(items) => items.iter().map(|item| rich_text(counter, item)).sum(),
     Value::Object(map) => {
       let mut total: u64 = map
         .get("text")
         .and_then(|v| v.as_str())
-        .map(|s| s.chars().count() as u64)
+        .map(|s| counter.count(s))
         .unwrap_or(0);
       if let Some(children) = map.get("children").and_then(|v| v.as_array()) {
-        total = total.saturating_add(children.iter().map(rich_text_chars).sum::<u64>());
+        total = total.saturating_add(children.iter().map(|item| rich_text(counter, item)).sum::<u64>());
       }
       if let Some(node) = map.get("node") {
-        total = total.saturating_add(rich_text_chars(node));
-      }
-      total
-    }
-    _ => 0,
-  }
-}
-
-fn rich_text_bytes(value: &Value) -> u64 {
-  match value {
-    Value::String(s) => s.len() as u64,
-    Value::Array(items) => items.iter().map(rich_text_bytes).sum(),
-    Value::Object(map) => {
-      let mut total: u64 = map
-        .get("text")
-        .and_then(|v| v.as_str())
-        .map(|s| s.len() as u64)
-        .unwrap_or(0);
-      if let Some(children) = map.get("children").and_then(|v| v.as_array()) {
-        total = total.saturating_add(children.iter().map(rich_text_bytes).sum::<u64>());
-      }
-      if let Some(node) = map.get("node") {
-        total = total.saturating_add(rich_text_bytes(node));
+        total = total.saturating_add(rich_text(counter, node));
       }
       total
     }
@@ -943,19 +902,27 @@ fn rich_text_bytes(value: &Value) -> u64 {
 }
 
 fn response_item_chars(item: &Value) -> u64 {
+  response_item(&Chars, item)
+}
+
+fn response_item_bytes(item: &Value) -> u64 {
+  response_item(&Bytes, item)
+}
+
+fn response_item<C: Counter>(counter: &C, item: &Value) -> u64 {
   // Plain `{value: "..."}` text segments and `{kind: "text", value: "..."}`
   // are LLM-generated text. For tool invocations, only count user-visible
   // invocation/past-tense text; skip tool payloads (tool output/input blobs).
   let kind = item.get("kind").and_then(|v| v.as_str());
   if kind == Some("toolInvocationSerialized") {
     let mut total: u64 = 0;
-    total = total.saturating_add(sum_text_chars(item.pointer("/invocationMessage")));
-    total = total.saturating_add(sum_text_chars(item.pointer("/pastTenseMessage")));
+    total = total.saturating_add(sum_text(counter, item.pointer("/invocationMessage")));
+    total = total.saturating_add(sum_text(counter, item.pointer("/pastTenseMessage")));
     return total;
   }
   if kind == Some("progressTaskSerialized") {
     // content can be {value: "..."} or {value: "...", uris: {...}}; recurse.
-    return sum_text_chars(item.get("content"));
+    return sum_text(counter, item.get("content"));
   }
   if matches!(
     kind,
@@ -973,39 +940,7 @@ fn response_item_chars(item: &Value) -> u64 {
     return 0;
   }
   if let Some(s) = item.get("value").and_then(|v| v.as_str()) {
-    s.chars().count() as u64
-  } else {
-    0
-  }
-}
-
-fn response_item_bytes(item: &Value) -> u64 {
-  let kind = item.get("kind").and_then(|v| v.as_str());
-  if kind == Some("toolInvocationSerialized") {
-    let mut total: u64 = 0;
-    total = total.saturating_add(sum_text_bytes(item.pointer("/invocationMessage")));
-    total = total.saturating_add(sum_text_bytes(item.pointer("/pastTenseMessage")));
-    return total;
-  }
-  if kind == Some("progressTaskSerialized") {
-    return sum_text_bytes(item.get("content"));
-  }
-  if matches!(
-    kind,
-    Some("codeblockUri")
-      | Some("textEditGroup")
-      | Some("undoStop")
-      | Some("inlineReference")
-      | Some("reference")
-      | Some("mcpServersStarting")
-      | Some("promptFile")
-      | Some("agent")
-      | Some("thinking")
-  ) {
-    return 0;
-  }
-  if let Some(s) = item.get("value").and_then(|v| v.as_str()) {
-    s.len() as u64
+    counter.count(s)
   } else {
     0
   }

@@ -5,6 +5,7 @@ mod format;
 mod model;
 mod pricing;
 mod sources;
+mod text_count;
 mod time;
 
 use anyhow::{Context, Result};
@@ -489,10 +490,7 @@ fn run_dump(out: &Path, source: &str, args: &Args) -> Result<()> {
   }
   std::fs::create_dir_all(out).with_context(|| format!("creating output dir {}", out.display()))?;
 
-  let roots = args
-    .copilot_dir
-    .clone()
-    .unwrap_or_else(CopilotSource::default_paths);
+  let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
   let copilot = CopilotSource::new(roots);
   let files = copilot.discover_files();
 
@@ -526,7 +524,10 @@ fn run_dump(out: &Path, source: &str, args: &Args) -> Result<()> {
   }
 
   if args.verbose || written == 0 {
-    eprintln!("dump: wrote {written} session file(s), {total_records} record(s) to {}", out.display());
+    eprintln!(
+      "dump: wrote {written} session file(s), {total_records} record(s) to {}",
+      out.display()
+    );
   }
   Ok(())
 }

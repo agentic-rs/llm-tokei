@@ -1,5 +1,6 @@
 use crate::model::{Source, UsageRecord};
 use crate::sources::UsageSource;
+use crate::text_count::{count_value, Bytes, Counter};
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
@@ -406,14 +407,14 @@ fn response_item_bytes(payload: &serde_json::Value) -> BytesUsage {
 
 fn message_content_bytes(content: Option<&serde_json::Value>) -> u64 {
   match content {
-    Some(serde_json::Value::String(s)) => s.len() as u64,
+    Some(serde_json::Value::String(s)) => Bytes.count(s),
     Some(serde_json::Value::Array(items)) => items
       .iter()
       .map(|item| {
         item
           .get("text")
           .and_then(|v| v.as_str())
-          .map(|s| s.len() as u64)
+          .map(|s| Bytes.count(s))
           .unwrap_or_else(|| nested_text_bytes(Some(item)))
       })
       .sum(),
@@ -426,15 +427,13 @@ fn string_field_bytes(value: &serde_json::Value, field: &str) -> u64 {
   value
     .get(field)
     .and_then(|v| v.as_str())
-    .map(|s| s.len() as u64)
+    .map(|s| Bytes.count(s))
     .unwrap_or(0)
 }
 
 fn nested_text_bytes(value: Option<&serde_json::Value>) -> u64 {
   match value {
-    Some(serde_json::Value::String(s)) => s.len() as u64,
-    Some(serde_json::Value::Array(items)) => items.iter().map(|item| nested_text_bytes(Some(item))).sum(),
-    Some(serde_json::Value::Object(map)) => map.values().map(|item| nested_text_bytes(Some(item))).sum(),
+    Some(value) => count_value(&Bytes, value),
     _ => 0,
   }
 }
