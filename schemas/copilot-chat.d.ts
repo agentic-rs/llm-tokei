@@ -8,70 +8,17 @@ export type Path = string;
 export type Base64 = string;
 export type Blob = string;
 
-/** 0.v.inputState.attachments[].value -> 1 */
-export type $mid_1_9b4a5f71 = {
-  $mid: 1;
-  _sep?: number;
-  authority?: string;
-  external?: Path;
-  fragment?: string;
-  fsPath?: Path;
-  path: Path;
-  query?: string;
-  scheme: string;
-};
-
-/** 0.v.inputState.attachments[].value -> Variant.range -> Variant */
-export type Range_Type_c56f3a3b = {
-  endColumn: number;
-  endLineNumber: number;
-  startColumn: number;
-  startLineNumber: number;
-};
-
-/** 0.v.inputState.attachments[].value -> Variant */
-export type ResultDetails_Type_5cbf55b8 = {
-  range: Range_Type_c56f3a3b;
-  uri: $mid_1_9b4a5f71;
-};
-
-/** 0.v.inputState.selectedModel -> Variant.metadata -> Variant.auth -> Variant */
-export type Auth_Type_0db0f468 = {
-  accountLabel: string;
-  providerLabel: string;
-};
-
-/** 0.v.inputState.selectedModel -> Variant.metadata -> Variant.capabilities -> Variant */
-export type Capabilities_Type_024bea5e = {
-  agentMode: boolean;
-  toolCalling: boolean;
-  vision: boolean;
-};
-
-/** 0.v.inputState.selectedModel -> Variant.metadata -> Variant.extension -> Variant */
-export type ExtensionId_Type_5b6f8a91 = {
-  _lower: string;
-  value: string;
-};
-
-/** 0.v.inputState.selectedModel -> Variant.metadata -> Variant.isDefaultForLocation -> Variant */
-export type IsDefaultForLocation_Type_b17d32ba = {
-  editor: boolean;
-  notebook: boolean;
-  panel: boolean;
-  terminal: boolean;
-};
-
-/** 0.v.inputState.selectedModel -> Variant.metadata -> Variant.modelPickerCategory -> Variant */
-export type ModelPickerCategory_Type_e766cacf = {
-  label: string;
-  order: number;
-};
-
-/** 0.v.inputState.selectedModel -> Variant.metadata -> Variant */
-export type Metadata_Variant_7403ebc8 = {
-  auth: Auth_Type_0db0f468;
-  capabilities: Capabilities_Type_024bea5e;
+/** 0.v -> Variant.inputState -> Variant.selectedModel -> Variant.metadata -> Variant */
+export type Metadata_Variant_a2f3ae0f = {
+  auth: {
+    accountLabel: string;
+    providerLabel: string;
+  };
+  capabilities: {
+    agentMode: boolean;
+    toolCalling: boolean;
+    vision: boolean;
+  };
   configurationSchema: {
     properties: {
       reasoningEffort: {
@@ -85,14 +32,25 @@ export type Metadata_Variant_7403ebc8 = {
       };
     };
   };
-  extension: ExtensionId_Type_5b6f8a91;
+  extension: {
+    _lower: string;
+    value: string;
+  };
   family: string;
   id: string;
-  isDefaultForLocation: IsDefaultForLocation_Type_b17d32ba;
+  isDefaultForLocation: {
+    editor: boolean;
+    notebook: boolean;
+    panel: boolean;
+    terminal: boolean;
+  };
   isUserSelectable: boolean;
   maxInputTokens: number;
   maxOutputTokens: number;
-  modelPickerCategory: ModelPickerCategory_Type_e766cacf;
+  modelPickerCategory: {
+    label: string;
+    order: number;
+  };
   multiplierNumeric: number;
   name: string;
   pricing: string;
@@ -101,10 +59,17 @@ export type Metadata_Variant_7403ebc8 = {
   version: string;
 };
 
-/** 0.v.inputState.selectedModel -> Variant.metadata -> Variant */
-export type Metadata_Variant_7403ebc8_2 = {
-  auth: Auth_Type_0db0f468;
-  capabilities: Capabilities_Type_024bea5e;
+/** 0.v -> Variant.inputState -> Variant.selectedModel -> Variant.metadata -> Variant */
+export type Metadata_Variant_a2f3ae0f_2 = {
+  auth: {
+    accountLabel: string;
+    providerLabel: string;
+  };
+  capabilities: {
+    agentMode: boolean;
+    toolCalling: boolean;
+    vision: boolean;
+  };
   configurationSchema?: {
     properties: {
       reasoningEffort: {
@@ -118,14 +83,25 @@ export type Metadata_Variant_7403ebc8_2 = {
       };
     };
   };
-  extension: ExtensionId_Type_5b6f8a91;
+  extension: {
+    _lower: string;
+    value: string;
+  };
   family: string;
   id: string;
-  isDefaultForLocation: IsDefaultForLocation_Type_b17d32ba;
+  isDefaultForLocation: {
+    editor: boolean;
+    notebook: boolean;
+    panel: boolean;
+    terminal: boolean;
+  };
   isUserSelectable: boolean;
   maxInputTokens: number;
   maxOutputTokens: number;
-  modelPickerCategory: ModelPickerCategory_Type_e766cacf;
+  modelPickerCategory: {
+    label: string;
+    order: number;
+  };
   multiplier: string;
   multiplierNumeric: number;
   name: string;
@@ -134,35 +110,22 @@ export type Metadata_Variant_7403ebc8_2 = {
   version: string;
 };
 
-/** 0.v.inputState.selectedModel -> Variant.metadata -> Variant */
-export type Metadata_Variant_7403ebc8_3 = {
-  auth: Auth_Type_0db0f468;
-  capabilities: Capabilities_Type_024bea5e;
-  extension: ExtensionId_Type_5b6f8a91;
-  family: string;
-  id: string;
-  isDefaultForLocation: IsDefaultForLocation_Type_b17d32ba;
-  isUserSelectable: boolean;
-  maxInputTokens: number;
-  maxOutputTokens: number;
-  modelPickerCategory: ModelPickerCategory_Type_e766cacf;
-  multiplier: string;
-  multiplierNumeric: number;
-  name: string;
-  statusIcon: {
-    id: string;
+/** 0.v -> Variant.inputState -> Variant.selectedModel -> Variant.metadata -> Variant */
+export type Metadata_Variant_a2f3ae0f_3 = {
+  auth: {
+    accountLabel: string;
+    providerLabel: string;
   };
-  tooltip: Blob;
-  vendor: string;
-  version: string;
-};
-
-/** 0.v.inputState.selectedModel -> Variant.metadata -> Variant */
-export type Metadata_Variant_7403ebc8_4 = {
-  auth: Auth_Type_0db0f468;
-  capabilities: Capabilities_Type_024bea5e;
+  capabilities: {
+    agentMode: boolean;
+    toolCalling: boolean;
+    vision: boolean;
+  };
   detail: string;
-  extension: ExtensionId_Type_5b6f8a91;
+  extension: {
+    _lower: string;
+    value: string;
+  };
   family: string;
   id: string;
   isDefaultForLocation: {
@@ -171,21 +134,24 @@ export type Metadata_Variant_7403ebc8_4 = {
   isUserSelectable: boolean;
   maxInputTokens: number;
   maxOutputTokens: number;
-  modelPickerCategory: ModelPickerCategory_Type_e766cacf;
+  modelPickerCategory: {
+    label: string;
+    order: number;
+  };
   name: string;
   tooltip: Blob;
   vendor: string;
   version: string;
 };
 
-/** 0.v.inputState.selectedModel -> Variant */
+/** 0.v -> Variant.inputState -> Variant.selectedModel -> Variant */
 export type SelectedModel_Type_71b7f8b2 = {
   identifier: Path;
-  metadata: Metadata_Variant_7403ebc8 | Metadata_Variant_7403ebc8_2 | Metadata_Variant_7403ebc8_3 | Metadata_Variant_7403ebc8_4;
+  metadata: Metadata_Variant_a2f3ae0f | Metadata_Variant_a2f3ae0f_2 | Metadata_Variant_a2f3ae0f_3;
 };
 
-/** 0.v.inputState.selections[] -> Variant */
-export type Range_Type_cb741af8 = {
+/** 0.v -> Variant.inputState -> Variant.selections[] -> Variant */
+export type Selections_Type_cb741af8 = {
   endColumn: number;
   endLineNumber: number;
   positionColumn: number;
@@ -196,597 +162,8 @@ export type Range_Type_cb741af8 = {
   startLineNumber: number;
 };
 
-/** 0.v.requests[] -> Variant.agent -> Variant.metadata -> Variant */
-export type Metadata_Type_3e2f0323 = {
-  hasFollowups: boolean;
-  supportIssueReporting: boolean;
-  themeIcon: {
-    id: string;
-  };
-};
-
-/** 0.v.requests[] -> Variant.agent -> Variant.slashCommands[] -> Variant.disambiguation[] -> Variant */
-export type Disambiguation_Type_d9420919 = {
-  category: string;
-  description: string;
-  examples: string[];
-};
-
-/** 0.v.requests[] -> Variant.agent -> Variant.slashCommands[] -> Variant */
-export type SlashCommands_Variant_419759c3 = {
-  description: string;
-  disambiguation?: Disambiguation_Type_d9420919[];
-  isSticky?: boolean;
-  name: string;
-  sampleRequest?: string;
-};
-
-/** 0.v.requests[] -> Variant.agent -> Variant.slashCommands[] -> Variant */
-export type SlashCommands_Variant_419759c3_2 = {
-  description: string;
-  disambiguation?: Disambiguation_Type_d9420919[];
-  name: string;
-  sampleRequest: string;
-  when?: string;
-};
-
-/** 0.v.requests[] -> Variant.agent -> Variant */
-export type Agent_Type_dc9bd4a7 = {
-  description: string;
-  disambiguation: never[];
-  extensionDisplayName: string;
-  extensionId: ExtensionId_Type_5b6f8a91;
-  extensionPublisherId: string;
-  extensionVersion: Semver;
-  fullName: string;
-  id: string;
-  isDefault: boolean;
-  locations: string[];
-  metadata: Metadata_Type_3e2f0323;
-  modes: string[];
-  name: string;
-  publisherDisplayName: string;
-  slashCommands: Array<SlashCommands_Variant_419759c3 | SlashCommands_Variant_419759c3_2>;
-  when: string;
-};
-
-/** 0.v.requests[] -> Variant.contentReferences[] -> reference */
-export type ContentReferences_Reference_b191043c = {
-  kind: "reference";
-  reference: $mid_1_9b4a5f71;
-};
-
-/** 0.v.requests[] -> Variant.message -> Variant.parts[].range -> Variant */
-export type Range_Type_e984d3e7 = {
-  endExclusive: number;
-  start: number;
-};
-
-/** 0.v.requests[] -> Variant.message -> Variant */
-export type Message_Type_cb5b622e = {
-  parts: {
-    editorRange: Range_Type_c56f3a3b;
-    kind: "text";
-    range: Range_Type_e984d3e7;
-    text: string;
-  }[];
-  text: string;
-};
-
-/** 0.v.requests[] -> Variant.modelState -> Variant */
-export type ModelState_Type_32b12971 = {
-  completedAt?: number;
-  value: number;
-};
-
-/** 0.v.requests[] -> Variant.response[] -> mcpServersStarting */
-export type Response_McpServersStarting_ca747050 = {
-  didStartServerIds: never[];
-  kind: "mcpServersStarting";
-};
-
-/** 0.v.requests[] -> Variant.response[] -> progressTaskSerialized.content -> Variant */
-export type Content_Type_c117e6d5 = {
-  uris: Record<string, unknown>;
-  value: string;
-};
-
-/** 0.v.requests[] -> Variant.response[] -> progressTaskSerialized */
-export type Response_ProgressTaskSerialized_9e22e023 = {
-  content: Content_Type_c117e6d5;
-  kind: "progressTaskSerialized";
-  progress: never[];
-};
-
-/** 0.v.requests[] -> Variant.response[] -> toolInvocationSerialized.invocationMessage -> Variant */
-export type InvocationMessage_Variant_bfc25fae = {
-  supportAlertSyntax: boolean;
-  supportHtml: boolean;
-  supportThemeIcons: boolean;
-  uris: Record<Url, $mid_1_9b4a5f71>;
-  value: string;
-};
-
-/** 0.v.requests[] -> Variant.response[] -> toolInvocationSerialized */
-export type Response_ToolInvocationSerialized_4dcbc231 = {
-  generatedTitle?: string;
-  invocationMessage: Path | InvocationMessage_Variant_bfc25fae | string;
-  isAttachedToThinking?: boolean;
-  isComplete: boolean;
-  isConfirmed?: {
-    type: 1;
-  };
-  kind: "toolInvocationSerialized";
-  pastTenseMessage?: InvocationMessage_Variant_bfc25fae | string;
-  presentation?: string;
-  resultDetails?: ResultDetails_Type_5cbf55b8[];
-  source: {
-    label: string;
-    type: "internal";
-  };
-  subAgentInvocationId?: string;
-  toolCallId: string;
-  toolId: string;
-  toolSpecificData?: {
-    agentName?: string;
-    description: string;
-    kind: "subagent";
-    modelName: string;
-    prompt: Path;
-    result?: string;
-  };
-};
-
-/** 0.v.requests[] -> Variant.response[] -> thinking.metadata -> Variant */
-export type Metadata_Variant_97f9cda1 = {
-  stopReason: string;
-  vscodeReasoningDone: boolean;
-};
-
-/** 0.v.requests[] -> Variant.response[] -> thinking.metadata -> Variant */
-export type Metadata_Variant_97f9cda1_2 = {
-  toolId: string;
-};
-
-/** 0.v.requests[] -> Variant.response[] -> thinking */
-export type Response_Thinking_f3c7934d = {
-  generatedTitle?: string;
-  id?: string;
-  kind: "thinking";
-  metadata?: Metadata_Variant_97f9cda1 | Metadata_Variant_97f9cda1_2;
-  value: never[] | string | Blob | Path;
-};
-
-/** 0.v.requests[] -> Variant.response[] -> Variant */
-export type Response_Variant_9ed16578 = {
-  baseUri?: $mid_1_9b4a5f71;
-  supportAlertSyntax?: boolean;
-  supportHtml: boolean;
-  supportThemeIcons: boolean;
-  uris?: Record<string, unknown>;
-  value: string;
-};
-
-/** 0.v.requests[] -> Variant.response[] -> inlineReference.inlineReference -> 12 */
-export type InlineReference_12_8b86d4f8 = {
-  containerName: string;
-  kind: 12;
-  location: ResultDetails_Type_5cbf55b8;
-  name: string;
-};
-
-/** 0.v.requests[] -> Variant.response[] -> inlineReference */
-export type Response_InlineReference_19da2736 = {
-  inlineReference: $mid_1_9b4a5f71 | ResultDetails_Type_5cbf55b8 | InlineReference_12_8b86d4f8;
-  kind: "inlineReference";
-  name?: string;
-  resolveId?: Uuid;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.renderedGlobalContext[] -> 1 */
-export type RenderedGlobalContext_1_70f03812 = {
-  text: Path;
-  type: 1;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.renderedGlobalContext[] -> 3 */
-export type RenderedGlobalContext_3_f626c266 = {
-  cacheType: string;
-  type: 3;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.renderedUserMessage[] -> 1 */
-export type RenderedUserMessage_1_e37b2dc9 = {
-  text: Path;
-  type: 1;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.renderedUserMessage[] -> 3 */
-export type RenderedUserMessage_3_29a4bb49 = {
-  cacheType: string;
-  type: 3;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.toolCallResults{} -> Variant.content[] -> 21 */
-export type $mid_21_db627c2b = {
-  $mid: 21;
-  value: string;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.toolCallResults{} -> Variant.content[] -> 23.value.node.children[] -> 1.children[] -> 2 */
-export type Children_2_184155d5 = {
-  lineBreakBefore: boolean;
-  priority: number;
-  references?: {
-    anchor: $mid_1_9b4a5f71;
-    options: {
-      isFromTool: boolean;
-    };
-  }[];
-  text: string;
-  type: 2;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.toolCallResults{} -> Variant.content[] -> 23.value.node.children[] -> 1 */
-export type Children_1_4d54983a = {
-  children: Array<Children_1_4d54983a | Children_2_184155d5>;
-  ctor: number;
-  ctorName: string;
-  props: Record<string, unknown>;
-  references: never[];
-  type: 1;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.toolCallResults{} -> Variant.content[] -> 23 */
-export type $mid_23_16b15f28 = {
-  $mid: 23;
-  value: {
-    node: {
-      children: Array<Children_1_4d54983a | Children_2_184155d5>;
-      ctor: number;
-      ctorName: string;
-      props: Record<string, unknown>;
-      references: never[];
-      type: 1;
-    };
-  };
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.toolCallResults{} -> Variant */
-export type $mid_20_d4f9b655 = {
-  $mid: 20;
-  content: Array<$mid_21_db627c2b | $mid_23_16b15f28>;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.toolCallRounds[] -> Variant.thinking -> Variant */
-export type Thinking_Type_c31d24a3 = {
-  encrypted: Path;
-  id: Base64;
-  text: never[];
-  tokens?: number;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.toolCallRounds[] -> Variant.toolCalls[] -> Variant */
-export type ToolCalls_Type_d37e2af8 = {
-  arguments: string;
-  id: VscodeCallId;
-  name: string;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant.toolCallRounds[] -> Variant */
-export type ToolCallRounds_Type_999c9a19 = {
-  id: Uuid;
-  phase?: string;
-  phaseModelId?: string;
-  response: string;
-  statefulMarker?: Path;
-  thinking?: Thinking_Type_c31d24a3;
-  timestamp: number;
-  toolCalls: ToolCalls_Type_d37e2af8[];
-  toolInputRetry: number;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.metadata -> Variant */
-export type Metadata_Type_97e20652 = {
-  agentId: string;
-  cacheKey?: Url;
-  codeBlocks?: never[];
-  modelMessageId: string;
-  renderedGlobalContext?: Array<RenderedGlobalContext_1_70f03812 | RenderedGlobalContext_3_f626c266>;
-  renderedUserMessage?: Array<RenderedUserMessage_1_e37b2dc9 | RenderedUserMessage_3_29a4bb49>;
-  resolvedModel?: string;
-  responseId: Uuid;
-  sessionId: Uuid;
-  toolCallResults?: Record<VscodeCallId, $mid_20_d4f9b655>;
-  toolCallRounds?: ToolCallRounds_Type_999c9a19[];
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant.timings -> Variant */
-export type Timings_Type_bfe18f74 = {
-  firstProgress?: number;
-  totalElapsed: number;
-};
-
-/** 0.v.requests[] -> Variant.result -> Variant */
-export type Result_Type_53c47f49 = {
-  details: string;
-  metadata: Metadata_Type_97e20652;
-  timings: Timings_Type_bfe18f74;
-};
-
-/** 0.v.requests[] -> Variant.variableData.variables[] -> tool */
-export type Variables_Tool_a642671e = {
-  fullName?: string;
-  icon?: {
-    id: string;
-  };
-  id: string;
-  kind: "tool";
-  name: string;
-  range?: Range_Type_e984d3e7;
-};
-
-/** 0.v.requests[] -> Variant.variableData.variables[] -> promptFile */
-export type Variables_PromptFile_83e33e32 = {
-  automaticallyAdded: boolean;
-  id: Path;
-  isRoot: boolean;
-  kind: "promptFile";
-  modelDescription: string;
-  name: string;
-  toolReferences?: never[];
-  value: $mid_1_9b4a5f71;
-};
-
-/** 0.v.requests[] -> Variant.variableData.variables[] -> promptText */
-export type Variables_PromptText_39dee4fb = {
-  automaticallyAdded: boolean;
-  id: string;
-  kind: "promptText";
-  modelDescription: string;
-  name: string;
-  toolReferences: {
-    fullName?: string;
-    icon?: {
-      id: string;
-    };
-    id: string;
-    kind: "tool";
-    name: string;
-    range?: Range_Type_e984d3e7;
-  }[];
-  value: Path;
-};
-
-/** 0.v.requests[] -> Variant.variableData.variables[] -> file */
-export type Variables_File_5c76f824 = {
-  id: string;
-  kind: "file";
-  modelDescription?: string;
-  name: string;
-  value: $mid_1_9b4a5f71 | ResultDetails_Type_5cbf55b8;
-};
-
-/** 0.v.requests[] -> Variant */
-export type Requests_Variant_a79b3dd9 = {
-  agent: Agent_Type_dc9bd4a7;
-  codeCitations: never[];
-  contentReferences: ContentReferences_Reference_b191043c[];
-  followups?: never[];
-  message: Message_Type_cb5b622e;
-  modeInfo?: {
-    isBuiltin: boolean;
-    kind: "agent";
-    modeId: string;
-    modeInstructions?: {
-      content: Path;
-      isBuiltin: boolean;
-      name: string;
-      toolReferences: never[];
-      uri: $mid_1_9b4a5f71;
-    };
-    modeName: string;
-    permissionLevel: string;
-  };
-  modelId: Path;
-  modelState: ModelState_Type_32b12971;
-  requestId: string;
-  response: Array<Response_McpServersStarting_ca747050 | Response_ProgressTaskSerialized_9e22e023 | Response_ToolInvocationSerialized_4dcbc231 | Response_Thinking_f3c7934d | Response_Variant_9ed16578 | Response_InlineReference_19da2736>;
-  responseId: string;
-  responseMarkdownInfo?: never[];
-  result?: Result_Type_53c47f49;
-  timeSpentWaiting: number;
-  timestamp: number;
-  variableData: {
-    variables: Array<Variables_Tool_a642671e | Variables_PromptFile_83e33e32 | Variables_PromptText_39dee4fb | Variables_File_5c76f824>;
-  };
-};
-
-/** 0.v.requests[] -> Variant.response[] -> Variant */
-export type Response_Variant_9ed16578_2 = {
-  baseUri: $mid_1_9b4a5f71;
-  supportHtml: boolean;
-  supportThemeIcons: boolean;
-  value: string;
-};
-
-/** 0.v.requests[] -> Variant */
-export type Requests_Variant_a79b3dd9_2 = {
-  agent: Agent_Type_dc9bd4a7;
-  codeCitations: never[];
-  completionTokens: number;
-  contentReferences: never[];
-  message: Message_Type_cb5b622e;
-  modeInfo: {
-    isBuiltin: boolean;
-    kind: "agent";
-    modeId: string;
-    modeInstructions?: {
-      content: Path;
-      isBuiltin: boolean;
-      name: string;
-      toolReferences: never[];
-      uri: $mid_1_9b4a5f71;
-    };
-    modeName: string;
-    permissionLevel: string;
-  };
-  modelId: Path;
-  modelState: {
-    value: number;
-  };
-  requestId: string;
-  response: Array<Response_McpServersStarting_ca747050 | Response_ProgressTaskSerialized_9e22e023 | Response_Thinking_f3c7934d | Response_Variant_9ed16578_2 | Response_InlineReference_19da2736 | Response_ToolInvocationSerialized_4dcbc231>;
-  responseId: string;
-  timeSpentWaiting: number;
-  timestamp: number;
-  variableData: {
-    variables: never[];
-  };
-};
-
-/** 0 */
-export type $0_801eaa31 = {
-  kind: 0;
-  v: {
-    creationDate: number;
-    customTitle?: string;
-    hasPendingEdits: boolean;
-    initialLocation: string;
-    inputState?: {
-      attachments: {
-        id: string;
-        kind: "file";
-        modelDescription?: string;
-        name: string;
-        value: $mid_1_9b4a5f71 | ResultDetails_Type_5cbf55b8;
-      }[];
-      contrib: {
-        chatDynamicVariableModel: never[];
-      };
-      inputText: string;
-      mode: {
-        id: string;
-        kind: "agent";
-      };
-      permissionLevel?: string;
-      selectedModel?: SelectedModel_Type_71b7f8b2;
-      selections: Range_Type_cb741af8[];
-    };
-    pendingRequests?: never[];
-    requests: Array<Requests_Variant_a79b3dd9 | Requests_Variant_a79b3dd9_2>;
-    responderUsername: string;
-    sessionId: Uuid;
-    version: number;
-  };
-};
-
-/** 1.v -> Variant.errorDetails -> Variant */
-export type ErrorDetails_Variant_3dfcc761 = {
-  code?: string;
-  confirmationButtons?: {
-    data: {
-      copilotContinueOnError: boolean;
-    };
-    label: string;
-  }[];
-  isRateLimited?: boolean;
-  level?: number;
-  message: string;
-  responseIsIncomplete: boolean;
-};
-
-/** 1.v -> Variant.errorDetails -> Variant */
-export type ErrorDetails_Variant_3dfcc761_2 = {
-  isQuotaExceeded: boolean;
-  isRateLimited: boolean;
-  message: string;
-  responseIsIncomplete: boolean;
-};
-
-/** 1.v -> Variant.metadata -> Variant.toolCallRounds[] -> Variant */
-export type ToolCallRounds_Variant_17b251ca = {
-  id: Uuid;
-  phase: string;
-  phaseModelId: string;
-  response: Blob;
-  statefulMarker: Path;
-  summary?: Path;
-  timestamp: number;
-  toolCalls: ToolCalls_Type_d37e2af8[];
-  toolInputRetry: number;
-};
-
-/** 1.v -> Variant.metadata -> Variant */
-export type Metadata_Variant_96fb7e68 = {
-  agentId: string;
-  codeBlocks: never[];
-  modelMessageId: Uuid;
-  renderedUserMessage: Array<RenderedUserMessage_1_e37b2dc9 | RenderedUserMessage_3_29a4bb49>;
-  resolvedModel: string;
-  responseId: Uuid;
-  sessionId: Uuid;
-  summaries: {
-    contextLengthBefore?: number;
-    durationMs: number;
-    model: string;
-    numRounds: number;
-    numRoundsSinceLastSummarization: number;
-    outcome?: string;
-    promptTokenDetails: {
-      category: string;
-      label: string;
-      percentageOfPrompt: number;
-    }[];
-    source?: string;
-    summarizationMode: string;
-    text: Path;
-    toolCallRoundId: Uuid;
-    usage: {
-      completion_tokens: number;
-      completion_tokens_details: {
-        accepted_prediction_tokens: number;
-        reasoning_tokens: number;
-        rejected_prediction_tokens: number;
-      };
-      prompt_tokens: number;
-      prompt_tokens_details: {
-        cached_tokens: number;
-      };
-      total_tokens: number;
-    };
-  }[];
-  toolCallResults: Record<VscodeCallId, $mid_20_d4f9b655>;
-  toolCallRounds: Array<ToolCallRounds_Variant_17b251ca | ToolCallRounds_Type_999c9a19>;
-};
-
-/** 1.v -> Variant */
-export type V_Variant_9dcab11c = {
-  details?: string;
-  errorDetails?: ErrorDetails_Variant_3dfcc761 | ErrorDetails_Variant_3dfcc761_2;
-  metadata?: Metadata_Type_97e20652 | Metadata_Variant_96fb7e68;
-  timings?: Timings_Type_bfe18f74;
-};
-
-/** 1.v -> agent */
-export type V_Agent_2bd6bbcb = {
-  id: string;
-  kind: "agent";
-};
-
-/** 1.v -> Variant */
-export type V_Variant_9dcab11c_2 = {
-  identifier: Path;
-  metadata: Metadata_Variant_7403ebc8 | Metadata_Variant_7403ebc8_2;
-};
-
-/** 1.v -> Variant */
-export type V_Variant_9dcab11c_3 = {
-  requestId: string;
-};
-
-/** 1.v -> Variant */
-export type V_Variant_9dcab11c_4 = {
+/** 0.v -> Variant.inputState -> Variant */
+export type InputState_Type_325379cc = {
   attachments: never[];
   contrib: {
     chatDynamicVariableModel: never[];
@@ -796,62 +173,170 @@ export type V_Variant_9dcab11c_4 = {
     id: string;
     kind: "agent";
   };
-  selectedModel: {
-    identifier: Path;
-    metadata: {
-      auth: Auth_Type_0db0f468;
-      capabilities: Capabilities_Type_024bea5e;
-      detail: string;
-      extension: ExtensionId_Type_5b6f8a91;
-      family: string;
+  permissionLevel?: string;
+  selectedModel?: SelectedModel_Type_71b7f8b2;
+  selections: Selections_Type_cb741af8[];
+};
+
+/** 0.v -> Variant.requests[].agent -> Variant.slashCommands[] -> Variant */
+export type SlashCommands_Variant_de33fafe = {
+  description: string;
+  disambiguation?: {
+    category: string;
+    description: string;
+    examples: string[];
+  }[];
+  isSticky?: boolean;
+  name: string;
+  sampleRequest?: string;
+};
+
+/** 0.v -> Variant.requests[].agent -> Variant.slashCommands[] -> Variant */
+export type SlashCommands_Variant_de33fafe_2 = {
+  description: string;
+  disambiguation?: {
+    category: string;
+    description: Blob;
+    examples: string[];
+  }[];
+  name: string;
+  sampleRequest: string;
+  when?: string;
+};
+
+/** 0.v -> Variant.requests[].agent -> Variant */
+export type Agent_Type_dc9bd4a7 = {
+  description: string;
+  disambiguation: never[];
+  extensionDisplayName: string;
+  extensionId: {
+    _lower: string;
+    value: string;
+  };
+  extensionPublisherId: string;
+  extensionVersion: Semver;
+  fullName: string;
+  id: string;
+  isDefault: boolean;
+  locations: string[];
+  metadata: {
+    hasFollowups: boolean;
+    supportIssueReporting: boolean;
+    themeIcon: {
       id: string;
-      isDefaultForLocation: {
-        panel: boolean;
-      };
-      isUserSelectable: boolean;
-      maxInputTokens: number;
-      maxOutputTokens: number;
-      modelPickerCategory: ModelPickerCategory_Type_e766cacf;
-      name: string;
-      tooltip: Blob;
-      vendor: string;
-      version: string;
     };
   };
-  selections: Range_Type_cb741af8[];
+  modes: string[];
+  name: string;
+  publisherDisplayName: string;
+  slashCommands: Array<SlashCommands_Variant_de33fafe | SlashCommands_Variant_de33fafe_2>;
+  when: string;
 };
 
-/** 1 */
-export type $1_a2c6e3e4 = {
-  k: Array<string | number>;
-  kind: 1;
-  v: string | Range_Type_cb741af8[] | boolean | number | V_Variant_9dcab11c | never[] | ModelState_Type_32b12971 | Blob | {
-    id: string;
-    kind: "file";
-    modelDescription?: string;
-    name: string;
-    value: $mid_1_9b4a5f71 | ResultDetails_Type_5cbf55b8;
-  }[] | Path | ContentReferences_Reference_b191043c[] | V_Agent_2bd6bbcb | V_Variant_9dcab11c_2 | V_Variant_9dcab11c_3 | {
-    suggestionId: string;
-  }[] | V_Variant_9dcab11c_4;
+/** 0.v -> Variant.requests[].message -> Variant.parts[].editorRange -> Variant */
+export type Range_Type_c56f3a3b = {
+  endColumn: number;
+  endLineNumber: number;
+  startColumn: number;
+  startLineNumber: number;
 };
 
-/** 2.v[] -> thinking.metadata -> Variant */
-export type Metadata_Variant_e84b06b3 = {
+/** 0.v -> Variant.requests[].message -> Variant */
+export type Message_Type_cb5b622e = {
+  parts: {
+    editorRange: Range_Type_c56f3a3b;
+    kind: "text";
+    range: {
+      endExclusive: number;
+      start: number;
+    };
+    text: string;
+  }[];
+  text: Path;
+};
+
+/** 0.v -> Variant.requests[].modeInfo.modeInstructions.toolReferences[].range -> Variant */
+export type Range_Type_e984d3e7 = {
+  endExclusive: number;
+  start: number;
+};
+
+/** 0.v -> Variant.requests[].modeInfo.modeInstructions.uri -> Variant */
+export type $mid_1_9b4a5f71 = {
+  $mid: 1;
+  _sep?: number;
+  authority?: string;
+  external?: Path;
+  fragment?: string;
+  fsPath?: Path;
+  path: Path;
+  query?: string;
+  scheme: string;
+};
+
+/** 0.v -> Variant.requests[].modelState -> Variant */
+export type ModelState_Type_32b12971 = {
+  completedAt: number;
+  value: number;
+};
+
+/** 0.v -> Variant.requests[].response[] -> mcpServersStarting */
+export type Response_McpServersStarting_898eb3e4 = {
+  didStartServerIds: never[];
+  kind: "mcpServersStarting";
+};
+
+/** 0.v -> Variant.requests[].response[] -> progressTaskSerialized */
+export type Response_ProgressTaskSerialized_132e6db2 = {
+  content: {
+    uris: Record<string, unknown>;
+    value: string;
+  };
+  kind: "progressTaskSerialized";
+  progress: never[];
+};
+
+/** 0.v -> Variant.requests[].response[] -> thinking.metadata -> Variant */
+export type Metadata_Variant_d8b7592b = {
+  stopReason: string;
+  vscodeReasoningDone: boolean;
+};
+
+/** 0.v -> Variant.requests[].response[] -> thinking.metadata -> Variant */
+export type Metadata_Variant_d8b7592b_2 = {
   toolId: string;
 };
 
-/** 2.v[] -> thinking */
-export type V_Thinking_0d8c201c = {
+/** 0.v -> Variant.requests[].response[] -> thinking */
+export type Response_Thinking_b518728e = {
   generatedTitle?: string;
   id?: string;
   kind: "thinking";
-  metadata?: Metadata_Variant_97f9cda1 | Metadata_Variant_e84b06b3;
-  value: never[] | string | Blob | Path;
+  metadata?: Metadata_Variant_d8b7592b | Metadata_Variant_d8b7592b_2;
+  value: never[] | string | Path | Blob;
 };
 
-/** 2.v[] -> toolInvocationSerialized.invocationMessage -> Variant */
-export type InvocationMessage_Variant_b6b5f121 = {
+/** 0.v -> Variant.requests[].response[] -> Variant */
+export type Response_Variant_780d654e = {
+  baseUri?: $mid_1_9b4a5f71;
+  supportAlertSyntax?: boolean;
+  supportHtml: boolean;
+  supportThemeIcons: boolean;
+  uris?: Record<string, unknown>;
+  value: string;
+};
+
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.invocationMessage -> Variant */
+export type InvocationMessage_Variant_ce876462 = {
+  supportAlertSyntax: boolean;
+  supportHtml: boolean;
+  supportThemeIcons: boolean;
+  uris: Record<string, $mid_1_9b4a5f71> | Record<Url, $mid_1_9b4a5f71>;
+  value: string;
+};
+
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.invocationMessage -> Variant */
+export type InvocationMessage_Variant_ce876462_2 = {
   isTrusted: boolean;
   supportAlertSyntax: boolean;
   supportHtml: boolean;
@@ -859,34 +344,34 @@ export type InvocationMessage_Variant_b6b5f121 = {
   value: string;
 };
 
-/** 2.v[] -> toolInvocationSerialized.isConfirmed -> 1 */
-export type IsConfirmed_1_5b8fc432 = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.isConfirmed -> 1 */
+export type IsConfirmed_1_c95cb60c = {
   type: 1;
 };
 
-/** 2.v[] -> toolInvocationSerialized.isConfirmed -> 4 */
-export type IsConfirmed_4_90ec962f = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.isConfirmed -> 4 */
+export type IsConfirmed_4_101ec371 = {
   type: 4;
 };
 
-/** 2.v[] -> toolInvocationSerialized.isConfirmed -> 0 */
-export type IsConfirmed_0_9216aac8 = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.isConfirmed -> 0 */
+export type IsConfirmed_0_6b61abae = {
   type: 0;
 };
 
-/** 2.v[] -> toolInvocationSerialized.isConfirmed -> 5 */
-export type IsConfirmed_5_a7a5bb24 = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.isConfirmed -> 5 */
+export type IsConfirmed_5_9efe7d77 = {
   type: 5;
 };
 
-/** 2.v[] -> toolInvocationSerialized.isConfirmed -> 3 */
-export type IsConfirmed_3_c2d3cd7c = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.isConfirmed -> 3 */
+export type IsConfirmed_3_b8417d0c = {
   scope: string;
   type: 3;
 };
 
-/** 2.v[] -> toolInvocationSerialized.resultDetails -> Variant */
-export type ResultDetails_Variant_fbcbbe50 = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.resultDetails -> Variant */
+export type ResultDetails_Variant_6a3ac424 = {
   input: string;
   isError: boolean;
   output: {
@@ -896,14 +381,38 @@ export type ResultDetails_Variant_fbcbbe50 = {
   }[];
 };
 
-/** 2.v[] -> toolInvocationSerialized.source -> internal */
-export type Source_Internal_a15c9bee = {
-  label: string;
-  type: "internal";
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.resultDetails -> Variant[] -> Variant */
+export type ResultDetails_Type_5cbf55b8 = {
+  range: Range_Type_c56f3a3b;
+  uri: $mid_1_9b4a5f71;
 };
 
-/** 2.v[] -> toolInvocationSerialized.source -> mcp */
-export type Source_Mcp_c68994a2 = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.resultDetails -> Variant[] -> Variant */
+export type ResultDetails_Variant_db7cfc41 = {
+  range: Range_Type_c56f3a3b;
+  uri: $mid_1_9b4a5f71;
+};
+
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.resultDetails -> Variant[] -> Variant */
+export type ResultDetails_Variant_db7cfc41_2 = {
+  range: Range_Type_c56f3a3b;
+  uri: $mid_1_9b4a5f71;
+};
+
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.resultDetails -> Variant[] -> Variant */
+export type ResultDetails_Variant_db7cfc41_3 = {
+  range: Range_Type_c56f3a3b;
+  uri: $mid_1_9b4a5f71;
+};
+
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.resultDetails -> Variant[] -> Variant */
+export type ResultDetails_Variant_db7cfc41_4 = {
+  range: Range_Type_c56f3a3b;
+  uri: $mid_1_9b4a5f71;
+};
+
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.source -> mcp */
+export type Source_Mcp_72c5f656 = {
   collectionId: Path;
   definitionId: Path;
   label: string;
@@ -911,14 +420,22 @@ export type Source_Mcp_c68994a2 = {
   type: "mcp";
 };
 
-/** 2.v[] -> toolInvocationSerialized.toolSpecificData -> terminal */
-export type ToolSpecificData_Terminal_8a60c52e = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.source -> internal */
+export type Source_Internal_44ce46f1 = {
+  label: string;
+  type: "internal";
+};
+
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.toolSpecificData -> terminal */
+export type ToolSpecificData_Terminal_e951ff02 = {
   autoApproveInfo?: {
-    isTrusted: boolean;
+    isTrusted: {
+      enabledCommands: Blob[];
+    };
     supportAlertSyntax: boolean;
     supportHtml: boolean;
     supportThemeIcons: boolean;
-    value: string;
+    value: Blob;
   };
   commandLine: {
     forDisplay?: string;
@@ -955,28 +472,8 @@ export type ToolSpecificData_Terminal_8a60c52e = {
   terminalToolSessionId?: Uuid;
 };
 
-/** 2.v[] -> toolInvocationSerialized.toolSpecificData -> input */
-export type ToolSpecificData_Input_e9170bc3 = {
-  kind: "input";
-  rawInput: {
-    action?: string;
-    directory: Path;
-    files?: string[];
-  };
-};
-
-/** 2.v[] -> toolInvocationSerialized.toolSpecificData -> todoList */
-export type ToolSpecificData_TodoList_4e947667 = {
-  kind: "todoList";
-  todoList: {
-    id: string;
-    status: string;
-    title: string;
-  }[];
-};
-
-/** 2.v[] -> toolInvocationSerialized.toolSpecificData -> subagent */
-export type ToolSpecificData_Subagent_d4d13177 = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.toolSpecificData -> subagent */
+export type ToolSpecificData_Subagent_3e13f9d1 = {
   agentName?: string;
   description: string;
   kind: "subagent";
@@ -985,184 +482,208 @@ export type ToolSpecificData_Subagent_d4d13177 = {
   result?: string;
 };
 
-/** 2.v[] -> toolInvocationSerialized */
-export type V_ToolInvocationSerialized_d70cc2ca = {
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.toolSpecificData -> input */
+export type ToolSpecificData_Input_335229f3 = {
+  kind: "input";
+  rawInput: {
+    action?: string;
+    directory: Path;
+    files?: string[];
+  };
+};
+
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized.toolSpecificData -> todoList */
+export type ToolSpecificData_TodoList_992240ca = {
+  kind: "todoList";
+  todoList: {
+    id: string;
+    status: string;
+    title: string;
+  }[];
+};
+
+/** 0.v -> Variant.requests[].response[] -> toolInvocationSerialized */
+export type Response_ToolInvocationSerialized_8dd43a27 = {
   generatedTitle?: string;
-  invocationMessage: InvocationMessage_Variant_bfc25fae | string | InvocationMessage_Variant_b6b5f121 | Path;
+  invocationMessage: InvocationMessage_Variant_ce876462 | string | InvocationMessage_Variant_ce876462_2 | Path;
+  isAttachedToThinking?: boolean;
   isComplete: boolean;
-  isConfirmed?: IsConfirmed_1_5b8fc432 | IsConfirmed_4_90ec962f | IsConfirmed_0_9216aac8 | IsConfirmed_5_a7a5bb24 | IsConfirmed_3_c2d3cd7c;
+  isConfirmed?: IsConfirmed_1_c95cb60c | IsConfirmed_4_101ec371 | IsConfirmed_0_6b61abae | IsConfirmed_5_9efe7d77 | IsConfirmed_3_b8417d0c;
   kind: "toolInvocationSerialized";
   originMessage?: string;
-  pastTenseMessage?: InvocationMessage_Variant_bfc25fae | InvocationMessage_Variant_b6b5f121 | string | Path;
+  pastTenseMessage?: InvocationMessage_Variant_ce876462 | InvocationMessage_Variant_ce876462_2 | string | Path;
   presentation?: string;
-  resultDetails?: Array<$mid_1_9b4a5f71 | ResultDetails_Type_5cbf55b8> | ResultDetails_Variant_fbcbbe50 | ResultDetails_Type_5cbf55b8[] | never[] | $mid_1_9b4a5f71[] | Array<ResultDetails_Type_5cbf55b8 | $mid_1_9b4a5f71>;
-  source: Source_Internal_a15c9bee | Source_Mcp_c68994a2;
-  subAgentInvocationId?: Uuid;
+  resultDetails?: ResultDetails_Variant_6a3ac424 | ResultDetails_Type_5cbf55b8[] | {
+    range: Range_Type_c56f3a3b;
+    uri: $mid_1_9b4a5f71;
+  }[] | Array<$mid_1_9b4a5f71 | ResultDetails_Variant_db7cfc41> | never[] | $mid_1_9b4a5f71[] | Array<$mid_1_9b4a5f71 | ResultDetails_Variant_db7cfc41_2> | Array<$mid_1_9b4a5f71 | ResultDetails_Variant_db7cfc41_3> | Array<ResultDetails_Variant_db7cfc41_4 | $mid_1_9b4a5f71>;
+  source: Source_Mcp_72c5f656 | Source_Internal_44ce46f1;
+  subAgentInvocationId?: string;
   toolCallId: string;
   toolId: string;
-  toolSpecificData?: ToolSpecificData_Terminal_8a60c52e | ToolSpecificData_Input_e9170bc3 | ToolSpecificData_TodoList_4e947667 | ToolSpecificData_Subagent_d4d13177;
+  toolSpecificData?: ToolSpecificData_Terminal_e951ff02 | ToolSpecificData_Subagent_3e13f9d1 | ToolSpecificData_Input_335229f3 | ToolSpecificData_TodoList_992240ca;
 };
 
-/** 2.v[] -> textEditGroup.edits[][] -> Variant */
-export type Edits_Type_77c82c0e = {
-  range: Range_Type_c56f3a3b;
-  text: string;
-};
-
-/** 2.v[] -> textEditGroup */
-export type V_TextEditGroup_f858d8c6 = {
-  done: boolean;
-  edits: Edits_Type_77c82c0e[][];
-  kind: "textEditGroup";
-  state?: {
-    applied: number;
-    sha1: Sha1;
+/** 0.v -> Variant.requests[].response[] -> inlineReference.inlineReference -> 12 */
+export type InlineReference_12_ea363bfb = {
+  containerName: string;
+  kind: 12;
+  location: {
+    range: Range_Type_c56f3a3b;
+    uri: $mid_1_9b4a5f71;
   };
-  uri: $mid_1_9b4a5f71;
-};
-
-/** 2.v[] -> Variant.message.parts[] -> prompt */
-export type Parts_Prompt_1c9a67af = {
-  editorRange: Range_Type_c56f3a3b;
-  kind: "prompt";
   name: string;
-  range: Range_Type_e984d3e7;
 };
 
-/** 2.v[] -> Variant.message.parts[] -> text */
-export type Parts_Text_31d30613 = {
-  editorRange: Range_Type_c56f3a3b;
-  kind: "text";
-  range: Range_Type_e984d3e7;
-  text: string;
-};
-
-/** 2.v[] -> Variant.response[] -> textEditGroup */
-export type Response_TextEditGroup_dcef7b7f = {
-  done: boolean;
-  edits: Edits_Type_77c82c0e[][];
-  kind: "textEditGroup";
+/** 0.v -> Variant.requests[].response[] -> inlineReference.inlineReference -> Variant */
+export type InlineReference_Variant_a7b55b7c = {
+  range: Range_Type_c56f3a3b;
   uri: $mid_1_9b4a5f71;
 };
 
-/** 2.v[] -> Variant.response[] -> undoStop */
-export type Response_UndoStop_7197bb90 = {
-  id: Uuid;
-  kind: "undoStop";
+/** 0.v -> Variant.requests[].response[] -> inlineReference */
+export type Response_InlineReference_732e3fa8 = {
+  inlineReference: $mid_1_9b4a5f71 | InlineReference_12_ea363bfb | InlineReference_Variant_a7b55b7c;
+  kind: "inlineReference";
+  name?: string;
+  resolveId?: Uuid;
 };
 
-/** 2.v[] -> Variant.response[] -> codeblockUri */
-export type Response_CodeblockUri_46d3ae9d = {
-  isEdit: boolean;
-  kind: "codeblockUri";
-  uri: $mid_1_9b4a5f71;
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant.renderedGlobalContext[] -> 1 */
+export type RenderedGlobalContext_1_5eba9d3a = {
+  text: Path;
+  type: 1;
 };
 
-/** 2.v[] -> Variant.response[] -> questionCarousel.questions[] -> multiSelect.options[] -> Variant */
-export type Options_Type_46c52020 = {
-  id: string;
-  label: string;
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant.renderedGlobalContext[] -> 3 */
+export type RenderedGlobalContext_3_69a1a30d = {
+  cacheType: string;
+  type: 3;
+};
+
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant.renderedUserMessage[] -> 1 */
+export type RenderedUserMessage_1_77adb8ef = {
+  text: Path;
+  type: 1;
+};
+
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant.renderedUserMessage[] -> 3 */
+export type RenderedUserMessage_3_93ddbdf0 = {
+  cacheType: string;
+  type: 3;
+};
+
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant.toolCallResults{} -> Variant.content[] -> 21 */
+export type $mid_21_db627c2b = {
+  $mid: 21;
   value: string;
 };
 
-/** 2.v[] -> Variant.response[] -> questionCarousel.questions[] -> multiSelect */
-export type Questions_MultiSelect_269537bd = {
-  allowFreeformInput: boolean;
-  defaultValue: string[];
-  id: Uuid;
-  message: string;
-  options: Options_Type_46c52020[];
-  title: string;
-  type: "multiSelect";
-};
-
-/** 2.v[] -> Variant.response[] -> questionCarousel.questions[] -> text */
-export type Questions_Text_98edc065 = {
-  allowFreeformInput: boolean;
-  id: Uuid;
-  message: Blob;
-  title: string;
-  type: "text";
-};
-
-/** 2.v[] -> Variant.response[] -> questionCarousel.questions[] -> singleSelect */
-export type Questions_SingleSelect_524a89e6 = {
-  allowFreeformInput: boolean;
-  defaultValue?: string;
-  id: Uuid;
-  message: string;
-  options: Options_Type_46c52020[];
-  title: string;
-  type: "singleSelect";
-};
-
-/** 2.v[] -> Variant.response[] -> questionCarousel */
-export type Response_QuestionCarousel_64466816 = {
-  allowSkip: boolean;
-  data?: Record<Uuid, string>;
-  isUsed?: boolean;
-  kind: "questionCarousel";
-  questions: Array<Questions_MultiSelect_269537bd | Questions_Text_98edc065 | Questions_SingleSelect_524a89e6>;
-  resolveId: Uuid;
-};
-
-/** 2.v[] -> Variant */
-export type V_Variant_ca258acf = {
-  agent: Agent_Type_dc9bd4a7;
-  codeCitations: never[];
-  completionTokens?: number;
-  contentReferences: ContentReferences_Reference_b191043c[];
-  editedFileEvents?: {
-    eventKind: number;
-    uri: $mid_1_9b4a5f71;
-  }[];
-  elapsedMs?: number;
-  followups?: never[];
-  isSystemInitiated?: boolean;
-  message: {
-    parts: Array<Parts_Prompt_1c9a67af | Parts_Text_31d30613>;
-    text: string;
-  };
-  modeInfo?: {
-    isBuiltin: boolean;
-    kind: "agent";
-    modeId: string;
-    modeInstructions?: {
-      content: Path;
-      isBuiltin: boolean;
-      name: string;
-      toolReferences: never[];
-      uri: $mid_1_9b4a5f71;
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant.toolCallResults{} -> Variant.content[] -> 23.value.node.children[] -> 1.children[] -> 2 */
+export type Children_2_d0a357ce = {
+  lineBreakBefore: boolean;
+  priority: number;
+  references?: {
+    anchor: $mid_1_9b4a5f71;
+    options: {
+      isFromTool: boolean;
     };
-    modeName: string;
-    permissionLevel: string;
-  };
-  modelId: Path;
-  modelState: ModelState_Type_32b12971;
-  requestId: string;
-  response: Array<Response_McpServersStarting_ca747050 | Response_ProgressTaskSerialized_9e22e023 | Response_Thinking_f3c7934d | Response_ToolInvocationSerialized_4dcbc231 | Response_TextEditGroup_dcef7b7f | Response_Variant_9ed16578 | Response_InlineReference_19da2736 | Response_UndoStop_7197bb90 | Response_CodeblockUri_46d3ae9d | Response_QuestionCarousel_64466816>;
-  responseId: string;
-  responseMarkdownInfo?: never[];
-  result?: {
-    details: string;
-    metadata: Metadata_Type_97e20652;
-    timings: Timings_Type_bfe18f74;
-  };
-  systemInitiatedLabel?: Path;
-  terminalExecutionId?: Uuid;
-  timeSpentWaiting: number;
-  timestamp: number;
-  variableData: {
-    variables: Array<Variables_File_5c76f824 | Variables_PromptFile_83e33e32 | Variables_PromptText_39dee4fb | Variables_Tool_a642671e>;
+  }[];
+  text: string;
+  type: 2;
+};
+
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant.toolCallResults{} -> Variant.content[] -> 23.value.node.children[] -> 1 */
+export type Children_1_656bf662 = {
+  children: Array<Children_1_656bf662 | Children_2_d0a357ce>;
+  ctor: number;
+  ctorName: string;
+  props: Record<string, unknown>;
+  references: never[];
+  type: 1;
+};
+
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant.toolCallResults{} -> Variant.content[] -> 23 */
+export type $mid_23_16b15f28 = {
+  $mid: 23;
+  value: {
+    node: {
+      children: Array<Children_1_656bf662 | Children_2_d0a357ce>;
+      ctor: number;
+      ctorName: string;
+      props: Record<string, unknown>;
+      references: never[];
+      type: 1;
+    };
   };
 };
 
-/** 2.v[] -> steering */
-export type V_Steering_8d80ed08 = {
-  id: string;
-  kind: "steering";
-  request: {
-    isSystemInitiated: boolean;
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant.toolCallResults{} -> Variant */
+export type $mid_20_d4f9b655 = {
+  $mid: 20;
+  content: Array<$mid_21_db627c2b | $mid_23_16b15f28>;
+};
+
+/** 0.v -> Variant.requests[].result -> Variant.metadata -> Variant */
+export type Metadata_Type_97e20652 = {
+  agentId: string;
+  cacheKey?: Url;
+  codeBlocks?: never[];
+  modelMessageId: Uuid;
+  renderedGlobalContext?: Array<RenderedGlobalContext_1_5eba9d3a | RenderedGlobalContext_3_69a1a30d>;
+  renderedUserMessage?: Array<RenderedUserMessage_1_77adb8ef | RenderedUserMessage_3_93ddbdf0>;
+  resolvedModel?: string;
+  responseId: Uuid;
+  sessionId: Uuid;
+  toolCallResults: Record<VscodeCallId, $mid_20_d4f9b655>;
+  toolCallRounds: {
+    id: Uuid;
+    phase?: string;
+    phaseModelId?: string;
+    response: string;
+    statefulMarker?: Path;
+    thinking?: {
+      encrypted: Path;
+      id: Path;
+      text: never[];
+      tokens: number;
+    };
+    timestamp: number;
+    toolCalls: {
+      arguments: Path;
+      id: VscodeCallId;
+      name: string;
+    }[];
+    toolInputRetry: number;
+  }[];
+};
+
+/** 0.v -> Variant.requests[].result -> Variant.timings -> Variant */
+export type Timings_Type_bfe18f74 = {
+  firstProgress: number;
+  totalElapsed: number;
+};
+
+/** 0.v -> Variant.requests[].result -> Variant */
+export type Result_Type_53c47f49 = {
+  details: string;
+  metadata: Metadata_Type_97e20652;
+  timings: Timings_Type_bfe18f74;
+};
+
+/** 0.v -> Variant */
+export type V_Type_7a9d56bb = {
+  creationDate: number;
+  customTitle?: Blob;
+  hasPendingEdits: boolean;
+  initialLocation: string;
+  inputState: InputState_Type_325379cc;
+  pendingRequests?: never[];
+  requests: {
+    agent: Agent_Type_dc9bd4a7;
+    codeCitations: never[];
+    contentReferences: never[];
+    followups: never[];
     message: Message_Type_cb5b622e;
     modeInfo: {
       isBuiltin: boolean;
@@ -1172,174 +693,241 @@ export type V_Steering_8d80ed08 = {
         content: Path;
         isBuiltin: boolean;
         name: string;
-        toolReferences: never[];
+        toolReferences: {
+          fullName?: string;
+          icon?: {
+            id: string;
+          };
+          id: string;
+          kind: "tool";
+          name: string;
+          range?: Range_Type_e984d3e7;
+        }[];
         uri: $mid_1_9b4a5f71;
       };
       modeName: string;
       permissionLevel: string;
     };
     modelId: Path;
-    requestId: string;
-    systemInitiatedLabel: Path;
-    terminalExecutionId: Uuid;
+    modelState: ModelState_Type_32b12971;
+    requestId: Uuid;
+    response: Array<Response_McpServersStarting_898eb3e4 | Response_ProgressTaskSerialized_132e6db2 | Response_Thinking_b518728e | Response_Variant_780d654e | Response_ToolInvocationSerialized_8dd43a27 | Response_InlineReference_732e3fa8>;
+    responseId: Uuid;
+    responseMarkdownInfo: never[];
+    result: Result_Type_53c47f49;
+    timeSpentWaiting: number;
     timestamp: number;
     variableData: {
-      variables: never[];
-    };
-  };
-  sendOptions: {
-    isSystemInitiated: boolean;
-    modeInfo: {
-      isBuiltin: boolean;
-      kind: "agent";
-      modeId: string;
-      modeInstructions?: {
-        content: Path;
-        isBuiltin: boolean;
+      variables: {
+        automaticallyAdded: boolean;
+        id: string;
+        kind: "promptText";
+        modelDescription: string;
         name: string;
-        toolReferences: never[];
-        uri: $mid_1_9b4a5f71;
-      };
-      modeName: string;
-      permissionLevel: string;
+        toolReferences: {
+          fullName?: string;
+          icon?: {
+            id: string;
+          };
+          id: string;
+          kind: "tool";
+          name: string;
+          range?: Range_Type_e984d3e7;
+        }[];
+        value: Path;
+      }[];
     };
-    systemInitiatedLabel: Path;
-    terminalExecutionId: Uuid;
-    userSelectedModelId: Path;
-    userSelectedTools: Record<string, boolean>;
+  }[];
+  responderUsername: string;
+  sessionId: Uuid;
+  version: number;
+};
+
+/** 0 */
+export type $0_801eaa31 = {
+  kind: 0;
+  v: V_Type_7a9d56bb;
+};
+
+/** Variant.inputState.attachments[].value -> Variant */
+export type Value_Variant_a02d0894 = {
+  range: Selections_Type_cb741af8;
+  uri: $mid_1_9b4a5f71;
+};
+
+/** Variant.inputState.selectedModel.metadata -> Variant.isDefaultForLocation -> Variant */
+export type IsDefaultForLocation_Type_b17d32ba = {
+  editor: boolean;
+  notebook: boolean;
+  panel: boolean;
+  terminal: boolean;
+};
+
+/** Variant.inputState.selectedModel.metadata -> Variant */
+export type Metadata_Variant_17d09d78 = {
+  auth: {
+    accountLabel: string;
+    providerLabel: string;
+  };
+  capabilities: {
+    agentMode: boolean;
+    toolCalling: boolean;
+    vision: boolean;
+  };
+  extension: {
+    _lower: string;
+    value: string;
+  };
+  family: string;
+  id: string;
+  isDefaultForLocation: IsDefaultForLocation_Type_b17d32ba;
+  isUserSelectable: boolean;
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  modelPickerCategory: {
+    label: string;
+    order: number;
+  };
+  multiplier: string;
+  multiplierNumeric: number;
+  name: string;
+  statusIcon: {
+    id: string;
+  };
+  tooltip: Blob;
+  vendor: string;
+  version: string;
+};
+
+/** Variant.requests[] -> Variant.message.parts[] -> prompt */
+export type Parts_Prompt_3932bda1 = {
+  editorRange: Range_Type_c56f3a3b;
+  kind: "prompt";
+  name: string;
+  range: {
+    endExclusive: number;
+    start: number;
   };
 };
 
-/** 2.v[] -> inlineReference */
-export type V_InlineReference_3f1ce092 = {
-  inlineReference: $mid_1_9b4a5f71 | InlineReference_12_8b86d4f8 | ResultDetails_Type_5cbf55b8;
-  kind: "inlineReference";
-  name?: string;
-  resolveId?: Uuid;
+/** Variant.requests[] -> Variant.message.parts[] -> text */
+export type Parts_Text_83865028 = {
+  editorRange: Range_Type_c56f3a3b;
+  kind: "text";
+  range: {
+    endExclusive: number;
+    start: number;
+  };
+  text: string;
 };
 
-/** 2.v[] -> undoStop */
-export type V_UndoStop_d2a847c5 = {
+/** Variant.requests[] -> Variant.response[] -> undoStop */
+export type Response_UndoStop_f579e33d = {
   id: Uuid;
   kind: "undoStop";
 };
 
-/** 2.v[] -> codeblockUri */
-export type V_CodeblockUri_d78e5a97 = {
+/** Variant.requests[] -> Variant.response[] -> codeblockUri */
+export type Response_CodeblockUri_144beaa5 = {
   isEdit: boolean;
   kind: "codeblockUri";
   subAgentInvocationId?: Uuid;
   uri: $mid_1_9b4a5f71;
 };
 
-/** 2.v[] -> progressTaskSerialized */
-export type V_ProgressTaskSerialized_e9b9bdfc = {
-  content: Content_Type_c117e6d5 | InvocationMessage_Variant_b6b5f121;
-  kind: "progressTaskSerialized";
-  progress: never[];
+/** Variant.requests[] -> Variant.response[] -> textEditGroup */
+export type Response_TextEditGroup_303ba707 = {
+  done: boolean;
+  edits: {
+    range: Range_Type_c56f3a3b;
+    text: string;
+  }[][];
+  kind: "textEditGroup";
+  state?: {
+    applied: number;
+    sha1: Sha1;
+  };
+  uri: $mid_1_9b4a5f71;
 };
 
-/** 2.v[] -> questionCarousel.data{} -> Variant */
-export type Data_Variant_d01ee24c = {
+/** Variant.requests[] -> Variant.response[] -> questionCarousel.data{} -> Variant */
+export type Data_Variant_46437535 = {
   freeformValue?: string;
   selectedValues: string[];
 };
 
-/** 2.v[] -> questionCarousel.data{} -> Variant */
-export type Data_Variant_d01ee24c_2 = {
+/** Variant.requests[] -> Variant.response[] -> questionCarousel.data{} -> Variant */
+export type Data_Variant_46437535_2 = {
   freeformValue: string;
 };
 
-/** 2.v[] -> questionCarousel.data{} -> Variant */
-export type Data_Variant_d01ee24c_3 = {
+/** Variant.requests[] -> Variant.response[] -> questionCarousel.data{} -> Variant */
+export type Data_Variant_46437535_3 = {
   selectedValue: string;
 };
 
-/** 2.v[] -> questionCarousel */
-export type V_QuestionCarousel_9c81803f = {
+/** Variant.requests[] -> Variant.response[] -> questionCarousel.questions[] -> singleSelect.options[] -> Variant */
+export type Options_Type_46c52020 = {
+  id: string;
+  label: string;
+  value: string;
+};
+
+/** Variant.requests[] -> Variant.response[] -> questionCarousel.questions[] -> singleSelect */
+export type Questions_SingleSelect_364bc79e = {
+  allowFreeformInput: boolean;
+  defaultValue?: string;
+  id: Uuid;
+  message: string;
+  options: Options_Type_46c52020[];
+  title: string;
+  type: "singleSelect";
+};
+
+/** Variant.requests[] -> Variant.response[] -> questionCarousel.questions[] -> multiSelect */
+export type Questions_MultiSelect_29db1e88 = {
+  allowFreeformInput: boolean;
+  defaultValue: string[];
+  id: Uuid;
+  message: string;
+  options: {
+    id: string;
+    label: string;
+    value: string;
+  }[];
+  title: string;
+  type: "multiSelect";
+};
+
+/** Variant.requests[] -> Variant.response[] -> questionCarousel.questions[] -> text */
+export type Questions_Text_138dd555 = {
+  allowFreeformInput: boolean;
+  id: Uuid;
+  message: Blob;
+  title: string;
+  type: "text";
+};
+
+/** Variant.requests[] -> Variant.response[] -> questionCarousel */
+export type Response_QuestionCarousel_0f3e4276 = {
   allowSkip: boolean;
-  data?: Record<Uuid, string | Data_Variant_d01ee24c | Data_Variant_d01ee24c_2 | Data_Variant_d01ee24c_3>;
+  data?: Record<Uuid, Data_Variant_46437535 | Data_Variant_46437535_2 | Data_Variant_46437535_3 | string>;
   isUsed?: boolean;
   kind: "questionCarousel";
-  questions: Array<Questions_Text_98edc065 | Questions_MultiSelect_269537bd | Questions_SingleSelect_524a89e6>;
+  questions: Array<Questions_SingleSelect_364bc79e | Questions_MultiSelect_29db1e88 | Questions_Text_138dd555>;
   resolveId: Uuid;
 };
 
-/** 2.v[] -> Variant.message.parts[] -> agent */
-export type Parts_Agent_267d30fc = {
-  agent: Agent_Type_dc9bd4a7;
-  editorRange: Range_Type_c56f3a3b;
-  kind: "agent";
-  range: Range_Type_e984d3e7;
-};
-
-/** 2.v[] -> Variant */
-export type V_Variant_ca258acf_2 = {
-  agent: Agent_Type_dc9bd4a7;
-  codeCitations: never[];
-  confirmation: string;
-  contentReferences: never[];
-  followups: never[];
-  message: {
-    parts: Array<Parts_Agent_267d30fc | Parts_Text_31d30613>;
-    text: string;
-  };
-  modeInfo: {
-    isBuiltin: boolean;
-    kind: "agent";
-    modeId: string;
-    modeInstructions?: {
-      content: Path;
-      isBuiltin: boolean;
-      name: string;
-      toolReferences: never[];
-      uri: $mid_1_9b4a5f71;
-    };
-    modeName: string;
-    permissionLevel: string;
-  };
-  modelId: Path;
-  modelState: ModelState_Type_32b12971;
-  requestId: string;
-  response: Array<Response_McpServersStarting_ca747050 | Response_Variant_9ed16578_2>;
-  responseId: string;
-  responseMarkdownInfo: never[];
-  result: {
-    details: string;
-    metadata: {
-      agentId: string;
-      codeBlocks: never[];
-      modelMessageId: Uuid;
-      resolvedModel: string;
-      responseId: Uuid;
-      sessionId: Uuid;
-      toolCallRounds: {
-        id: Uuid;
-        response: Path;
-        timestamp: number;
-        toolCalls: never[];
-        toolInputRetry: number;
-      }[];
-    };
-    timings: Timings_Type_bfe18f74;
-  };
-  timeSpentWaiting: number;
-  timestamp: number;
-  variableData: {
-    variables: never[];
-  };
-};
-
-/** 2.v[] -> workspaceEdit */
-export type V_WorkspaceEdit_a6e76e67 = {
+/** Variant.requests[] -> Variant.response[] -> workspaceEdit */
+export type Response_WorkspaceEdit_adc32944 = {
   edits: {
     oldResource: $mid_1_9b4a5f71;
   }[];
   kind: "workspaceEdit";
 };
 
-/** 2.v[] -> elicitationSerialized */
-export type V_ElicitationSerialized_44716c0f = {
+/** Variant.requests[] -> Variant.response[] -> elicitationSerialized */
+export type Response_ElicitationSerialized_39ff6b15 = {
   isHidden: boolean;
   kind: "elicitationSerialized";
   message: {
@@ -1360,12 +948,654 @@ export type V_ElicitationSerialized_44716c0f = {
   };
 };
 
-/** 2 */
-export type $2_3da03859 = {
-  i?: number;
-  k: Array<string | number>;
-  kind: 2;
-  v?: Array<V_Thinking_0d8c201c | Response_Variant_9ed16578 | V_ToolInvocationSerialized_d70cc2ca | V_TextEditGroup_f858d8c6 | V_Variant_ca258acf | V_Steering_8d80ed08 | V_InlineReference_3f1ce092 | V_UndoStop_d2a847c5 | V_CodeblockUri_d78e5a97 | V_ProgressTaskSerialized_e9b9bdfc | V_QuestionCarousel_9c81803f | V_Variant_ca258acf_2 | V_WorkspaceEdit_a6e76e67 | V_ElicitationSerialized_44716c0f | InvocationMessage_Variant_b6b5f121>;
+/** Variant.requests[] -> Variant.result -> Variant.errorDetails -> Variant */
+export type ErrorDetails_Variant_f34fccbe = {
+  code: string;
+  confirmationButtons: {
+    data: {
+      copilotContinueOnError: boolean;
+    };
+    label: string;
+  }[];
+  message: string;
+  responseIsIncomplete: boolean;
 };
 
-export type CopilotChat = $0_801eaa31 | $1_a2c6e3e4 | $2_3da03859;
+/** Variant.requests[] -> Variant.result -> Variant.errorDetails -> Variant */
+export type ErrorDetails_Variant_f34fccbe_2 = {
+  isQuotaExceeded: boolean;
+  isRateLimited: boolean;
+  message: string;
+  responseIsIncomplete: boolean;
+};
+
+/** Variant.requests[] -> Variant.result -> Variant.metadata.toolCallRounds[].thinking -> Variant */
+export type Thinking_Variant_fb475f55 = {
+  encrypted: Path;
+  id: Path;
+  metadata?: {
+    toolId: string;
+  };
+  text: string;
+};
+
+/** Variant.requests[] -> Variant.result -> Variant.metadata.toolCallRounds[].thinking -> Variant */
+export type Thinking_Variant_fb475f55_2 = {
+  encrypted: Path;
+  id: Base64;
+  text: never[] | Path | Blob | string;
+  tokens?: number;
+};
+
+/** Variant.requests[] -> Variant.result -> Variant */
+export type Result_Type_3a58776b = {
+  details?: string;
+  errorDetails?: ErrorDetails_Variant_f34fccbe | ErrorDetails_Variant_f34fccbe_2;
+  metadata?: {
+    agentId: string;
+    cacheKey?: Url;
+    codeBlocks?: {
+      code: string;
+      language: string;
+      markdownBeforeBlock: Blob;
+    }[];
+    modelMessageId: Uuid;
+    renderedGlobalContext?: Array<RenderedGlobalContext_1_5eba9d3a | RenderedGlobalContext_3_69a1a30d>;
+    renderedUserMessage?: Array<RenderedUserMessage_1_77adb8ef | RenderedUserMessage_3_93ddbdf0>;
+    resolvedModel?: string;
+    responseId: Uuid;
+    sessionId: Uuid;
+    toolCallResults?: Record<VscodeCallId, $mid_20_d4f9b655>;
+    toolCallRounds: {
+      id: Uuid;
+      phase?: string;
+      phaseModelId?: string;
+      response: string;
+      statefulMarker?: Path;
+      thinking?: Thinking_Variant_fb475f55 | Thinking_Variant_fb475f55_2;
+      timestamp: number;
+      toolCalls: {
+        arguments: string;
+        id: VscodeCallId;
+        name: string;
+      }[];
+      toolInputRetry: number;
+    }[];
+  };
+  timings?: {
+    firstProgress: number;
+    totalElapsed: number;
+  };
+};
+
+/** Variant.requests[] -> Variant.variableData.variables[] -> promptFile */
+export type Variables_PromptFile_2c6f576e = {
+  automaticallyAdded: boolean;
+  id: Path;
+  isRoot: boolean;
+  kind: "promptFile";
+  modelDescription: string;
+  name: string;
+  toolReferences?: never[];
+  value: $mid_1_9b4a5f71;
+};
+
+/** Variant.requests[] -> Variant.variableData.variables[] -> file */
+export type Variables_File_d11166f2 = {
+  id: string;
+  kind: "file";
+  modelDescription?: string;
+  name: string;
+  value: $mid_1_9b4a5f71 | Value_Variant_a02d0894;
+};
+
+/** Variant.requests[] -> Variant.variableData.variables[] -> tool */
+export type Variables_Tool_fb9422e6 = {
+  fullName?: string;
+  icon?: {
+    id: string;
+  };
+  id: string;
+  kind: "tool";
+  name: string;
+  range?: Range_Type_e984d3e7;
+};
+
+/** Variant.requests[] -> Variant.variableData.variables[] -> promptText */
+export type Variables_PromptText_2a5131e7 = {
+  automaticallyAdded: boolean;
+  id: string;
+  kind: "promptText";
+  modelDescription: string;
+  name: string;
+  toolReferences: {
+    fullName?: string;
+    icon?: {
+      id: string;
+    };
+    id: string;
+    kind: "tool";
+    name: string;
+    range?: Range_Type_e984d3e7;
+  }[];
+  value: Path;
+};
+
+/** Variant.requests[] -> Variant */
+export type Requests_Variant_af50ec9b = {
+  agent: Agent_Type_dc9bd4a7;
+  codeCitations: never[];
+  completionTokens?: number;
+  contentReferences: {
+    kind: "reference";
+    reference: $mid_1_9b4a5f71;
+  }[];
+  editedFileEvents?: {
+    eventKind: number;
+    uri: $mid_1_9b4a5f71;
+  }[];
+  elapsedMs?: number;
+  followups?: never[];
+  isSystemInitiated?: boolean;
+  message: {
+    parts: Array<Parts_Prompt_3932bda1 | Parts_Text_83865028>;
+    text: string;
+  };
+  modeInfo?: {
+    isBuiltin: boolean;
+    kind: "agent";
+    modeId: string;
+    modeInstructions?: {
+      content: Path;
+      isBuiltin: boolean;
+      name: string;
+      toolReferences: {
+        fullName?: string;
+        icon?: {
+          id: string;
+        };
+        id: string;
+        kind: "tool";
+        name: string;
+        range?: Range_Type_e984d3e7;
+      }[];
+      uri: $mid_1_9b4a5f71;
+    };
+    modeName: string;
+    permissionLevel: string;
+  };
+  modelId: Path;
+  modelState: {
+    completedAt?: number;
+    value: number;
+  };
+  requestId: string;
+  response: Array<Response_McpServersStarting_898eb3e4 | Response_ProgressTaskSerialized_132e6db2 | Response_Thinking_b518728e | Response_Variant_780d654e | Response_InlineReference_732e3fa8 | Response_ToolInvocationSerialized_8dd43a27 | Response_UndoStop_f579e33d | Response_CodeblockUri_144beaa5 | Response_TextEditGroup_303ba707 | Response_QuestionCarousel_0f3e4276 | Response_WorkspaceEdit_adc32944 | Response_ElicitationSerialized_39ff6b15 | InvocationMessage_Variant_ce876462_2>;
+  responseId: string;
+  responseMarkdownInfo?: {
+    suggestionId: string;
+  }[];
+  result?: Result_Type_3a58776b;
+  systemInitiatedLabel?: Path;
+  terminalExecutionId?: Uuid;
+  timeSpentWaiting: number;
+  timestamp: number;
+  variableData: {
+    variables: Array<Variables_PromptFile_2c6f576e | Variables_File_d11166f2 | Variables_Tool_fb9422e6 | Variables_PromptText_2a5131e7>;
+  };
+};
+
+/** Variant.requests[] -> Variant.result.metadata -> Variant.toolCallRounds[] -> Variant */
+export type ToolCallRounds_Type_999c9a19 = {
+  id: Uuid;
+  phase?: string;
+  phaseModelId?: string;
+  response: string;
+  statefulMarker?: Path;
+  thinking?: {
+    encrypted: Path;
+    id: Path;
+    text: never[];
+    tokens: number;
+  };
+  timestamp: number;
+  toolCalls: {
+    arguments: Path;
+    id: VscodeCallId;
+    name: string;
+  }[];
+  toolInputRetry: number;
+};
+
+/** Variant.requests[] -> Variant.result.metadata -> Variant */
+export type Metadata_Type_f4bd771f = {
+  agentId: string;
+  codeBlocks: never[];
+  modelMessageId: Uuid;
+  renderedUserMessage: Array<RenderedUserMessage_1_77adb8ef | RenderedUserMessage_3_93ddbdf0>;
+  resolvedModel: string;
+  responseId: Uuid;
+  sessionId: Uuid;
+  toolCallResults: Record<VscodeCallId, $mid_20_d4f9b655>;
+  toolCallRounds: ToolCallRounds_Type_999c9a19[];
+};
+
+/** Variant.requests[] -> Variant */
+export type Requests_Variant_af50ec9b_2 = {
+  agent: Agent_Type_dc9bd4a7;
+  codeCitations: never[];
+  completionTokens: number;
+  contentReferences: {
+    kind: "reference";
+    reference: $mid_1_9b4a5f71;
+  }[];
+  elapsedMs: number;
+  followups: never[];
+  message: {
+    parts: {
+      editorRange: Range_Type_c56f3a3b;
+      kind: "text";
+      range: {
+        endExclusive: number;
+        start: number;
+      };
+      text: string;
+    }[];
+    text: Path;
+  };
+  modeInfo: {
+    isBuiltin: boolean;
+    kind: "agent";
+    modeId: string;
+    modeInstructions?: {
+      content: Path;
+      isBuiltin: boolean;
+      name: string;
+      toolReferences: {
+        fullName?: string;
+        icon?: {
+          id: string;
+        };
+        id: string;
+        kind: "tool";
+        name: string;
+        range?: Range_Type_e984d3e7;
+      }[];
+      uri: $mid_1_9b4a5f71;
+    };
+    modeName: string;
+    permissionLevel: string;
+  };
+  modelId: Path;
+  modelState: {
+    completedAt: number;
+    value: number;
+  };
+  requestId: string;
+  response: Array<Response_McpServersStarting_898eb3e4 | Response_Thinking_b518728e | Response_Variant_780d654e | Response_ToolInvocationSerialized_8dd43a27 | Response_TextEditGroup_303ba707 | Response_InlineReference_732e3fa8 | Response_UndoStop_f579e33d | Response_CodeblockUri_144beaa5>;
+  responseId: string;
+  responseMarkdownInfo: never[];
+  result: {
+    details: string;
+    metadata: Metadata_Type_f4bd771f;
+    timings: {
+      firstProgress: number;
+      totalElapsed: number;
+    };
+  };
+  timeSpentWaiting: number;
+  timestamp: number;
+  variableData: {
+    variables: {
+      automaticallyAdded: boolean;
+      id: Path;
+      isRoot: boolean;
+      kind: "promptFile";
+      modelDescription: string;
+      name: string;
+      toolReferences?: never[];
+      value: $mid_1_9b4a5f71;
+    }[];
+  };
+};
+
+/** Variant.requests[] -> Variant.message.parts[] -> agent */
+export type Parts_Agent_262332f1 = {
+  agent: Agent_Type_dc9bd4a7;
+  editorRange: Range_Type_c56f3a3b;
+  kind: "agent";
+  range: {
+    endExclusive: number;
+    start: number;
+  };
+};
+
+/** Variant.requests[] -> Variant.result.metadata -> Variant */
+export type Metadata_Variant_b5e53fa7 = {
+  agentId: string;
+  codeBlocks?: never[];
+  modelMessageId: Uuid;
+  renderedUserMessage?: Array<RenderedUserMessage_1_77adb8ef | RenderedUserMessage_3_93ddbdf0>;
+  resolvedModel?: string;
+  responseId: Uuid;
+  sessionId: Uuid;
+  toolCallResults?: Record<VscodeCallId, $mid_20_d4f9b655>;
+  toolCallRounds: {
+    id: Uuid;
+    response: string;
+    thinking?: {
+      encrypted: Path;
+      id: Path;
+      text: Blob;
+    };
+    timestamp: number;
+    toolCalls: {
+      arguments: Path;
+      id: VscodeCallId;
+      name: string;
+    }[];
+    toolInputRetry: number;
+  }[];
+};
+
+/** Variant.requests[] -> Variant.result.metadata -> Variant */
+export type Metadata_Variant_b5e53fa7_2 = {
+  agentId: string;
+  codeBlocks: never[];
+  modelMessageId: Uuid;
+  resolvedModel: string;
+  responseId: Uuid;
+  sessionId: Uuid;
+  toolCallRounds: {
+    id: Uuid;
+    response: Path;
+    timestamp: number;
+    toolCalls: never[];
+    toolInputRetry: number;
+  }[];
+};
+
+/** Variant.requests[] -> Variant */
+export type Requests_Variant_af50ec9b_3 = {
+  agent: Agent_Type_dc9bd4a7;
+  codeCitations: never[];
+  confirmation?: string;
+  contentReferences: {
+    kind: "reference";
+    reference: $mid_1_9b4a5f71;
+  }[];
+  followups?: never[];
+  message: {
+    parts: Array<Parts_Prompt_3932bda1 | Parts_Text_83865028 | Parts_Agent_262332f1>;
+    text: string;
+  };
+  modeInfo: {
+    isBuiltin: boolean;
+    kind: "agent";
+    modeId: string;
+    modeInstructions?: {
+      content: Path;
+      isBuiltin: boolean;
+      name: string;
+      toolReferences: {
+        fullName?: string;
+        icon?: {
+          id: string;
+        };
+        id: string;
+        kind: "tool";
+        name: string;
+        range?: Range_Type_e984d3e7;
+      }[];
+      uri: $mid_1_9b4a5f71;
+    };
+    modeName: string;
+    permissionLevel: string;
+  };
+  modelId: Path;
+  modelState: {
+    completedAt?: number;
+    value: number;
+  };
+  requestId: string;
+  response: Array<Response_McpServersStarting_898eb3e4 | Response_ProgressTaskSerialized_132e6db2 | Response_Thinking_b518728e | Response_ToolInvocationSerialized_8dd43a27 | Response_TextEditGroup_303ba707 | Response_QuestionCarousel_0f3e4276 | Response_Variant_780d654e | Response_InlineReference_732e3fa8 | Response_UndoStop_f579e33d | Response_CodeblockUri_144beaa5>;
+  responseId: string;
+  responseMarkdownInfo?: never[];
+  result?: {
+    details: string;
+    errorDetails?: {
+      code: string;
+      confirmationButtons: {
+        data: {
+          copilotContinueOnError: boolean;
+        };
+        label: string;
+      }[];
+      isRateLimited: boolean;
+      level: number;
+      message: Blob;
+      responseIsIncomplete: boolean;
+    };
+    metadata: Metadata_Variant_b5e53fa7 | Metadata_Variant_b5e53fa7_2;
+    timings: {
+      firstProgress: number;
+      totalElapsed: number;
+    };
+  };
+  timeSpentWaiting: number;
+  timestamp: number;
+  variableData: {
+    variables: Array<Variables_PromptFile_2c6f576e | Variables_PromptText_2a5131e7 | Variables_File_d11166f2>;
+  };
+};
+
+/** Variant.requests[] -> Variant.response[] -> Variant */
+export type Response_Variant_bffae506 = {
+  supportAlertSyntax: boolean;
+  supportHtml: boolean;
+  supportThemeIcons: boolean;
+  uris: Record<string, unknown>;
+  value: string;
+};
+
+/** Variant.requests[] -> Variant.result.metadata -> Variant.toolCallRounds[] -> Variant */
+export type ToolCallRounds_Variant_c05913b0 = {
+  id: Uuid;
+  phase: string;
+  phaseModelId: string;
+  response: Blob;
+  statefulMarker: Path;
+  summary?: Path;
+  timestamp: number;
+  toolCalls: {
+    arguments: Blob;
+    id: VscodeCallId;
+    name: string;
+  }[];
+  toolInputRetry: number;
+};
+
+/** Variant.requests[] -> Variant.result.metadata -> Variant.toolCallRounds[] -> Variant.thinking -> Variant */
+export type Thinking_Type_c31d24a3 = {
+  encrypted: Path;
+  id: Path;
+  text: never[];
+  tokens: number;
+};
+
+/** Variant.requests[] -> Variant.result.metadata -> Variant.toolCallRounds[] -> Variant */
+export type ToolCallRounds_Variant_c05913b0_2 = {
+  id: Uuid;
+  phase?: string;
+  phaseModelId?: string;
+  response: string;
+  statefulMarker: Path;
+  thinking: Thinking_Type_c31d24a3;
+  timestamp: number;
+  toolCalls: {
+    arguments: Blob;
+    id: VscodeCallId;
+    name: string;
+  }[];
+  toolInputRetry: number;
+};
+
+/** Variant.requests[] -> Variant.result.metadata -> Variant */
+export type Metadata_Variant_b5e53fa7_3 = {
+  agentId: string;
+  codeBlocks: never[];
+  modelMessageId: Uuid;
+  renderedUserMessage: Array<RenderedUserMessage_1_77adb8ef | RenderedUserMessage_3_93ddbdf0>;
+  resolvedModel: string;
+  responseId: Uuid;
+  sessionId: Uuid;
+  summaries: {
+    contextLengthBefore?: number;
+    durationMs: number;
+    model: string;
+    numRounds: number;
+    numRoundsSinceLastSummarization: number;
+    outcome?: string;
+    promptTokenDetails: {
+      category: string;
+      label: string;
+      percentageOfPrompt: number;
+    }[];
+    source?: string;
+    summarizationMode: string;
+    text: Path;
+    toolCallRoundId: Uuid;
+    usage: {
+      completion_tokens: number;
+      completion_tokens_details: {
+        accepted_prediction_tokens: number;
+        reasoning_tokens: number;
+        rejected_prediction_tokens: number;
+      };
+      prompt_tokens: number;
+      prompt_tokens_details: {
+        cached_tokens: number;
+      };
+      total_tokens: number;
+    };
+  }[];
+  toolCallResults: Record<VscodeCallId, $mid_20_d4f9b655>;
+  toolCallRounds: Array<ToolCallRounds_Variant_c05913b0 | ToolCallRounds_Variant_c05913b0_2>;
+};
+
+/** Variant.requests[] -> Variant */
+export type Requests_Variant_af50ec9b_4 = {
+  agent: Agent_Type_dc9bd4a7;
+  codeCitations: never[];
+  contentReferences: never[];
+  followups?: never[];
+  message: {
+    parts: {
+      editorRange: Range_Type_c56f3a3b;
+      kind: "text";
+      range: {
+        endExclusive: number;
+        start: number;
+      };
+      text: string;
+    }[];
+    text: string;
+  };
+  modeInfo: {
+    isBuiltin: boolean;
+    kind: "agent";
+    modeId: string;
+    modeInstructions?: {
+      content: Path;
+      isBuiltin: boolean;
+      name: string;
+      toolReferences: {
+        fullName?: string;
+        icon?: {
+          id: string;
+        };
+        id: string;
+        kind: "tool";
+        name: string;
+        range?: Range_Type_e984d3e7;
+      }[];
+      uri: $mid_1_9b4a5f71;
+    };
+    modeName: string;
+    permissionLevel: string;
+  };
+  modelId: Path;
+  modelState: {
+    completedAt?: number;
+    value: number;
+  };
+  requestId: string;
+  response: Array<Response_McpServersStarting_898eb3e4 | Response_Thinking_b518728e | Response_Variant_780d654e | Response_ToolInvocationSerialized_8dd43a27 | Response_Variant_bffae506 | Response_UndoStop_f579e33d | Response_CodeblockUri_144beaa5 | Response_TextEditGroup_303ba707 | Response_InlineReference_732e3fa8 | Response_ProgressTaskSerialized_132e6db2>;
+  responseId: string;
+  responseMarkdownInfo?: never[];
+  result?: {
+    details: string;
+    errorDetails?: {
+      code: string;
+      confirmationButtons: {
+        data: {
+          copilotContinueOnError: boolean;
+        };
+        label: string;
+      }[];
+      message: string;
+      responseIsIncomplete: boolean;
+    };
+    metadata: Metadata_Type_97e20652 | Metadata_Variant_b5e53fa7_3;
+    timings: {
+      firstProgress: number;
+      totalElapsed: number;
+    };
+  };
+  shouldBeRemovedOnSend?: {
+    requestId: string;
+  };
+  timeSpentWaiting: number;
+  timestamp: number;
+  variableData: {
+    variables: Array<Variables_File_d11166f2 | Variables_PromptText_2a5131e7>;
+  };
+};
+
+/** Variant */
+export type Variant_d4f642fa = {
+  creationDate: number;
+  customTitle?: string;
+  hasPendingEdits: boolean;
+  initialLocation: string;
+  inputState: {
+    attachments: {
+      id: string;
+      kind: "file";
+      modelDescription?: string;
+      name: string;
+      value: $mid_1_9b4a5f71 | Value_Variant_a02d0894;
+    }[];
+    contrib: {
+      chatDynamicVariableModel: never[];
+    };
+    inputText: string;
+    mode: {
+      id: string;
+      kind: "agent";
+    };
+    permissionLevel?: string;
+    selectedModel?: {
+      identifier: Path;
+      metadata: Metadata_Variant_a2f3ae0f_2 | Metadata_Variant_a2f3ae0f | Metadata_Variant_17d09d78 | Metadata_Variant_a2f3ae0f_3;
+    };
+    selections: Selections_Type_cb741af8[];
+  };
+  pendingRequests?: unknown[];
+  requests: Array<Requests_Variant_af50ec9b | Requests_Variant_af50ec9b_2 | Requests_Variant_af50ec9b_3 | Requests_Variant_af50ec9b_4>;
+  responderUsername: string;
+  sessionId: Uuid;
+  version: number;
+};
+
+export type CopilotChat = $0_801eaa31 | Variant_d4f642fa;

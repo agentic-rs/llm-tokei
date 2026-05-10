@@ -395,6 +395,7 @@ function pickTagKey(o: Schema & { k: "object" }): string | null {
 
 type CombineKind =
   | "deep"          // recurse into values; cycle-unsafe; delegates to mergeObjects via merge()
+  | "deep-safe"     // recurse into values with cycle guards; preserves nested structure
   | "shallow"       // top-level field union; missing fields → {present:0}; cycle-safe
   | "structural"    // identical bodies only — no mutation
   | "rename-only";  // share name; keep distinct shapes
@@ -664,6 +665,13 @@ function combineInto(
       canon.total = merged.total;
       return true;
     }
+    case "deep-safe": {
+      const merged = mergeDeepSafe(canon, other);
+      if (!merged || merged.k !== "object") return false;
+      canon.props = merged.props;
+      canon.total = merged.total;
+      return true;
+    }
     case "shallow": {
       // Proper presence accounting: track how many merged instances had each
       // field. Shared fields bump `present`; canon's schema wins for non-prim
@@ -691,6 +699,88 @@ function combineInto(
     case "rename-only":
       return true;
   }
+}
+
+function mergeDeepSafe(a: Schema, b: Schema, seen = new Map<Schema, Set<Schema>>()): Schema | null {
+  if (a === b) return a;
+  const prior = seen.get(a);
+  if (prior?.has(b)) return a;
+  if (prior) prior.add(b);
+  else seen.set(a, new Set([b]));
+
+  if (a.k === "never") return b;
+  if (b.k === "never") return a;
+  if (a.k === "any" || b.k === "any") return { k: "any" };
+
+  if (a.k === "union") return mergeUnionDeepSafe(a, b, seen);
+  if (b.k === "union") return mergeUnionDeepSafe(b, a, seen);
+
+  if (a.k === "prim" && b.k === "prim") return merge(a, b);
+  if (a.k === "array" && b.k === "array") {
+    const item = mergeDeepSafe(a.item, b.item, seen);
+    return item ? { k: "array", item } : null;
+  }
+  if (a.k === "record" && b.k === "record") {
+    const value = mergeDeepSafe(a.value, b.value, seen);
+    if (!value) return null;
+    return { k: "record", key: a.key === b.key ? a.key : "string", value };
+  }
+  if (a.k === "record" && b.k === "object") return mergeRecordWithObject(a, b);
+  if (b.k === "record" && a.k === "object") return mergeRecordWithObject(b, a);
+  if (a.k === "object" && b.k === "object") return mergeObjectsDeepSafe(a, b, seen);
+  return dryRender(a) === dryRender(b) ? a : null;
+}
+
+function mergeUnionDeepSafe(u: Schema & { k: "union" }, x: Schema, seen: Map<Schema, Set<Schema>>): Schema | null {
+  if (x.k === "union") {
+    let acc: Schema | null = u;
+    for (const v of x.variants) {
+      if (!acc) return null;
+      acc = mergeUnionDeepSafe(acc.k === "union" ? acc : { k: "union", variants: [acc] }, v, seen);
+    }
+    return acc;
+  }
+
+  const variants: Schema[] = [];
+  let placed = false;
+  for (const variant of u.variants) {
+    if (!placed && compatibleForMerge(variant, x)) {
+      const merged = mergeDeepSafe(variant, x, seen);
+      if (merged) {
+        variants.push(merged);
+        placed = true;
+        continue;
+      }
+    }
+    variants.push(variant);
+  }
+  if (!placed) variants.push(x);
+  return variants.length === 1 ? variants[0]! : { k: "union", variants };
+}
+
+function mergeObjectsDeepSafe(
+  a: Schema & { k: "object" },
+  b: Schema & { k: "object" },
+  seen: Map<Schema, Set<Schema>>,
+): Schema | null {
+  if (!policyAccepts(a, b, STREAM_MERGE_POLICY)) return null;
+  const props = new Map<string, { schema: Schema; present: number }>();
+  const total = a.total + b.total;
+  const allKeys = new Set<string>([...a.props.keys(), ...b.props.keys()]);
+  for (const k of allKeys) {
+    const pa = a.props.get(k);
+    const pb = b.props.get(k);
+    if (pa && pb) {
+      const merged = mergeDeepSafe(pa.schema, pb.schema, seen);
+      if (!merged) return null;
+      props.set(k, { schema: merged, present: pa.present + pb.present });
+    } else if (pa) {
+      props.set(k, { schema: pa.schema, present: pa.present });
+    } else if (pb) {
+      props.set(k, { schema: pb.schema, present: pb.present });
+    }
+  }
+  return { k: "object", total, props };
 }
 
 // --- group merger -----------------------------------------------------
@@ -837,6 +927,7 @@ function openSource(path: string): ReadableStream<Uint8Array> {
 }
 
 async function ingest(stream: ReadableStream<Uint8Array>, source: string, state: { schema: Schema }) {
+  const parsed: unknown[] = [];
   let n = 0;
   for await (const raw of lines(stream)) {
     const line = raw.trim();
@@ -844,12 +935,165 @@ async function ingest(stream: ReadableStream<Uint8Array>, source: string, state:
     n++;
     try {
       const v = JSON.parse(line);
-      state.schema = merge(state.schema, fromValue(v));
+      parsed.push(v);
     } catch (e) {
       console.error(`[${source}:${n}] JSON parse error: ${(e as Error).message}`);
     }
   }
+  const schema = maybeReplayVscodePatchJsonl(parsed);
+  state.schema = merge(state.schema, schema);
   console.error(`[${source}] processed ${n} lines`);
+}
+
+function maybeReplayVscodePatchJsonl(records: unknown[]): Schema {
+  if (!isVscodePatchJsonl(records)) {
+    let schema: Schema = NEVER;
+    for (const record of records) schema = merge(schema, fromValue(record));
+    return schema;
+  }
+  let state: unknown = undefined;
+  const observed = new Map<string, { path: unknown[]; schema: Schema }>();
+  for (const rec of records) {
+    if (!isPlainObject(rec)) continue;
+    const kind = rec.kind;
+    if (kind === 0) {
+      state = cloneJson(rec.v);
+    } else if (kind === 1 || kind === 2) {
+      const path = Array.isArray(rec.k) ? rec.k : null;
+      if (!path) continue;
+      recordObservedPatchValue(observed, path, rec.v, kind === 2);
+      if (kind === 1) state = setPathValue(state, path, cloneJson(rec.v));
+      else state = appendPathValue(state, path, cloneJson(rec.v));
+    }
+  }
+  if (state === undefined) {
+    let schema: Schema = NEVER;
+    for (const record of records) schema = merge(schema, fromValue(record));
+    return schema;
+  }
+  let schema = fromValue(state);
+  for (const entry of observed.values()) schema = mergeSchemaAtPath(schema, entry.path, entry.schema);
+  return schema;
+}
+
+function recordObservedPatchValue(
+  observed: Map<string, { path: unknown[]; schema: Schema }>,
+  path: unknown[],
+  value: unknown,
+  append: boolean,
+) {
+  const key = JSON.stringify(path);
+  const schema = append && Array.isArray(value)
+    ? fromValue(value)
+    : append
+      ? { k: "array", item: fromValue(value) } as Schema
+      : fromValue(value);
+  const prev = observed.get(key);
+  observed.set(key, { path: [...path], schema: prev ? merge(prev.schema, schema) : schema });
+}
+
+function mergeSchemaAtPath(root: Schema, path: unknown[], observed: Schema): Schema {
+  if (path.length === 0) return merge(root, observed);
+  const [head, ...tail] = path;
+  const key = normalizePathKey(head);
+  if (key === null) return root;
+  if (typeof key === "number") {
+    if (root.k !== "array") return root;
+    return { k: "array", item: mergeSchemaAtPath(root.item, tail, observed) };
+  }
+  if (root.k !== "object") return root;
+  const props = new Map(root.props);
+  const existing = props.get(key);
+  const child = mergeSchemaAtPath(existing?.schema ?? NEVER, tail, observed);
+  props.set(key, { schema: child, present: existing?.present ?? root.total });
+  return { k: "object", total: root.total, props };
+}
+
+function isVscodePatchJsonl(records: unknown[]): boolean {
+  const sample = records.filter(isPlainObject).slice(0, 20);
+  if (sample.length < 2) return false;
+  const patchLike = sample.filter((rec) => {
+    if (!(rec.kind === 0 || rec.kind === 1 || rec.kind === 2)) return false;
+    if (!Object.prototype.hasOwnProperty.call(rec, "v")) return false;
+    if (rec.kind === 0) return true;
+    return Array.isArray(rec.k);
+  });
+  return patchLike.length >= 2 && patchLike.length / sample.length >= 0.8 && sample.some((rec) => rec.kind === 0);
+}
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function cloneJson<T>(value: T): T {
+  return value === undefined ? value : JSON.parse(JSON.stringify(value));
+}
+
+function setPathValue(root: unknown, path: unknown[], value: unknown): unknown {
+  if (path.length === 0) return value;
+  const nextRoot = root === undefined ? containerFor(path[0]) : root;
+  const parent = ensureParent(nextRoot, path);
+  if (!parent) return nextRoot;
+  setChild(parent.container, parent.key, value);
+  return nextRoot;
+}
+
+function appendPathValue(root: unknown, path: unknown[], value: unknown): unknown {
+  const nextRoot = root === undefined ? containerFor(path[0]) : root;
+  const target = ensurePath(nextRoot, path, []);
+  if (Array.isArray(target)) {
+    if (Array.isArray(value)) target.push(...value);
+    else target.push(value);
+  }
+  return nextRoot;
+}
+
+function ensureParent(root: unknown, path: unknown[]): { container: any; key: string | number } | null {
+  if (path.length === 0) return null;
+  const parentPath = path.slice(0, -1);
+  const key = normalizePathKey(path[path.length - 1]);
+  if (key === null) return null;
+  return { container: ensurePath(root, parentPath, containerFor(key)), key };
+}
+
+function ensurePath(root: any, path: unknown[], leafFallback: unknown): any {
+  let cur = root;
+  for (let i = 0; i < path.length; i++) {
+    const key = normalizePathKey(path[i]);
+    if (key === null) return cur;
+    const fallback = i === path.length - 1 ? leafFallback : containerFor(path[i + 1]);
+    let child = getChild(cur, key);
+    if (child === undefined || child === null || (typeof child !== "object" && i < path.length - 1)) {
+      child = cloneJson(fallback);
+      setChild(cur, key, child);
+    }
+    cur = child;
+  }
+  return cur;
+}
+
+function containerFor(nextKey: unknown): unknown {
+  return typeof nextKey === "number" ? [] : {};
+}
+
+function normalizePathKey(key: unknown): string | number | null {
+  if (typeof key === "string") return key;
+  if (typeof key === "number" && Number.isInteger(key) && key >= 0) return key;
+  return null;
+}
+
+function getChild(container: any, key: string | number): unknown {
+  if (Array.isArray(container) && typeof key === "number") return container[key];
+  if (isPlainObject(container) && typeof key === "string") return container[key];
+  return undefined;
+}
+
+function setChild(container: any, key: string | number, value: unknown) {
+  if (Array.isArray(container) && typeof key === "number") {
+    container[key] = value;
+  } else if (isPlainObject(container) && typeof key === "string") {
+    container[key] = value;
+  }
 }
 
 // ---------------- Emit TypeScript ----------------
@@ -1667,11 +1911,10 @@ function applyInlineUnify(
 // Bucketing is global (cross-field) by sorted-keys signature; rule then enforces
 // no-tag (defensive) and keys-gt:2 (skip small/trivial shapes).
 const INLINE_SAMEKEYS_POLICY: MergePolicy = {
-  combine: "shallow",
+  combine: "deep-safe",
   pick: "most-fields",
   rules: [
-    { gates: ["no-tag"], similar: ["same-keys", { kind: "keys-gt", n: 3 }] },
-    { gates: ["no-tag"], similar: ["same-keys", { kind: "keys-gt", n: 1 }, "types-match"] },
+    { gates: ["no-tag"], similar: ["same-keys", { kind: "keys-gt", n: 3 }, "types-match"] },
   ],
 };
 
