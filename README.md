@@ -65,6 +65,11 @@ llm-tokei dump --copilot --out ./dumped-sessions
 | `--no-color` | Disable ANSI colors |
 | `-v, --verbose` | Print parse stats to stderr |
 
+Table output uses compact human-readable units for usage columns such as
+`input`, `output`, `reasoning`, `cache_r`, `cache_w`, and `total` (for example,
+`1.2K` or `3.4M`). Count columns and cost columns remain exact. JSON output
+keeps raw numeric values for scripting.
+
 ## Pricing
 
 The bundled `data/prices.json` is **generated** from [models.dev](https://models.dev),
@@ -115,6 +120,8 @@ Two cost columns are reported:
 - `cache_r` is cached-read prompt tokens.
 - `cache_w` is cache-write tokens (billed separately at write rates).
 - `total = input + output + reasoning`.
+- Table output formats usage columns with compact decimal units (`K`, `M`, `B`);
+  JSON output keeps the raw numeric totals.
 
 `--bytes` mode:
 - Default mode reports `input`/`output` as tokens.

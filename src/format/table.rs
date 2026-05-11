@@ -60,7 +60,7 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
         a.input
       }
     };
-    row.push(Col::num(&fmt_est_avg(
+    row.push(Col::num(&fmt_est_usage_avg(
       shown_input,
       if opts.bytes {
         a.input_bytes_estimated
@@ -69,7 +69,7 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
       },
       avg_den(a, opts.avg),
     )));
-    row.push(Col::num(&fmt_est_avg(
+    row.push(Col::num(&fmt_est_usage_avg(
       if opts.bytes { a.output_bytes } else { a.output },
       if opts.bytes {
         a.output_bytes_estimated
@@ -78,10 +78,10 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
       },
       avg_den(a, opts.avg),
     )));
-    row.push(Col::num(&fmt_avg(a.reasoning, avg_den(a, opts.avg))));
-    row.push(Col::num(&fmt_avg(a.cache_read, avg_den(a, opts.avg))));
-    row.push(Col::num(&fmt_avg(a.cache_write, avg_den(a, opts.avg))));
-    row.push(Col::num(&fmt_avg(a.total, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_usage_avg(a.reasoning, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_usage_avg(a.cache_read, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_usage_avg(a.cache_write, avg_den(a, opts.avg))));
+    row.push(Col::num(&fmt_usage_avg(a.total, avg_den(a, opts.avg))));
     row.push(Col::num(&fmt_int(a.turns)));
     row.push(Col::num(&fmt_int(a.rounds)));
     row.push(Col::num(&fmt_int(a.sessions)));
@@ -130,7 +130,7 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     Some(AvgBy::Session) => tot_s,
     None => 1,
   };
-  total_row.push(Col::num(&fmt_est_avg(
+  total_row.push(Col::num(&fmt_est_usage_avg(
     shown_total_input,
     if opts.bytes {
       aggs.iter().any(|a| a.input_bytes_estimated)
@@ -139,7 +139,7 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     },
     total_den,
   )));
-  total_row.push(Col::num(&fmt_est_avg(
+  total_row.push(Col::num(&fmt_est_usage_avg(
     tot_out_display,
     if opts.bytes {
       aggs.iter().any(|a| a.output_bytes_estimated)
@@ -148,10 +148,10 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     },
     total_den,
   )));
-  total_row.push(Col::num(&fmt_avg(tot_re, total_den)));
-  total_row.push(Col::num(&fmt_avg(tot_cr, total_den)));
-  total_row.push(Col::num(&fmt_avg(tot_cw, total_den)));
-  total_row.push(Col::num(&fmt_avg(tot_tot, total_den)));
+  total_row.push(Col::num(&fmt_usage_avg(tot_re, total_den)));
+  total_row.push(Col::num(&fmt_usage_avg(tot_cr, total_den)));
+  total_row.push(Col::num(&fmt_usage_avg(tot_cw, total_den)));
+  total_row.push(Col::num(&fmt_usage_avg(tot_tot, total_den)));
   total_row.push(Col::num(&fmt_int(tot_t)));
   total_row.push(Col::num(&fmt_int(tot_r)));
   total_row.push(Col::num(&fmt_int(tot_s)));
@@ -285,15 +285,15 @@ fn avg_den(a: &Aggregate, avg: Option<AvgBy>) -> u64 {
   }
 }
 
-fn fmt_avg(n: u64, den: u64) -> String {
+fn fmt_usage_avg(n: u64, den: u64) -> String {
   if den <= 1 {
-    return fmt_int(n);
+    return fmt_usage(n as f64);
   }
-  fmt_float(n as f64 / den as f64)
+  fmt_usage(n as f64 / den as f64)
 }
 
-fn fmt_est_avg(n: u64, estimated: bool, den: u64) -> String {
-  let body = fmt_avg(n, den);
+fn fmt_est_usage_avg(n: u64, estimated: bool, den: u64) -> String {
+  let body = fmt_usage_avg(n, den);
   if estimated {
     format!("~{body}")
   } else {
@@ -313,5 +313,132 @@ fn fmt_float(v: f64) -> String {
     fmt_int(v as u64)
   } else {
     format!("{v:.2}")
+  }
+}
+
+fn fmt_usage(v: f64) -> String {
+  const UNITS: [&str; 5] = ["", "K", "M", "B", "T"];
+  if v < 999.95 {
+    return fmt_float(v);
+  }
+
+  let mut scaled = v;
+  let mut unit_idx = 0usize;
+  while scaled >= 999.95 && unit_idx < UNITS.len() - 1 {
+    scaled /= 1000.0;
+    unit_idx += 1;
+  }
+
+  let body = format!("{scaled:.1}");
+  let body = body.strip_suffix(".0").unwrap_or(&body);
+  format!("{body}{}", UNITS[unit_idx])
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn aggregate(keys: &[&str]) -> Aggregate {
+    Aggregate {
+      keys: keys.iter().map(|s| s.to_string()).collect(),
+      input: 1_234,
+      output: 2_500_000,
+      input_bytes: 1_500,
+      output_bytes: 2_500_000_000,
+      input_estimated: true,
+      output_estimated: false,
+      input_bytes_estimated: true,
+      output_bytes_estimated: false,
+      reasoning: 999,
+      cache_read: 1_500,
+      cache_write: 1_000_000,
+      total: 3_501_233,
+      turns: 1_234,
+      rounds: 2_345,
+      sessions: 3_456,
+      cost_embedded: 0.0,
+      cost_base: 12.3456,
+      cost_multiplied: 23.4567,
+      first_ts: None,
+      last_ts: None,
+    }
+  }
+
+  #[test]
+  fn table_compacts_usage_fields_but_not_counts_or_costs() {
+    let table = render_table(
+      &[aggregate(&["codex"])],
+      &[GroupDim::Source],
+      &TableOpts {
+        show_cost: true,
+        use_color: false,
+        split_input: false,
+        avg: None,
+        bytes: false,
+      },
+    );
+
+    assert!(table.contains("~1.2K"), "table output: {table}");
+    assert!(table.contains("2.5M"), "table output: {table}");
+    assert!(table.contains("999"), "table output: {table}");
+    assert!(table.contains("1.5K"), "table output: {table}");
+    assert!(table.contains("1M"), "table output: {table}");
+    assert!(table.contains("3.5M"), "table output: {table}");
+    assert!(table.contains("1,234"), "table output: {table}");
+    assert!(table.contains("2,345"), "table output: {table}");
+    assert!(table.contains("3,456"), "table output: {table}");
+    assert!(table.contains("12.3456"), "table output: {table}");
+    assert!(table.contains("23.4567"), "table output: {table}");
+  }
+
+  #[test]
+  fn table_compacts_usage_after_averaging() {
+    let mut agg = aggregate(&["codex"]);
+    agg.input = 12_345;
+    agg.output = 9_999;
+    agg.reasoning = 999;
+    agg.cache_read = 12_000;
+    agg.cache_write = 1_234_567;
+    agg.total = 2_500_000;
+    agg.turns = 10;
+
+    let table = render_table(
+      &[agg],
+      &[GroupDim::Source],
+      &TableOpts {
+        show_cost: false,
+        use_color: false,
+        split_input: false,
+        avg: Some(AvgBy::Turn),
+        bytes: false,
+      },
+    );
+
+    assert!(table.contains("~1.2K"), "table output: {table}");
+    assert!(table.contains("999.90"), "table output: {table}");
+    assert!(table.contains("99.90"), "table output: {table}");
+    assert!(table.contains("1.2K"), "table output: {table}");
+    assert!(table.contains("123.5K"), "table output: {table}");
+    assert!(table.contains("250K"), "table output: {table}");
+  }
+
+  #[test]
+  fn bytes_headers_stay_plain_while_byte_values_compact() {
+    let table = render_table(
+      &[aggregate(&["codex"])],
+      &[GroupDim::Source],
+      &TableOpts {
+        show_cost: false,
+        use_color: false,
+        split_input: false,
+        avg: None,
+        bytes: true,
+      },
+    );
+
+    assert!(table.contains("input(B)"), "table output: {table}");
+    assert!(table.contains("output(B)"), "table output: {table}");
+    assert!(table.contains("~1.5K"), "table output: {table}");
+    assert!(table.contains("2.5B"), "table output: {table}");
   }
 }
