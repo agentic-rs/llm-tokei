@@ -8,6 +8,21 @@ fn temp_file_path(name: &str) -> std::path::PathBuf {
   std::env::temp_dir().join(format!("llm-tokei-{name}-{nanos}.json"))
 }
 
+fn temp_cache_home(name: &str) -> std::path::PathBuf {
+  let nanos = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .expect("system time")
+    .as_nanos();
+  std::env::temp_dir().join(format!("llm-tokei-cache-{name}-{nanos}"))
+}
+
+fn isolated_cmd(name: &str) -> (Command, std::path::PathBuf) {
+  let cache_home = temp_cache_home(name);
+  let mut cmd = Command::new(bin());
+  cmd.env("XDG_CACHE_HOME", &cache_home);
+  (cmd, cache_home)
+}
+
 fn bin() -> std::path::PathBuf {
   let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
   p.push("target");
@@ -19,7 +34,8 @@ fn bin() -> std::path::PathBuf {
 #[test]
 fn codex_fixture_parses_last_total() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
-  let out = Command::new(bin())
+  let (mut cmd, cache_home) = isolated_cmd("codex-total");
+  let out = cmd
     .args([
       "--source",
       "codex",
@@ -29,9 +45,11 @@ fn codex_fixture_parses_last_total() {
       "/nonexistent/opencode.db",
       "--format",
       "json",
+      "--no-cache",
     ])
     .output()
     .expect("run llm-tokei");
+  let _ = std::fs::remove_dir_all(cache_home);
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
   let s = String::from_utf8_lossy(&out.stdout);
   let v: serde_json::Value = serde_json::from_str(&s).expect("valid json");
@@ -64,7 +82,8 @@ fn codex_fixture_parses_last_total() {
 #[test]
 fn codex_fixture_reports_response_item_bytes() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
-  let out = Command::new(bin())
+  let (mut cmd, cache_home) = isolated_cmd("codex-bytes");
+  let out = cmd
     .args([
       "--source",
       "codex",
@@ -78,6 +97,7 @@ fn codex_fixture_reports_response_item_bytes() {
     ])
     .output()
     .expect("run llm-tokei bytes mode");
+  let _ = std::fs::remove_dir_all(cache_home);
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
   let s = String::from_utf8_lossy(&out.stdout);
   let v: serde_json::Value = serde_json::from_str(&s).expect("valid json");
@@ -95,13 +115,7 @@ fn codex_fixture_reports_response_item_bytes() {
 #[test]
 fn codex_bytes_mode_rebuilds_stale_zero_byte_cache() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
-  let cache_home = std::env::temp_dir().join(format!(
-    "llm-tokei-cache-{}",
-    std::time::SystemTime::now()
-      .duration_since(std::time::UNIX_EPOCH)
-      .expect("system time")
-      .as_nanos()
-  ));
+  let cache_home = temp_cache_home("stale-codex-bytes");
   std::fs::create_dir_all(&cache_home).expect("create cache home");
 
   let cache_path = cache_home.join("llm-tokei.db");
@@ -232,6 +246,7 @@ fn copilot_fixture_estimates_and_thinking() {
       "json",
       "--group-by",
       "source,model,project",
+      "--no-cache",
     ])
     .output()
     .expect("run llm-tokei");
@@ -275,6 +290,7 @@ fn copilot_transcript_shutdown_dedupes_chat_session() {
       "json",
       "--group-by",
       "source,model,project",
+      "--no-cache",
     ])
     .output()
     .expect("run llm-tokei");
@@ -308,6 +324,7 @@ fn copilot_cli_fixture_parses_fallback_and_compaction() {
       fixtures.to_str().unwrap(),
       "--format",
       "json",
+      "--no-cache",
     ])
     .output()
     .expect("run llm-tokei");
@@ -400,6 +417,7 @@ fn bytes_mode_table_header_uses_byte_suffix() {
       "--group-by",
       "source,model",
       "--bytes",
+      "--no-cache",
     ])
     .output()
     .expect("run llm-tokei table bytes mode");
@@ -420,6 +438,7 @@ fn table_width_fits_table_output() {
       fixtures.to_str().unwrap(),
       "--group-by",
       "source,model",
+      "--no-cache",
       "--table-width",
       "50",
     ])
@@ -445,6 +464,7 @@ fn table_width_does_not_affect_json_output() {
       fixtures.to_str().unwrap(),
       "--format",
       "json",
+      "--no-cache",
       "--table-width",
       "20",
     ])
@@ -502,6 +522,7 @@ fn missing_cache_write_price_falls_back_to_input_price() {
       pricing_path.to_str().unwrap(),
       "--format",
       "json",
+      "--no-cache",
     ])
     .output()
     .expect("run llm-tokei");
@@ -551,6 +572,7 @@ fn explicit_zero_cache_write_price_stays_zero() {
       pricing_path.to_str().unwrap(),
       "--format",
       "json",
+      "--no-cache",
     ])
     .output()
     .expect("run llm-tokei");
@@ -586,6 +608,7 @@ fn copilot_dump_fixture_bytes_cover_schema_variants() {
       "--bytes",
       "--group-by",
       "source,model,project",
+      "--no-cache",
     ])
     .output()
     .expect("run llm-tokei");
