@@ -209,12 +209,7 @@ fn main() -> Result<()> {
   }
 
   // Filters.
-  let period_since = match args.period {
-    Some(Period::Today) => Some(crate::time::start_of_today()),
-    Some(Period::Week) => Some(crate::time::last_7d()),
-    Some(Period::Month) => Some(crate::time::start_of_month()),
-    None => None,
-  };
+  let period_since = period_since(&args);
 
   let since = args
     .since
@@ -398,6 +393,27 @@ where
   Ok((out, stats))
 }
 
+fn period_since(args: &Args) -> Option<chrono::DateTime<chrono::Utc>> {
+  let period = args
+    .period
+    .or_else(|| args.period_24h.then_some(Period::Hours24))
+    .or_else(|| args.period_7d.then_some(Period::Days7))
+    .or_else(|| args.period_1m.then_some(Period::Month1))
+    .or_else(|| args.today.then_some(Period::Today))
+    .or_else(|| args.week.then_some(Period::Week))
+    .or_else(|| args.month.then_some(Period::Month));
+
+  match period {
+    Some(Period::Hours24) => Some(crate::time::last_24h()),
+    Some(Period::Days7) => Some(crate::time::last_7d()),
+    Some(Period::Month1) => Some(crate::time::last_1m()),
+    Some(Period::Today) => Some(crate::time::start_of_today()),
+    Some(Period::Week) => Some(crate::time::start_of_week()),
+    Some(Period::Month) => Some(crate::time::start_of_month()),
+    None => None,
+  }
+}
+
 fn collect_opencode_with_cache(cache: &CacheDb, src: &OpenCodeSource) -> Result<(Vec<UsageRecord>, CacheStats)> {
   let mut stats = CacheStats::new();
   let mut out = Vec::new();
@@ -511,6 +527,7 @@ fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
       codex,
       files,
       out,
+      ..
     } => run_dump(*copilot, *codex, files, out.as_deref(), args),
   }
 }

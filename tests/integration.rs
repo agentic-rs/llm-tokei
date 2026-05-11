@@ -341,6 +341,7 @@ fn bytes_mode_switches_input_output_units_only() {
     "json",
     "--group-by",
     "source,model,project",
+    "--no-cache",
   ];
 
   let token_out = Command::new(bin())

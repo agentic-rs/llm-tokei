@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Utc};
 
 /// Parse a "since/until" expression: RFC3339 date(time), `YYYY-MM-DD`,
 /// or relative like `7d`, `12h`, `1w`, `1mo`.
@@ -63,19 +63,37 @@ pub fn date_bucket(ts: DateTime<Utc>, unit: &str) -> String {
 }
 
 pub fn start_of_today() -> DateTime<Utc> {
-  let now = Utc::now();
-  now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc()
+  local_midnight(Local::now().date_naive())
+}
+
+pub fn start_of_week() -> DateTime<Utc> {
+  let now = Local::now();
+  let start = now.date_naive() - Duration::days(now.weekday().num_days_from_monday() as i64);
+  local_midnight(start)
 }
 
 pub fn start_of_month() -> DateTime<Utc> {
-  let now = Utc::now();
-  NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
-    .unwrap()
-    .and_hms_opt(0, 0, 0)
-    .unwrap()
-    .and_utc()
+  let now = Local::now();
+  local_midnight(NaiveDate::from_ymd_opt(now.year(), now.month(), 1).unwrap())
+}
+
+pub fn last_24h() -> DateTime<Utc> {
+  Utc::now() - Duration::hours(24)
 }
 
 pub fn last_7d() -> DateTime<Utc> {
   Utc::now() - Duration::days(7)
+}
+
+pub fn last_1m() -> DateTime<Utc> {
+  Utc::now() - Duration::days(30)
+}
+
+fn local_midnight(date: NaiveDate) -> DateTime<Utc> {
+  let naive = date.and_hms_opt(0, 0, 0).unwrap();
+  match Local.from_local_datetime(&naive) {
+    chrono::LocalResult::Single(dt) => dt.with_timezone(&Utc),
+    chrono::LocalResult::Ambiguous(dt, _) => dt.with_timezone(&Utc),
+    chrono::LocalResult::None => Utc.from_utc_datetime(&naive),
+  }
 }

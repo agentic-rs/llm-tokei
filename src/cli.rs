@@ -26,8 +26,13 @@ impl DateBucket {
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum Period {
-  Today,
+  #[value(name = "24h")]
+  Hours24,
   #[value(name = "7d")]
+  Days7,
+  #[value(name = "1m")]
+  Month1,
+  Today,
   Week,
   Month,
 }
@@ -43,126 +48,155 @@ pub enum AvgBy {
 #[derive(Debug, Parser)]
 #[command(name = "llm-tokei", version, about, disable_help_flag = true)]
 pub struct Args {
+  /// Output format.
+  #[arg(long, value_enum, default_value_t = Format::Table, help_heading = "Output")]
+  pub format: Format,
+
+  /// Sort key: total|input|output|cost|date|turns.
+  #[arg(long, default_value = "total", help_heading = "Output")]
+  pub sort: String,
+
+  /// Sort ascending instead of descending.
+  #[arg(long, help_heading = "Output")]
+  pub asc: bool,
+
+  /// Limit number of rows.
+  #[arg(long, help_heading = "Output")]
+  pub limit: Option<usize>,
+
+  /// Hide cost column.
+  #[arg(long, help_heading = "Output")]
+  pub no_cost: bool,
+
+  /// Shortcut: filter to a recent or calendar time window.
+  #[arg(long, value_enum, help_heading = "Period", conflicts_with_all = ["period_24h", "period_7d", "period_1m", "today", "week", "month"])]
+  pub period: Option<Period>,
+
+  /// Shortcut for `--period 24h`.
+  #[arg(long = "24h", help_heading = "Period")]
+  pub period_24h: bool,
+
+  /// Shortcut for `--period 7d`.
+  #[arg(long = "7d", help_heading = "Period")]
+  pub period_7d: bool,
+
+  /// Shortcut for `--period 1m`.
+  #[arg(long = "1m", help_heading = "Period")]
+  pub period_1m: bool,
+
+  /// Shortcut for `--period today`.
+  #[arg(long, help_heading = "Period")]
+  pub today: bool,
+
+  /// Shortcut for `--period week`.
+  #[arg(long, help_heading = "Period")]
+  pub week: bool,
+
+  /// Shortcut for `--period month`.
+  #[arg(long, help_heading = "Period")]
+  pub month: bool,
+
+  /// Disable ANSI colors.
+  #[arg(long, help_heading = "Table")]
+  pub no_color: bool,
+
+  /// Show human-readable usage values in table output.
+  #[arg(short = 'h', long, help_heading = "Table")]
+  pub human: bool,
+
+  /// Disable automatic table column fitting.
+  #[arg(long, conflicts_with = "table_width", help_heading = "Table")]
+  pub no_fit: bool,
+
+  /// Force table output to fit this width.
+  #[arg(long, help_heading = "Table")]
+  pub table_width: Option<usize>,
+
+  /// Show uncached input only.
+  #[arg(long, help_heading = "Table")]
+  pub split_input: bool,
+
+  /// Show input/output in bytes instead of tokens.
+  #[arg(long, help_heading = "Table")]
+  pub bytes: bool,
+
+  /// Show per-unit averages in table output: turn|round|session.
+  #[arg(long, value_enum, help_heading = "Table")]
+  pub avg: Option<AvgBy>,
+
+  /// Disable the usage cache (re-parse all source files).
+  #[arg(long, help_heading = "Cache")]
+  pub no_cache: bool,
+
+  /// Grouping dimensions, comma-separated: source,model,provider,project,date,session.
+  #[arg(
+    long,
+    value_delimiter = ',',
+    default_value = "source,model",
+    help_heading = "Grouping"
+  )]
+  pub group_by: Vec<String>,
+
+  /// Date bucket unit (used when grouping by date).
+  #[arg(long, value_enum, default_value_t = DateBucket::Day, help_heading = "Grouping")]
+  pub date_bucket: DateBucket,
+
+  /// Filter: include records on/after this time (e.g. 7d, 24h, 2025-04-01, RFC3339).
+  #[arg(long, help_heading = "Filters")]
+  pub since: Option<String>,
+
+  /// Filter: include records on/before this time.
+  #[arg(long, help_heading = "Filters")]
+  pub until: Option<String>,
+
+  /// Filter: model name glob (e.g. "claude-*").
+  #[arg(long, help_heading = "Filters")]
+  pub model: Option<String>,
+
+  /// Filter: provider glob.
+  #[arg(long, help_heading = "Filters")]
+  pub provider: Option<String>,
+
+  /// Filter: cwd glob.
+  #[arg(long, help_heading = "Filters")]
+  pub cwd: Option<String>,
+
   /// Comma-separated source list: codex,opencode,claude,copilot,copilot-cli (default: all).
-  #[arg(long, value_delimiter = ',')]
+  #[arg(long, value_delimiter = ',', help_heading = "Sources")]
   pub source: Option<Vec<String>>,
 
   /// Override Codex sessions root (default: $CODEX_HOME/sessions or ~/.codex/sessions).
-  #[arg(long)]
+  #[arg(long, help_heading = "Sources")]
   pub codex_dir: Option<PathBuf>,
 
   /// Override OpenCode database path (default: ~/.local/share/opencode/opencode.db).
-  #[arg(long)]
+  #[arg(long, help_heading = "Sources")]
   pub opencode_db: Option<PathBuf>,
 
   /// Override Claude Code projects root (default: $CLAUDE_HOME/projects or ~/.claude/projects).
-  #[arg(long)]
+  #[arg(long, help_heading = "Sources")]
   pub claude_dir: Option<PathBuf>,
 
   /// Override Copilot Chat workspaceStorage root (default: VS Code / Insiders / VSCodium / Cursor user dirs).
   /// Repeatable; if unset, all known defaults are scanned.
-  #[arg(long)]
+  #[arg(long, help_heading = "Sources")]
   pub copilot_dir: Option<Vec<PathBuf>>,
 
   /// Override GitHub Copilot CLI state root (default: ~/.copilot/session-state).
   /// Repeatable; if unset, all known defaults are scanned.
-  #[arg(long)]
+  #[arg(long, help_heading = "Sources")]
   pub copilot_cli_dir: Option<Vec<PathBuf>>,
 
-  /// Shortcut: filter to a recent time window (today / 7d / month).
-  #[arg(long, value_enum)]
-  pub period: Option<Period>,
-
-  /// Filter: include records on/after this time (e.g. 7d, 24h, 2025-04-01, RFC3339).
-  #[arg(long)]
-  pub since: Option<String>,
-
-  /// Filter: include records on/before this time.
-  #[arg(long)]
-  pub until: Option<String>,
-
-  /// Filter: model name glob (e.g. "claude-*").
-  #[arg(long)]
-  pub model: Option<String>,
-
-  /// Filter: provider glob.
-  #[arg(long)]
-  pub provider: Option<String>,
-
-  /// Filter: cwd glob.
-  #[arg(long)]
-  pub cwd: Option<String>,
-
-  /// Grouping dimensions, comma-separated: source,model,provider,project,date,session.
-  #[arg(long, value_delimiter = ',', default_value = "source,model")]
-  pub group_by: Vec<String>,
-
-  /// Date bucket unit (used when grouping by date).
-  #[arg(long, value_enum, default_value_t = DateBucket::Day)]
-  pub date_bucket: DateBucket,
-
-  /// Output format.
-  #[arg(long, value_enum, default_value_t = Format::Table)]
-  pub format: Format,
-
-  /// Sort key: total|input|output|cost|date|turns.
-  #[arg(long, default_value = "total")]
-  pub sort: String,
-
-  /// Sort ascending instead of descending.
-  #[arg(long)]
-  pub asc: bool,
-
-  /// Limit number of rows.
-  #[arg(long)]
-  pub limit: Option<usize>,
-
-  /// Disable ANSI colors.
-  #[arg(long)]
-  pub no_color: bool,
-
-  /// Print help.
-  #[arg(long, action = clap::ArgAction::HelpLong)]
-  pub help: Option<bool>,
-
-  /// Show human-readable usage values in table output.
-  #[arg(short = 'h', long)]
-  pub human: bool,
-
-  /// Disable automatic table column fitting.
-  #[arg(long, conflicts_with = "table_width")]
-  pub no_fit: bool,
-
-  /// Force table output to fit this width.
-  #[arg(long)]
-  pub table_width: Option<usize>,
-
-  /// Hide cost column.
-  #[arg(long)]
-  pub no_cost: bool,
-
-  /// Show uncached input only.
-  #[arg(long)]
-  pub split_input: bool,
-
-  /// Show input/output in bytes instead of tokens.
-  #[arg(long)]
-  pub bytes: bool,
-
-  /// Show per-unit averages in table output: turn|round|session.
-  #[arg(long, value_enum)]
-  pub avg: Option<AvgBy>,
-
   /// Override/extend pricing table (JSON file).
-  #[arg(long)]
+  #[arg(long, help_heading = "Pricing")]
   pub pricing: Option<PathBuf>,
 
-  /// Disable the usage cache (re-parse all source files).
-  #[arg(long)]
-  pub no_cache: bool,
+  /// Print help.
+  #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics")]
+  pub help: Option<bool>,
 
   /// Print parsing warnings.
-  #[arg(short, long)]
+  #[arg(short, long, help_heading = "Diagnostics")]
   pub verbose: bool,
 
   #[command(subcommand)]
@@ -177,16 +211,19 @@ pub enum Cmd {
   /// `--out`, writes comment headers plus JSONL records to stdout.
   Dump {
     /// Dump GitHub Copilot Chat sessions.
-    #[arg(long)]
+    #[arg(long, help_heading = "Source Selection", display_order = 10)]
     copilot: bool,
     /// Dump OpenAI Codex CLI sessions.
-    #[arg(long)]
+    #[arg(long, help_heading = "Source Selection", display_order = 11)]
     codex: bool,
     /// Input session JSONL files. If omitted, sessions are discovered from
     /// the selected source's configured/default session roots.
     files: Vec<PathBuf>,
     /// Output directory (created if missing).
-    #[arg(long, short = 'o')]
+    #[arg(long, short = 'o', help_heading = "Output", display_order = 20)]
     out: Option<PathBuf>,
+    /// Print help.
+    #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics", display_order = 30)]
+    help: Option<bool>,
   },
 }
