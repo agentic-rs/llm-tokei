@@ -509,6 +509,8 @@ fn dump_record_from_response_item(payload: &serde_json::Value) -> Option<DumpRec
       let role = match payload.get("role").and_then(|v| v.as_str()) {
         Some("user") => "user",
         Some("assistant") => "assistant",
+        Some("developer") => "developer",
+        Some("system") => "system",
         _ => return None,
       };
       let text = dump_message_content(payload.get("content"));
@@ -526,6 +528,20 @@ fn dump_record_from_response_item(payload: &serde_json::Value) -> Option<DumpRec
       let text = dump_nested_text(payload.get("output"));
       non_empty_dump_record("tool_call_result", text, None, call_id)
     }
+    Some("reasoning") => {
+      let encrypted_text = payload.get("encrypted_content").and_then(|v| v.as_str())?;
+      if encrypted_text.is_empty() {
+        None
+      } else {
+        Some(DumpRecord {
+          role: "reasoning",
+          text: String::new(),
+          encrypted_text: Some(encrypted_text.to_string()),
+          display: None,
+          call_id: None,
+        })
+      }
+    }
     _ => None,
   }
 }
@@ -542,6 +558,7 @@ fn non_empty_dump_record(
     Some(DumpRecord {
       role,
       text,
+      encrypted_text: None,
       display,
       call_id,
     })
@@ -671,7 +688,7 @@ mod tests {
     assert_eq!(records.len(), 4);
     assert_eq!(
       records.iter().map(|r| r.input_bytes).collect::<Vec<_>>(),
-      vec![18, 4, 7, 5]
+      vec![21, 4, 7, 5]
     );
     assert_eq!(
       records.iter().map(|r| r.output_bytes).collect::<Vec<_>>(),

@@ -595,6 +595,7 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
       out.push(DumpRecord {
         role: "user",
         text: prompt,
+        encrypted_text: None,
         display: None,
         call_id: None,
       });
@@ -620,6 +621,7 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
           out.push(DumpRecord {
             role: "assistant",
             text,
+            encrypted_text: None,
             display: None,
             call_id: item.get("toolCallId").and_then(|v| v.as_str()).map(str::to_string),
           });
@@ -648,6 +650,7 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
                 out.push(DumpRecord {
                   role: "tool_call",
                   text: format!("{name}: {args}"),
+                  encrypted_text: None,
                   display: None,
                   call_id: Some(id.to_string()),
                 });
@@ -670,6 +673,7 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
               out.push(DumpRecord {
                 role: "tool_call_result",
                 text,
+                encrypted_text: None,
                 display,
                 call_id: Some(id.to_string()),
               });
@@ -732,6 +736,7 @@ fn emit_tool_invocation_pair(
     } else {
       format!("{name}: {args}")
     },
+    encrypted_text: None,
     display: if display.is_empty() {
       None
     } else {
@@ -748,6 +753,7 @@ fn emit_tool_invocation_pair(
       out.push(DumpRecord {
         role: "tool_call_result",
         text,
+        encrypted_text: None,
         display: if display.is_empty() { None } else { Some(display) },
         call_id: Some(id.to_string()),
       });

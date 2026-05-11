@@ -84,7 +84,7 @@ fn codex_fixture_reports_response_item_bytes() {
   let arr = v.as_array().unwrap();
   assert_eq!(arr.len(), 1);
   let row = &arr[0];
-  assert_eq!(row["input"], 34);
+  assert_eq!(row["input"], 37);
   assert_eq!(row["output"], 34);
   assert_eq!(row["reasoning"], 50);
   assert_eq!(row["total"], 770);
@@ -607,7 +607,7 @@ fn codex_dump_subcommand_writes_positional_file_to_stdout() {
 
   let body = String::from_utf8_lossy(&out.stdout);
   let lines: Vec<&str> = body.lines().collect();
-  assert_eq!(lines.len(), 13);
+  assert_eq!(lines.len(), 17);
   assert_eq!(lines[0], format!("# {}", fixture.display()));
   let parsed: Vec<serde_json::Value> = lines[1..]
     .iter()
@@ -620,40 +620,47 @@ fn codex_dump_subcommand_writes_positional_file_to_stdout() {
       .map(|rec| rec["role"].as_str().unwrap())
       .collect::<Vec<_>>(),
     vec![
+      "developer",
+      "system",
       "user",
       "assistant",
       "tool_call",
       "tool_call_result",
       "tool_call",
       "tool_call_result",
+      "reasoning",
       "user",
       "assistant",
       "user",
       "tool_call",
       "tool_call_result",
+      "developer",
       "assistant",
     ]
   );
-  assert_eq!(parsed[0]["text"], "hello");
-  assert_eq!(parsed[1]["text"], "ok");
-  assert_eq!(parsed[2]["text"], "tool: args");
-  assert_eq!(parsed[2]["call_id"], "call_1");
-  assert_eq!(parsed[3]["text"], "result");
-  assert_eq!(parsed[3]["call_id"], "call_1");
-  assert_eq!(parsed[4]["text"], "shell: patch");
-  assert_eq!(parsed[4]["call_id"], "call_custom_1");
-  assert_eq!(parsed[5]["text"], "tool");
-  assert_eq!(parsed[5]["call_id"], "call_custom_1");
-  assert_eq!(parsed[6]["text"], "next");
-  assert_eq!(parsed[7]["text"], "done");
-  assert_eq!(parsed[8]["text"], "more");
-  assert_eq!(parsed[9]["text"], "run: {}");
-  assert_eq!(parsed[9]["call_id"], "call_2");
-  assert_eq!(parsed[10]["text"], "abc");
-  assert_eq!(parsed[10]["call_id"], "call_2");
-  assert_eq!(parsed[11]["text"], "final");
-  assert!(parsed.iter().all(|rec| rec["role"] != "developer"));
-  assert!(parsed.iter().all(|rec| rec["role"] != "reasoning"));
+  assert_eq!(parsed[0]["text"], "dev");
+  assert_eq!(parsed[1]["text"], "sys");
+  assert_eq!(parsed[2]["text"], "hello");
+  assert_eq!(parsed[3]["text"], "ok");
+  assert_eq!(parsed[4]["text"], "tool: args");
+  assert_eq!(parsed[4]["call_id"], "call_1");
+  assert_eq!(parsed[5]["text"], "result");
+  assert_eq!(parsed[5]["call_id"], "call_1");
+  assert_eq!(parsed[6]["text"], "shell: patch");
+  assert_eq!(parsed[6]["call_id"], "call_custom_1");
+  assert_eq!(parsed[7]["text"], "tool");
+  assert_eq!(parsed[7]["call_id"], "call_custom_1");
+  assert_eq!(parsed[8]["encrypted_text"], "think");
+  assert_eq!(parsed[8]["text"], "");
+  assert_eq!(parsed[9]["text"], "next");
+  assert_eq!(parsed[10]["text"], "done");
+  assert_eq!(parsed[11]["text"], "more");
+  assert_eq!(parsed[12]["text"], "run: {}");
+  assert_eq!(parsed[12]["call_id"], "call_2");
+  assert_eq!(parsed[13]["text"], "abc");
+  assert_eq!(parsed[13]["call_id"], "call_2");
+  assert_eq!(parsed[14]["text"], "rules");
+  assert_eq!(parsed[15]["text"], "final");
 }
 
 #[test]
@@ -685,11 +692,18 @@ fn codex_dump_subcommand_discovers_sessions_and_writes_out_dir() {
     .lines()
     .map(|line| serde_json::from_str(line).expect("valid jsonl"))
     .collect();
-  assert_eq!(parsed.len(), 12);
-  assert_eq!(parsed[0]["role"], "user");
-  assert_eq!(parsed[0]["text"], "hello");
-  assert_eq!(parsed[11]["role"], "assistant");
-  assert_eq!(parsed[11]["text"], "final");
+  assert_eq!(parsed.len(), 16);
+  assert_eq!(parsed[0]["role"], "developer");
+  assert_eq!(parsed[0]["text"], "dev");
+  assert_eq!(parsed[1]["role"], "system");
+  assert_eq!(parsed[1]["text"], "sys");
+  assert_eq!(parsed[8]["role"], "reasoning");
+  assert_eq!(parsed[8]["encrypted_text"], "think");
+  assert_eq!(parsed[8]["text"], "");
+  assert_eq!(parsed[14]["role"], "developer");
+  assert_eq!(parsed[14]["text"], "rules");
+  assert_eq!(parsed[15]["role"], "assistant");
+  assert_eq!(parsed[15]["text"], "final");
 
   let _ = std::fs::remove_dir_all(&out_dir);
 }

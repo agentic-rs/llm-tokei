@@ -1,6 +1,7 @@
 {"timestamp":"2025-01-02T10:00:00.000Z","type":"session_meta","payload":{"id":"sess-test-1","cwd":"/tmp/proj","model_provider":"openai","cli_version":"0.0.0"}}
 {"timestamp":"2025-01-02T10:00:01.000Z","type":"turn_context","payload":{"model":"gpt-5"}}
 {"timestamp":"2025-01-02T10:00:01.100Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"dev"}]}}
+{"timestamp":"2025-01-02T10:00:01.150Z","type":"response_item","payload":{"type":"message","role":"system","content":[{"type":"input_text","text":"sys"}]}}
 {"timestamp":"2025-01-02T10:00:01.200Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
 {"timestamp":"2025-01-02T10:00:01.300Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}}
 {"timestamp":"2025-01-02T10:00:01.400Z","type":"response_item","payload":{"type":"function_call","name":"tool","arguments":"args","call_id":"call_1"}}
