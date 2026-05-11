@@ -463,16 +463,14 @@ fn dump_rollout(path: &Path) -> Result<Option<DumpedSession>> {
     };
 
     match parsed.kind.as_deref() {
-      Some("session_meta") => {
-        if session_id.is_none() {
-          session_id = parsed
-            .payload
-            .as_ref()
-            .and_then(|payload| payload.get("meta").unwrap_or(payload).get("id"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .or(parsed.id.clone());
-        }
+      Some("session_meta") if session_id.is_none() => {
+        session_id = parsed
+          .payload
+          .as_ref()
+          .and_then(|payload| payload.get("meta").unwrap_or(payload).get("id"))
+          .and_then(|v| v.as_str())
+          .map(str::to_string)
+          .or(parsed.id.clone());
       }
       Some("response_item") => {
         let Some(payload) = parsed.payload.as_ref() else {

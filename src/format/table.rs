@@ -579,7 +579,8 @@ fn project_row(cols: &[Col], visible: &[bool]) -> Vec<Col> {
   cols
     .iter()
     .zip(visible)
-    .filter_map(|(col, visible)| visible.then(|| col.clone()))
+    .filter(|&(_, visible)| *visible)
+    .map(|(col, _)| col.clone())
     .collect()
 }
 
