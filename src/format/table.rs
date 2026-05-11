@@ -11,10 +11,36 @@ pub struct TableOpts {
 }
 
 pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> String {
+  let model = build_table_model(aggs, dims, opts);
+  let widths = measure_widths(&model);
+  let fitted = fit_table(model, widths, opts.fit_width);
+  render_fitted_table(&fitted, opts.use_color)
+}
+
+// Table model construction.
+
+struct TableModel {
+  headers: Vec<Col>,
+  rows: Vec<Vec<Col>>,
+  total_row: Vec<Col>,
+  columns: Vec<ColumnLayout>,
+  show_total: bool,
+}
+
+struct FittedTable {
+  headers: Vec<Col>,
+  rows: Vec<Vec<Col>>,
+  total_row: Vec<Col>,
+  widths: Vec<usize>,
+  hidden: Vec<String>,
+  show_total: bool,
+}
+
+fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> TableModel {
   let mut headers: Vec<Col> = dims.iter().map(|d| Col::text(d.label())).collect();
-  let mut meta: Vec<ColumnMeta> = dims
+  let mut columns: Vec<ColumnLayout> = dims
     .iter()
-    .map(|d| ColumnMeta::required_dim(d.label().to_string()))
+    .map(|d| ColumnLayout::required_dim(d.label().to_string()))
     .collect();
   let avg_suffix = match opts.avg {
     Some(AvgBy::Turn) => "/t",
@@ -23,10 +49,9 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     None => "",
   };
 
-  let active_specs = active_stat_specs(opts);
-  for spec in &active_specs {
+  for spec in active_stat_specs(opts) {
     headers.push(Col::num(&spec.header(opts, avg_suffix)));
-    meta.push(ColumnMeta::from_stat_spec(spec));
+    columns.push(ColumnLayout::from_stat_spec(spec));
   }
 
   let mut totals = TableTotals::default();
@@ -34,7 +59,7 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   let mut rows: Vec<Vec<Col>> = Vec::new();
   for a in aggs {
     let mut row: Vec<Col> = a.keys.iter().map(|k| Col::text(k)).collect();
-    for spec in &active_specs {
+    for spec in active_stat_specs(opts) {
       row.push(spec.row_col(a, opts));
     }
     rows.push(row);
@@ -44,67 +69,91 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
   let mut total_row: Vec<Col> = (0..dims.len())
     .map(|i| if i == 0 { Col::text("TOTAL") } else { Col::text("") })
     .collect();
-  for spec in &active_specs {
+  for spec in active_stat_specs(opts) {
     total_row.push(spec.total_col(&totals, aggs, opts));
   }
 
-  let show_total = aggs.len() > 1;
-
-  let mut widths = vec![0usize; headers.len()];
-  for (i, h) in headers.iter().enumerate() {
-    widths[i] = widths[i].max(h.text.len());
+  TableModel {
+    headers,
+    rows,
+    total_row,
+    columns,
+    show_total: aggs.len() > 1,
   }
-  for row in &rows {
-    for (i, c) in row.iter().enumerate() {
-      widths[i] = widths[i].max(c.text.len());
-    }
-  }
-  if show_total {
-    for (i, c) in total_row.iter().enumerate() {
-      widths[i] = widths[i].max(c.text.len());
-    }
-  }
+}
 
-  let fit = fit_columns(&meta, &widths, opts.fit_width);
-  let headers = project_row(&headers, &fit.visible);
-  let rows = rows
-    .iter()
-    .map(|row| project_row(row, &fit.visible))
-    .collect::<Vec<_>>();
-  let total_row = project_row(&total_row, &fit.visible);
-  let widths = project_widths(&fit.widths, &fit.visible);
+fn measure_widths(model: &TableModel) -> Vec<usize> {
+  let mut widths = vec![0usize; model.headers.len()];
+  include_widths(&mut widths, &model.headers);
+  for row in &model.rows {
+    include_widths(&mut widths, row);
+  }
+  if model.show_total {
+    include_widths(&mut widths, &model.total_row);
+  }
+  widths
+}
 
+fn include_widths(widths: &mut [usize], row: &[Col]) {
+  for (i, c) in row.iter().enumerate() {
+    widths[i] = widths[i].max(c.text.len());
+  }
+}
+
+fn fit_table(model: TableModel, widths: Vec<usize>, target: Option<usize>) -> FittedTable {
+  let fit = fit_columns(&model.columns, &widths, target);
+  project_table(model, fit)
+}
+
+fn project_table(model: TableModel, fit: FitResult) -> FittedTable {
+  FittedTable {
+    headers: project_row(&model.headers, &fit.visible),
+    rows: model
+      .rows
+      .iter()
+      .map(|row| project_row(row, &fit.visible))
+      .collect::<Vec<_>>(),
+    total_row: project_row(&model.total_row, &fit.visible),
+    widths: project_widths(&fit.widths, &fit.visible),
+    hidden: fit.hidden,
+    show_total: model.show_total,
+  }
+}
+
+fn render_fitted_table(table: &FittedTable, use_color: bool) -> String {
   let mut out = String::new();
 
-  let header_line = format_row(&headers, &widths);
-  let sep = separator(&widths);
-  let style = if opts.use_color { Style::Header } else { Style::Plain };
+  let header_line = format_row(&table.headers, &table.widths);
+  let sep = separator(&table.widths);
+  let style = if use_color { Style::Header } else { Style::Plain };
   out.push_str(&colorize(&header_line, style));
   out.push('\n');
   out.push_str(&sep);
   out.push('\n');
 
-  for row in &rows {
-    out.push_str(&format_row(row, &widths));
+  for row in &table.rows {
+    out.push_str(&format_row(row, &table.widths));
     out.push('\n');
   }
 
-  if show_total {
+  if table.show_total {
     out.push_str(&sep);
     out.push('\n');
-    let total_style = if opts.use_color { Style::Total } else { Style::Plain };
-    out.push_str(&colorize(&format_row(&total_row, &widths), total_style));
+    let total_style = if use_color { Style::Total } else { Style::Plain };
+    out.push_str(&colorize(&format_row(&table.total_row, &table.widths), total_style));
     out.push('\n');
   }
 
-  if !fit.hidden.is_empty() {
+  if !table.hidden.is_empty() {
     out.push_str("hidden columns: ");
-    out.push_str(&fit.hidden.join(", "));
+    out.push_str(&table.hidden.join(", "));
     out.push('\n');
   }
 
   out
 }
+
+// Statistic column definitions and value extraction.
 
 #[derive(Clone, Copy)]
 enum StatColumnId {
@@ -130,84 +179,28 @@ struct StatColumnSpec {
 }
 
 const STAT_COLUMNS: &[StatColumnSpec] = &[
-  StatColumnSpec {
-    id: StatColumnId::Input,
-    label: "input",
-    priority: 90,
-    required: false,
-    cost: false,
-  },
-  StatColumnSpec {
-    id: StatColumnId::Output,
-    label: "output",
-    priority: 90,
-    required: false,
-    cost: false,
-  },
-  StatColumnSpec {
-    id: StatColumnId::Reasoning,
-    label: "reasoning",
-    priority: 60,
-    required: false,
-    cost: false,
-  },
-  StatColumnSpec {
-    id: StatColumnId::CacheRead,
-    label: "cache_r",
-    priority: 60,
-    required: false,
-    cost: false,
-  },
-  StatColumnSpec {
-    id: StatColumnId::CacheWrite,
-    label: "cache_w",
-    priority: 60,
-    required: false,
-    cost: false,
-  },
-  StatColumnSpec {
-    id: StatColumnId::Total,
-    label: "total",
-    priority: u8::MAX,
-    required: true,
-    cost: false,
-  },
-  StatColumnSpec {
-    id: StatColumnId::Turns,
-    label: "turns",
-    priority: 80,
-    required: false,
-    cost: false,
-  },
-  StatColumnSpec {
-    id: StatColumnId::Rounds,
-    label: "rounds",
-    priority: 50,
-    required: false,
-    cost: false,
-  },
-  StatColumnSpec {
-    id: StatColumnId::Sessions,
-    label: "sessions",
-    priority: 50,
-    required: false,
-    cost: false,
-  },
-  StatColumnSpec {
-    id: StatColumnId::CostBase,
-    label: "cost($)",
-    priority: 70,
-    required: false,
-    cost: true,
-  },
-  StatColumnSpec {
-    id: StatColumnId::CostMultiplied,
-    label: "cost_mult($)",
-    priority: 70,
-    required: false,
-    cost: true,
-  },
+  stat(StatColumnId::Input, "input", 90, false, false),
+  stat(StatColumnId::Output, "output", 90, false, false),
+  stat(StatColumnId::Reasoning, "reasoning", 60, false, false),
+  stat(StatColumnId::CacheRead, "cache_r", 60, false, false),
+  stat(StatColumnId::CacheWrite, "cache_w", 60, false, false),
+  stat(StatColumnId::Total, "total", u8::MAX, true, false),
+  stat(StatColumnId::Turns, "turns", 80, false, false),
+  stat(StatColumnId::Rounds, "rounds", 50, false, false),
+  stat(StatColumnId::Sessions, "sessions", 50, false, false),
+  stat(StatColumnId::CostBase, "cost($)", 70, false, true),
+  stat(StatColumnId::CostMultiplied, "cost_mult($)", 70, false, true),
 ];
+
+const fn stat(id: StatColumnId, label: &'static str, priority: u8, required: bool, cost: bool) -> StatColumnSpec {
+  StatColumnSpec {
+    id,
+    label,
+    priority,
+    required,
+    cost,
+  }
+}
 
 impl StatColumnSpec {
   fn header(&self, opts: &TableOpts, avg_suffix: &str) -> String {
@@ -275,11 +268,8 @@ impl StatColumnSpec {
   }
 }
 
-fn active_stat_specs(opts: &TableOpts) -> Vec<&'static StatColumnSpec> {
-  STAT_COLUMNS
-    .iter()
-    .filter(|spec| !spec.cost || opts.show_cost)
-    .collect()
+fn active_stat_specs(opts: &TableOpts) -> impl Iterator<Item = &'static StatColumnSpec> + '_ {
+  STAT_COLUMNS.iter().filter(|spec| !spec.cost || opts.show_cost)
 }
 
 #[derive(Default)]
@@ -381,14 +371,16 @@ fn any_output_estimated(aggs: &[Aggregate], opts: &TableOpts) -> bool {
   }
 }
 
-struct ColumnMeta {
+// Column layout and fitting.
+
+struct ColumnLayout {
   label: String,
   priority: u8,
   required: bool,
   dim: bool,
 }
 
-impl ColumnMeta {
+impl ColumnLayout {
   fn required_dim(label: String) -> Self {
     Self {
       label,
@@ -414,34 +406,34 @@ struct FitResult {
   hidden: Vec<String>,
 }
 
-fn fit_columns(meta: &[ColumnMeta], widths: &[usize], target: Option<usize>) -> FitResult {
+fn fit_columns(columns: &[ColumnLayout], widths: &[usize], target: Option<usize>) -> FitResult {
   let Some(target) = target else {
     return FitResult {
-      visible: vec![true; meta.len()],
+      visible: vec![true; columns.len()],
       widths: widths.to_vec(),
       hidden: Vec::new(),
     };
   };
 
-  let mut visible = vec![true; meta.len()];
+  let mut visible = vec![true; columns.len()];
   let mut adjusted = widths.to_vec();
   let mut hidden = Vec::new();
-  let mut optional: Vec<usize> = meta
+  let mut optional: Vec<usize> = columns
     .iter()
     .enumerate()
-    .filter_map(|(idx, m)| (!m.required).then_some(idx))
+    .filter_map(|(idx, column)| (!column.required).then_some(idx))
     .collect();
-  optional.sort_by_key(|idx| (meta[*idx].priority, *idx));
+  optional.sort_by_key(|idx| (columns[*idx].priority, *idx));
 
   for idx in optional {
     if table_width(&adjusted, &visible) <= target {
       break;
     }
     visible[idx] = false;
-    hidden.push(meta[idx].label.clone());
+    hidden.push(columns[idx].label.clone());
   }
 
-  fit_dimension_widths(meta, &mut adjusted, &visible, target);
+  fit_dimension_widths(columns, &mut adjusted, &visible, target);
 
   FitResult {
     visible,
@@ -450,12 +442,14 @@ fn fit_columns(meta: &[ColumnMeta], widths: &[usize], target: Option<usize>) -> 
   }
 }
 
-fn fit_dimension_widths(meta: &[ColumnMeta], widths: &mut [usize], visible: &[bool], target: usize) {
+const MIN_DIM_COLUMN_WIDTH: usize = 1;
+
+fn fit_dimension_widths(columns: &[ColumnLayout], widths: &mut [usize], visible: &[bool], target: usize) {
   while table_width(widths, visible) > target {
-    let Some(idx) = meta
+    let Some(idx) = columns
       .iter()
       .enumerate()
-      .filter(|(idx, m)| visible[*idx] && m.dim && widths[*idx] > m.label.len().max(1))
+      .filter(|(idx, column)| visible[*idx] && column.dim && widths[*idx] > min_dim_width(column))
       .max_by_key(|(idx, _)| widths[*idx])
       .map(|(idx, _)| idx)
     else {
@@ -465,13 +459,21 @@ fn fit_dimension_widths(meta: &[ColumnMeta], widths: &mut [usize], visible: &[bo
   }
 }
 
+fn min_dim_width(column: &ColumnLayout) -> usize {
+  column.label.len().max(MIN_DIM_COLUMN_WIDTH)
+}
+
 fn table_width(widths: &[usize], visible: &[bool]) -> usize {
-  let visible_widths = widths
+  let mut count = 0usize;
+  let sum = widths
     .iter()
     .zip(visible)
-    .filter_map(|(width, visible)| visible.then_some(*width))
-    .collect::<Vec<_>>();
-  visible_widths.iter().sum::<usize>() + 2 * visible_widths.len().saturating_sub(1)
+    .filter_map(|(width, visible)| {
+      count += usize::from(*visible);
+      visible.then_some(*width)
+    })
+    .sum::<usize>();
+  sum + 2 * count.saturating_sub(1)
 }
 
 fn project_row(cols: &[Col], visible: &[bool]) -> Vec<Col> {
@@ -489,6 +491,8 @@ fn project_widths(widths: &[usize], visible: &[bool]) -> Vec<usize> {
     .filter_map(|(width, visible)| visible.then_some(*width))
     .collect()
 }
+
+// Row rendering.
 
 #[derive(Clone)]
 struct Col {
@@ -558,6 +562,8 @@ fn separator(widths: &[usize]) -> String {
   let total: usize = widths.iter().sum::<usize>() + 2 * (widths.len().saturating_sub(1));
   "\u{2500}".repeat(total)
 }
+
+// Number formatting.
 
 fn fmt_int(n: u64) -> String {
   let s = n.to_string();
@@ -668,19 +674,19 @@ mod tests {
     }
   }
 
+  fn opts(show_cost: bool, avg: Option<AvgBy>, bytes: bool, fit_width: Option<usize>) -> TableOpts {
+    TableOpts {
+      show_cost,
+      use_color: false,
+      split_input: false,
+      avg,
+      bytes,
+      fit_width,
+    }
+  }
+
   fn render_test_table(aggs: &[Aggregate], dims: &[GroupDim], fit_width: Option<usize>) -> String {
-    render_table(
-      aggs,
-      dims,
-      &TableOpts {
-        show_cost: true,
-        use_color: false,
-        split_input: false,
-        avg: None,
-        bytes: false,
-        fit_width,
-      },
-    )
+    render_table(aggs, dims, &opts(true, None, false, fit_width))
   }
 
   #[test]
@@ -688,14 +694,7 @@ mod tests {
     let table = render_table(
       &[aggregate(&["codex"])],
       &[GroupDim::Source],
-      &TableOpts {
-        show_cost: true,
-        use_color: false,
-        split_input: false,
-        avg: None,
-        bytes: false,
-        fit_width: None,
-      },
+      &opts(true, None, false, None),
     );
 
     assert!(table.contains("~1.2K"), "table output: {table}");
@@ -725,14 +724,7 @@ mod tests {
     let table = render_table(
       &[agg],
       &[GroupDim::Source],
-      &TableOpts {
-        show_cost: false,
-        use_color: false,
-        split_input: false,
-        avg: Some(AvgBy::Turn),
-        bytes: false,
-        fit_width: None,
-      },
+      &opts(false, Some(AvgBy::Turn), false, None),
     );
 
     assert!(table.contains("~1.2K"), "table output: {table}");
@@ -748,14 +740,7 @@ mod tests {
     let table = render_table(
       &[aggregate(&["codex"])],
       &[GroupDim::Source],
-      &TableOpts {
-        show_cost: false,
-        use_color: false,
-        split_input: false,
-        avg: None,
-        bytes: true,
-        fit_width: None,
-      },
+      &opts(false, None, true, None),
     );
 
     assert!(table.contains("input(B)"), "table output: {table}");
