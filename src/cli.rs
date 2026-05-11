@@ -163,8 +163,11 @@ pub enum Cmd {
     /// Dump GitHub Copilot Chat sessions.
     #[arg(long)]
     copilot: bool,
+    /// Dump OpenAI Codex CLI sessions.
+    #[arg(long)]
+    codex: bool,
     /// Input session JSONL files. If omitted, sessions are discovered from
-    /// `--copilot-dir` / known VS Code workspaceStorage defaults.
+    /// the selected source's configured/default session roots.
     files: Vec<PathBuf>,
     /// Output directory (created if missing).
     #[arg(long, short = 'o')]

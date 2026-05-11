@@ -6,6 +6,7 @@ pub mod codex;
 pub mod copilot;
 pub mod copilot_cli;
 pub mod copilot_shutdown;
+pub mod dump;
 pub mod opencode;
 
 #[allow(dead_code)]

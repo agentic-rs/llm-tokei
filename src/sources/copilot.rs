@@ -2,6 +2,7 @@ use crate::model::{Source, UsageRecord};
 use crate::sources::copilot_shutdown::{
   normalize_copilot_model, records_from_shutdown_model_metrics, ShutdownRecordArgs,
 };
+use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
 use crate::text_count::{Bytes, Chars, Counter};
 use anyhow::Result;
@@ -490,22 +491,6 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
   }
 
   Ok(Some(records))
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct DumpRecord {
-  pub role: &'static str,
-  pub text: String,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub display: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub call_id: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DumpedSession {
-  pub session_id: String,
-  pub records: Vec<DumpRecord>,
 }
 
 fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {

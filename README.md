@@ -35,6 +35,10 @@ llm-tokei --group-by project --format json
 
 # Show input/output in bytes instead of tokens
 llm-tokei --bytes
+
+# Dump replayable session messages
+llm-tokei dump --codex <rollout.jsonl>
+llm-tokei dump --copilot --out ./dumped-sessions
 ```
 
 ## Flags

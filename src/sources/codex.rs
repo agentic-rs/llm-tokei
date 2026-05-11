@@ -1,4 +1,5 @@
 use crate::model::{Source, UsageRecord};
+use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
 use crate::text_count::{count_value, Bytes, Counter};
 use anyhow::Result;
@@ -50,6 +51,10 @@ impl CodexSource {
 
   pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     parse_rollout(path)
+  }
+
+  pub fn dump_session_messages(path: &Path) -> Result<Option<DumpedSession>> {
+    dump_rollout(path)
   }
 }
 
@@ -436,6 +441,187 @@ fn nested_text_bytes(value: Option<&serde_json::Value>) -> u64 {
     Some(value) => count_value(&Bytes, value),
     _ => 0,
   }
+}
+
+fn dump_rollout(path: &Path) -> Result<Option<DumpedSession>> {
+  let f = File::open(path)?;
+  let reader = BufReader::new(f);
+  let mut session_id: Option<String> = None;
+  let mut records = Vec::new();
+
+  for line in reader.lines() {
+    let line = match line {
+      Ok(l) => l,
+      Err(_) => continue,
+    };
+    if line.trim().is_empty() {
+      continue;
+    }
+    let parsed: RolloutLine = match serde_json::from_str(&line) {
+      Ok(p) => p,
+      Err(_) => continue,
+    };
+
+    match parsed.kind.as_deref() {
+      Some("session_meta") => {
+        if session_id.is_none() {
+          session_id = parsed
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.get("meta").unwrap_or(payload).get("id"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or(parsed.id.clone());
+        }
+      }
+      Some("response_item") => {
+        let Some(payload) = parsed.payload.as_ref() else {
+          continue;
+        };
+        if let Some(record) = dump_record_from_response_item(payload) {
+          records.push(record);
+        }
+      }
+      _ => {}
+    }
+  }
+
+  if records.is_empty() {
+    return Ok(None);
+  }
+
+  Ok(Some(DumpedSession {
+    session_id: session_id.unwrap_or_else(|| {
+      path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string()
+    }),
+    records,
+  }))
+}
+
+fn dump_record_from_response_item(payload: &serde_json::Value) -> Option<DumpRecord> {
+  let call_id = payload.get("call_id").and_then(|v| v.as_str()).map(str::to_string);
+  match payload.get("type").and_then(|v| v.as_str()) {
+    Some("message") => {
+      let role = match payload.get("role").and_then(|v| v.as_str()) {
+        Some("user") => "user",
+        Some("assistant") => "assistant",
+        _ => return None,
+      };
+      let text = dump_message_content(payload.get("content"));
+      non_empty_dump_record(role, text, None, call_id)
+    }
+    Some("function_call") => {
+      let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("arguments"));
+      non_empty_dump_record("tool_call", text, None, call_id)
+    }
+    Some("custom_tool_call") => {
+      let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("input"));
+      non_empty_dump_record("tool_call", text, None, call_id)
+    }
+    Some("function_call_output" | "custom_tool_call_output") => {
+      let text = dump_nested_text(payload.get("output"));
+      non_empty_dump_record("tool_call_result", text, None, call_id)
+    }
+    _ => None,
+  }
+}
+
+fn non_empty_dump_record(
+  role: &'static str,
+  text: String,
+  display: Option<String>,
+  call_id: Option<String>,
+) -> Option<DumpRecord> {
+  if text.is_empty() {
+    None
+  } else {
+    Some(DumpRecord {
+      role,
+      text,
+      display,
+      call_id,
+    })
+  }
+}
+
+fn dump_tool_call_text(name: Option<&str>, body: Option<&serde_json::Value>) -> String {
+  let name = name.unwrap_or("tool");
+  let args = dump_tool_body(body);
+  if args.is_empty() {
+    name.to_string()
+  } else {
+    format!("{name}: {args}")
+  }
+}
+
+fn dump_tool_body(value: Option<&serde_json::Value>) -> String {
+  match value {
+    Some(serde_json::Value::String(s)) => s.clone(),
+    Some(value) => serde_json::to_string(value).unwrap_or_default(),
+    None => String::new(),
+  }
+}
+
+fn dump_message_content(content: Option<&serde_json::Value>) -> String {
+  match content {
+    Some(serde_json::Value::String(s)) => s.clone(),
+    Some(serde_json::Value::Array(items)) => join_non_empty(
+      items
+        .iter()
+        .filter_map(|item| item.get("text").and_then(|v| v.as_str()).map(str::to_string)),
+    ),
+    Some(value) => dump_nested_text(Some(value)),
+    None => String::new(),
+  }
+}
+
+fn dump_nested_text(value: Option<&serde_json::Value>) -> String {
+  let mut out = Vec::new();
+  collect_nested_text(value, &mut out);
+  join_non_empty(out)
+}
+
+fn collect_nested_text(value: Option<&serde_json::Value>, out: &mut Vec<String>) {
+  let Some(value) = value else {
+    return;
+  };
+  match value {
+    serde_json::Value::String(s) => out.push(s.clone()),
+    serde_json::Value::Array(items) => {
+      for item in items {
+        collect_nested_text(Some(item), out);
+      }
+    }
+    serde_json::Value::Object(map) => {
+      for key in ["text", "value", "output", "content"] {
+        if let Some(child) = map.get(key) {
+          collect_nested_text(Some(child), out);
+        }
+      }
+    }
+    _ => {}
+  }
+}
+
+fn join_non_empty<I>(items: I) -> String
+where
+  I: IntoIterator<Item = String>,
+{
+  let mut buf = String::new();
+  for item in items {
+    if item.is_empty() {
+      continue;
+    }
+    if !buf.is_empty() {
+      buf.push('\n');
+    }
+    buf.push_str(&item);
+  }
+  buf
 }
 
 fn reasoning_bytes(payload: &serde_json::Value) -> u64 {

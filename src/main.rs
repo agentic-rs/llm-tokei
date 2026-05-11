@@ -479,14 +479,28 @@ fn init_tracing(verbose: bool) {
 
 fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
   match cmd {
-    Cmd::Dump { copilot, files, out } => run_dump(*copilot, files, out.as_deref(), args),
+    Cmd::Dump {
+      copilot,
+      codex,
+      files,
+      out,
+    } => run_dump(*copilot, *codex, files, out.as_deref(), args),
   }
 }
 
-fn run_dump(copilot: bool, files: &[PathBuf], out: Option<&Path>, args: &Args) -> Result<()> {
-  if !copilot {
-    anyhow::bail!("dump: select a source with `--copilot`");
-  }
+#[derive(Debug, Clone, Copy)]
+enum DumpSource {
+  Codex,
+  Copilot,
+}
+
+fn run_dump(copilot: bool, codex: bool, files: &[PathBuf], out: Option<&Path>, args: &Args) -> Result<()> {
+  let source = match (copilot, codex) {
+    (true, false) => DumpSource::Copilot,
+    (false, true) => DumpSource::Codex,
+    (false, false) => anyhow::bail!("dump: select a source with `--copilot` or `--codex`"),
+    (true, true) => anyhow::bail!("dump: select only one source: `--copilot` or `--codex`"),
+  };
 
   if let Some(out) = out {
     std::fs::create_dir_all(out).with_context(|| format!("creating output dir {}", out.display()))?;
@@ -494,9 +508,7 @@ fn run_dump(copilot: bool, files: &[PathBuf], out: Option<&Path>, args: &Args) -
 
   let discovered;
   let paths: &[PathBuf] = if files.is_empty() {
-    let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
-    let source = CopilotSource::new(roots);
-    discovered = source.discover_files();
+    discovered = discover_dump_files(source, args);
     &discovered
   } else {
     files
@@ -509,7 +521,7 @@ fn run_dump(copilot: bool, files: &[PathBuf], out: Option<&Path>, args: &Args) -
   use std::io::Write;
 
   for path in paths {
-    let dumped = match CopilotSource::dump_session_messages(&path) {
+    let dumped = match dump_session_messages(source, path) {
       Ok(Some(d)) => d,
       Ok(None) => continue,
       Err(e) => {
@@ -556,6 +568,28 @@ fn run_dump(copilot: bool, files: &[PathBuf], out: Option<&Path>, args: &Args) -
     eprintln!("dump: wrote {written} session stream(s), {total_records} record(s) to stdout");
   }
   Ok(())
+}
+
+fn discover_dump_files(source: DumpSource, args: &Args) -> Vec<PathBuf> {
+  match source {
+    DumpSource::Codex => args
+      .codex_dir
+      .clone()
+      .or_else(CodexSource::default_path)
+      .map(|root| CodexSource::new(root).discover_files())
+      .unwrap_or_default(),
+    DumpSource::Copilot => {
+      let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
+      CopilotSource::new(roots).discover_files()
+    }
+  }
+}
+
+fn dump_session_messages(source: DumpSource, path: &Path) -> Result<Option<crate::sources::dump::DumpedSession>> {
+  match source {
+    DumpSource::Codex => CodexSource::dump_session_messages(path),
+    DumpSource::Copilot => CopilotSource::dump_session_messages(path),
+  }
 }
 
 fn sanitize_filename(name: &str) -> String {

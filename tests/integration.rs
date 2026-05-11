@@ -594,3 +594,113 @@ fn copilot_dump_subcommand_requires_copilot_flag() {
   assert!(stderr.contains("select a source with `--copilot`"), "stderr: {stderr}");
   let _ = std::fs::remove_dir_all(&out_dir);
 }
+
+#[test]
+fn codex_dump_subcommand_writes_positional_file_to_stdout() {
+  let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    .join("tests/fixtures/codex/sessions/2025/01/02/rollout-2025-01-02T10-00-00-test.jsonl");
+  let out = Command::new(bin())
+    .args(["dump", "--codex", fixture.to_str().unwrap()])
+    .output()
+    .expect("run llm-tokei dump");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+
+  let body = String::from_utf8_lossy(&out.stdout);
+  let lines: Vec<&str> = body.lines().collect();
+  assert_eq!(lines.len(), 13);
+  assert_eq!(lines[0], format!("# {}", fixture.display()));
+  let parsed: Vec<serde_json::Value> = lines[1..]
+    .iter()
+    .map(|line| serde_json::from_str(line).expect("valid jsonl"))
+    .collect();
+
+  assert_eq!(
+    parsed
+      .iter()
+      .map(|rec| rec["role"].as_str().unwrap())
+      .collect::<Vec<_>>(),
+    vec![
+      "user",
+      "assistant",
+      "tool_call",
+      "tool_call_result",
+      "tool_call",
+      "tool_call_result",
+      "user",
+      "assistant",
+      "user",
+      "tool_call",
+      "tool_call_result",
+      "assistant",
+    ]
+  );
+  assert_eq!(parsed[0]["text"], "hello");
+  assert_eq!(parsed[1]["text"], "ok");
+  assert_eq!(parsed[2]["text"], "tool: args");
+  assert_eq!(parsed[2]["call_id"], "call_1");
+  assert_eq!(parsed[3]["text"], "result");
+  assert_eq!(parsed[3]["call_id"], "call_1");
+  assert_eq!(parsed[4]["text"], "shell: patch");
+  assert_eq!(parsed[4]["call_id"], "call_custom_1");
+  assert_eq!(parsed[5]["text"], "tool");
+  assert_eq!(parsed[5]["call_id"], "call_custom_1");
+  assert_eq!(parsed[6]["text"], "next");
+  assert_eq!(parsed[7]["text"], "done");
+  assert_eq!(parsed[8]["text"], "more");
+  assert_eq!(parsed[9]["text"], "run: {}");
+  assert_eq!(parsed[9]["call_id"], "call_2");
+  assert_eq!(parsed[10]["text"], "abc");
+  assert_eq!(parsed[10]["call_id"], "call_2");
+  assert_eq!(parsed[11]["text"], "final");
+  assert!(parsed.iter().all(|rec| rec["role"] != "developer"));
+  assert!(parsed.iter().all(|rec| rec["role"] != "reasoning"));
+}
+
+#[test]
+fn codex_dump_subcommand_discovers_sessions_and_writes_out_dir() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let nanos = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap()
+    .as_nanos();
+  let out_dir = std::env::temp_dir().join(format!("llm-tokei-codex-dump-{nanos}"));
+  let _ = std::fs::remove_dir_all(&out_dir);
+
+  let status = Command::new(bin())
+    .args([
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "dump",
+      "--codex",
+      "--out",
+      out_dir.to_str().unwrap(),
+    ])
+    .status()
+    .expect("run llm-tokei dump");
+  assert!(status.success());
+
+  let dest = out_dir.join("sess-test-1.jsonl");
+  let body = std::fs::read_to_string(&dest).expect("dump file written");
+  let parsed: Vec<serde_json::Value> = body
+    .lines()
+    .map(|line| serde_json::from_str(line).expect("valid jsonl"))
+    .collect();
+  assert_eq!(parsed.len(), 12);
+  assert_eq!(parsed[0]["role"], "user");
+  assert_eq!(parsed[0]["text"], "hello");
+  assert_eq!(parsed[11]["role"], "assistant");
+  assert_eq!(parsed[11]["text"], "final");
+
+  let _ = std::fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn dump_subcommand_rejects_multiple_sources() {
+  let out = Command::new(bin())
+    .args(["dump", "--copilot", "--codex"])
+    .output()
+    .expect("run llm-tokei dump");
+  assert!(!out.status.success());
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(stderr.contains("select only one source"), "stderr: {stderr}");
+}
