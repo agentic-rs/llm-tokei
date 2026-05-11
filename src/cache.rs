@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-const CACHE_SCHEMA_VERSION: i64 = 3;
+const CACHE_SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = "\
 CREATE TABLE IF NOT EXISTS sessions (

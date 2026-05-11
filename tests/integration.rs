@@ -93,6 +93,92 @@ fn codex_fixture_reports_response_item_bytes() {
 }
 
 #[test]
+fn codex_bytes_mode_rebuilds_stale_zero_byte_cache() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let cache_home = std::env::temp_dir().join(format!(
+    "llm-tokei-cache-{}",
+    std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .expect("system time")
+      .as_nanos()
+  ));
+  std::fs::create_dir_all(&cache_home).expect("create cache home");
+
+  let cache_path = cache_home.join("llm-tokei.db");
+  {
+    let conn = rusqlite::Connection::open(&cache_path).expect("open stale cache");
+    conn
+      .execute_batch(
+        r#"
+        PRAGMA user_version = 3;
+        CREATE TABLE sessions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            source        TEXT NOT NULL,
+            session_id    TEXT NOT NULL,
+            session_title TEXT,
+            project_cwd   TEXT,
+            project_name  TEXT,
+            file_path     TEXT NOT NULL,
+            first_ts      TEXT NOT NULL,
+            last_ts       TEXT NOT NULL,
+            file_mtime    INTEGER NOT NULL,
+            pruned        INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE records (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_rowid INTEGER NOT NULL REFERENCES sessions(id),
+            provider      TEXT,
+            model         TEXT,
+            ts            TEXT NOT NULL,
+            input         INTEGER NOT NULL,
+            output        INTEGER NOT NULL,
+            input_bytes   INTEGER NOT NULL,
+            output_bytes  INTEGER NOT NULL,
+            input_estimated INTEGER NOT NULL,
+            output_estimated INTEGER NOT NULL,
+            input_bytes_estimated INTEGER NOT NULL,
+            output_bytes_estimated INTEGER NOT NULL,
+            reasoning     INTEGER NOT NULL,
+            cache_read    INTEGER NOT NULL,
+            cache_write   INTEGER NOT NULL,
+            mode          TEXT,
+            agent         TEXT,
+            is_compaction INTEGER NOT NULL,
+            rounds        INTEGER NOT NULL,
+            turns         INTEGER NOT NULL,
+            cost_embedded REAL
+        );
+        "#,
+      )
+      .expect("create stale schema");
+  }
+
+  let out = Command::new(bin())
+    .env("XDG_CACHE_HOME", &cache_home)
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+      "--format",
+      "json",
+      "--bytes",
+    ])
+    .output()
+    .expect("run llm-tokei bytes mode with stale cache");
+
+  let _ = std::fs::remove_dir_all(&cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  let row = &v.as_array().unwrap()[0];
+  assert_eq!(row["input"], 34);
+  assert_eq!(row["output"], 34);
+}
+
+#[test]
 fn claude_fixture_parses_usage() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/projects");
   let out = Command::new(bin())
