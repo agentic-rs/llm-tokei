@@ -41,7 +41,7 @@ pub enum AvgBy {
 
 /// Token usage stats for local LLM agent sessions.
 #[derive(Debug, Parser)]
-#[command(name = "llm-tokei", version, about)]
+#[command(name = "llm-tokei", version, about, disable_help_flag = true)]
 pub struct Args {
   /// Comma-separated source list: codex,opencode,claude,copilot,copilot-cli (default: all).
   #[arg(long, value_delimiter = ',')]
@@ -120,6 +120,14 @@ pub struct Args {
   /// Disable ANSI colors.
   #[arg(long)]
   pub no_color: bool,
+
+  /// Print help.
+  #[arg(long, action = clap::ArgAction::HelpLong)]
+  pub help: Option<bool>,
+
+  /// Show human-readable usage values in table output.
+  #[arg(short = 'h', long)]
+  pub human: bool,
 
   /// Disable automatic table column fitting.
   #[arg(long, conflicts_with = "table_width")]

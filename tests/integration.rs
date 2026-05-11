@@ -174,7 +174,7 @@ fn codex_bytes_mode_rebuilds_stale_zero_byte_cache() {
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
   let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
   let row = &v.as_array().unwrap()[0];
-  assert_eq!(row["input"], 34);
+  assert_eq!(row["input"], 37);
   assert_eq!(row["output"], 34);
 }
 

@@ -7,6 +7,7 @@ pub struct TableOpts {
   pub split_input: bool,
   pub avg: Option<AvgBy>,
   pub bytes: bool,
+  pub human: bool,
   pub fit_width: Option<usize>,
 }
 
@@ -56,11 +57,13 @@ fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) ->
 
   let mut totals = TableTotals::default();
 
+  let max_units = max_human_units(aggs, opts);
+
   let mut rows: Vec<Vec<Col>> = Vec::new();
   for a in aggs {
     let mut row: Vec<Col> = a.keys.iter().map(|k| Col::text(k)).collect();
     for spec in active_stat_specs(opts) {
-      row.push(spec.row_col(a, opts));
+      row.push(spec.row_col(a, opts, &max_units));
     }
     rows.push(row);
     totals.add(a);
@@ -70,7 +73,7 @@ fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) ->
     .map(|i| if i == 0 { Col::text("TOTAL") } else { Col::text("") })
     .collect();
   for spec in active_stat_specs(opts) {
-    total_row.push(spec.total_col(&totals, aggs, opts));
+    total_row.push(spec.total_col(&totals, aggs, opts, &max_units));
   }
 
   TableModel {
@@ -123,7 +126,7 @@ fn project_table(model: TableModel, fit: FitResult) -> FittedTable {
 fn render_fitted_table(table: &FittedTable, use_color: bool) -> String {
   let mut out = String::new();
 
-  let header_line = format_row(&table.headers, &table.widths);
+  let header_line = format_row(&table.headers, &table.widths, use_color);
   let sep = separator(&table.widths);
   let style = if use_color { Style::Header } else { Style::Plain };
   out.push_str(&colorize(&header_line, style));
@@ -132,7 +135,7 @@ fn render_fitted_table(table: &FittedTable, use_color: bool) -> String {
   out.push('\n');
 
   for row in &table.rows {
-    out.push_str(&format_row(row, &table.widths));
+    out.push_str(&format_row(row, &table.widths, use_color));
     out.push('\n');
   }
 
@@ -140,7 +143,10 @@ fn render_fitted_table(table: &FittedTable, use_color: bool) -> String {
     out.push_str(&sep);
     out.push('\n');
     let total_style = if use_color { Style::Total } else { Style::Plain };
-    out.push_str(&colorize(&format_row(&table.total_row, &table.widths), total_style));
+    out.push_str(&colorize(
+      &format_row(&table.total_row, &table.widths, use_color),
+      total_style,
+    ));
     out.push('\n');
   }
 
@@ -223,10 +229,10 @@ impl StatColumnSpec {
     }
   }
 
-  fn row_col(&self, a: &Aggregate, opts: &TableOpts) -> Col {
+  fn row_col(&self, a: &Aggregate, opts: &TableOpts, max_units: &[usize]) -> Col {
     let den = avg_den(a, opts.avg);
     let text = match self.id {
-      StatColumnId::Input => fmt_est_usage_avg(shown_input(a, opts), input_estimated(a, opts), den),
+      StatColumnId::Input => fmt_est_usage_avg(shown_input(a, opts), input_estimated(a, opts), den, opts.human),
       StatColumnId::Output => fmt_est_usage_avg(
         if opts.bytes { a.output_bytes } else { a.output },
         if opts.bytes {
@@ -235,37 +241,130 @@ impl StatColumnSpec {
           a.output_estimated
         },
         den,
+        opts.human,
       ),
-      StatColumnId::Reasoning => fmt_usage_avg(a.reasoning, den),
-      StatColumnId::CacheRead => fmt_usage_avg(a.cache_read, den),
-      StatColumnId::CacheWrite => fmt_usage_avg(a.cache_write, den),
-      StatColumnId::Total => fmt_usage_avg(a.total, den),
+      StatColumnId::Reasoning => fmt_usage_avg(a.reasoning, den, opts.human),
+      StatColumnId::CacheRead => fmt_usage_avg(a.cache_read, den, opts.human),
+      StatColumnId::CacheWrite => fmt_usage_avg(a.cache_write, den, opts.human),
+      StatColumnId::Total => fmt_usage_avg(a.total, den, opts.human),
       StatColumnId::Turns => fmt_int(a.turns),
       StatColumnId::Rounds => fmt_int(a.rounds),
       StatColumnId::Sessions => fmt_int(a.sessions),
       StatColumnId::CostBase => fmt_cost_avg(a.cost_base, den),
       StatColumnId::CostMultiplied => fmt_cost_avg(a.cost_multiplied, den),
     };
-    Col::num(&text)
+    let muted = opts.human
+      && self
+        .human_unit(a, opts, den)
+        .is_some_and(|unit| unit < max_units[self.id.idx()]);
+    Col::num(&text).with_muted(muted)
   }
 
-  fn total_col(&self, totals: &TableTotals, aggs: &[Aggregate], opts: &TableOpts) -> Col {
+  fn total_col(&self, totals: &TableTotals, aggs: &[Aggregate], opts: &TableOpts, max_units: &[usize]) -> Col {
     let den = totals.avg_den(opts.avg);
     let text = match self.id {
-      StatColumnId::Input => fmt_est_usage_avg(totals.shown_input(opts), any_input_estimated(aggs, opts), den),
-      StatColumnId::Output => fmt_est_usage_avg(totals.shown_output(opts), any_output_estimated(aggs, opts), den),
-      StatColumnId::Reasoning => fmt_usage_avg(totals.reasoning, den),
-      StatColumnId::CacheRead => fmt_usage_avg(totals.cache_read, den),
-      StatColumnId::CacheWrite => fmt_usage_avg(totals.cache_write, den),
-      StatColumnId::Total => fmt_usage_avg(totals.total, den),
+      StatColumnId::Input => fmt_est_usage_avg(
+        totals.shown_input(opts),
+        any_input_estimated(aggs, opts),
+        den,
+        opts.human,
+      ),
+      StatColumnId::Output => fmt_est_usage_avg(
+        totals.shown_output(opts),
+        any_output_estimated(aggs, opts),
+        den,
+        opts.human,
+      ),
+      StatColumnId::Reasoning => fmt_usage_avg(totals.reasoning, den, opts.human),
+      StatColumnId::CacheRead => fmt_usage_avg(totals.cache_read, den, opts.human),
+      StatColumnId::CacheWrite => fmt_usage_avg(totals.cache_write, den, opts.human),
+      StatColumnId::Total => fmt_usage_avg(totals.total, den, opts.human),
       StatColumnId::Turns => fmt_int(totals.turns),
       StatColumnId::Rounds => fmt_int(totals.rounds),
       StatColumnId::Sessions => fmt_int(totals.sessions),
       StatColumnId::CostBase => fmt_cost_avg(totals.cost_base, den),
       StatColumnId::CostMultiplied => fmt_cost_avg(totals.cost_multiplied, den),
     };
-    Col::num(&text)
+    let muted = opts.human
+      && self
+        .total_human_unit(totals, opts, den)
+        .is_some_and(|unit| unit < max_units[self.id.idx()]);
+    Col::num(&text).with_muted(muted)
   }
+
+  fn human_unit(&self, a: &Aggregate, opts: &TableOpts, den: u64) -> Option<usize> {
+    let value = match self.id {
+      StatColumnId::Input => shown_input(a, opts),
+      StatColumnId::Output => {
+        if opts.bytes {
+          a.output_bytes
+        } else {
+          a.output
+        }
+      }
+      StatColumnId::Reasoning => a.reasoning,
+      StatColumnId::CacheRead => a.cache_read,
+      StatColumnId::CacheWrite => a.cache_write,
+      StatColumnId::Total => a.total,
+      _ => return None,
+    };
+    Some(human_unit(value as f64 / den.max(1) as f64))
+  }
+
+  fn total_human_unit(&self, totals: &TableTotals, opts: &TableOpts, den: u64) -> Option<usize> {
+    let value = match self.id {
+      StatColumnId::Input => totals.shown_input(opts),
+      StatColumnId::Output => totals.shown_output(opts),
+      StatColumnId::Reasoning => totals.reasoning,
+      StatColumnId::CacheRead => totals.cache_read,
+      StatColumnId::CacheWrite => totals.cache_write,
+      StatColumnId::Total => totals.total,
+      _ => return None,
+    };
+    Some(human_unit(value as f64 / den.max(1) as f64))
+  }
+}
+
+impl StatColumnId {
+  fn idx(self) -> usize {
+    match self {
+      StatColumnId::Input => 0,
+      StatColumnId::Output => 1,
+      StatColumnId::Reasoning => 2,
+      StatColumnId::CacheRead => 3,
+      StatColumnId::CacheWrite => 4,
+      StatColumnId::Total => 5,
+      StatColumnId::Turns => 6,
+      StatColumnId::Rounds => 7,
+      StatColumnId::Sessions => 8,
+      StatColumnId::CostBase => 9,
+      StatColumnId::CostMultiplied => 10,
+    }
+  }
+}
+
+fn max_human_units(aggs: &[Aggregate], opts: &TableOpts) -> Vec<usize> {
+  let mut max_units = vec![0; STAT_COLUMNS.len()];
+  if !opts.human {
+    return max_units;
+  }
+  let mut totals = TableTotals::default();
+  for a in aggs {
+    totals.add(a);
+    for spec in active_stat_specs(opts) {
+      let den = avg_den(a, opts.avg);
+      if let Some(unit) = spec.human_unit(a, opts, den) {
+        max_units[spec.id.idx()] = max_units[spec.id.idx()].max(unit);
+      }
+    }
+  }
+  let total_den = totals.avg_den(opts.avg);
+  for spec in active_stat_specs(opts) {
+    if let Some(unit) = spec.total_human_unit(&totals, opts, total_den) {
+      max_units[spec.id.idx()] = max_units[spec.id.idx()].max(unit);
+    }
+  }
+  max_units
 }
 
 fn active_stat_specs(opts: &TableOpts) -> impl Iterator<Item = &'static StatColumnSpec> + '_ {
@@ -498,6 +597,7 @@ fn project_widths(widths: &[usize], visible: &[bool]) -> Vec<usize> {
 struct Col {
   text: String,
   right: bool,
+  muted: bool,
 }
 
 impl Col {
@@ -505,13 +605,19 @@ impl Col {
     Self {
       text: s.to_string(),
       right: false,
+      muted: false,
     }
   }
   fn num(s: &str) -> Self {
     Self {
       text: s.to_string(),
       right: true,
+      muted: false,
     }
+  }
+  fn with_muted(mut self, muted: bool) -> Self {
+    self.muted = muted;
+    self
   }
 }
 
@@ -519,6 +625,7 @@ enum Style {
   Plain,
   Header,
   Total,
+  Muted,
 }
 
 fn colorize(line: &str, style: Style) -> String {
@@ -526,10 +633,11 @@ fn colorize(line: &str, style: Style) -> String {
     Style::Plain => line.to_string(),
     Style::Header => format!("\x1b[36m{}\x1b[0m", line),
     Style::Total => format!("\x1b[33m{}\x1b[0m", line),
+    Style::Muted => format!("\x1b[90m{}\x1b[0m", line),
   }
 }
 
-fn format_row(cols: &[Col], widths: &[usize]) -> String {
+fn format_row(cols: &[Col], widths: &[usize], use_color: bool) -> String {
   let mut parts: Vec<String> = Vec::with_capacity(cols.len());
   for (i, c) in cols.iter().enumerate() {
     let w = widths[i];
@@ -538,6 +646,10 @@ fn format_row(cols: &[Col], widths: &[usize]) -> String {
       parts.push(format!("{text:>width$}", width = w));
     } else {
       parts.push(format!("{text:<width$}", width = w));
+    }
+    let idx = parts.len() - 1;
+    if use_color && c.muted {
+      parts[idx] = colorize(&parts[idx], Style::Muted);
     }
   }
   parts.join("  ")
@@ -595,15 +707,15 @@ fn avg_den(a: &Aggregate, avg: Option<AvgBy>) -> u64 {
   }
 }
 
-fn fmt_usage_avg(n: u64, den: u64) -> String {
+fn fmt_usage_avg(n: u64, den: u64, human: bool) -> String {
   if den <= 1 {
-    return fmt_usage(n as f64);
+    return fmt_usage(n as f64, human);
   }
-  fmt_usage(n as f64 / den as f64)
+  fmt_usage(n as f64 / den as f64, human)
 }
 
-fn fmt_est_usage_avg(n: u64, estimated: bool, den: u64) -> String {
-  let body = fmt_usage_avg(n, den);
+fn fmt_est_usage_avg(n: u64, estimated: bool, den: u64, human: bool) -> String {
+  let body = fmt_usage_avg(n, den, human);
   if estimated {
     format!("~{body}")
   } else {
@@ -626,8 +738,11 @@ fn fmt_float(v: f64) -> String {
   }
 }
 
-fn fmt_usage(v: f64) -> String {
+fn fmt_usage(v: f64, human: bool) -> String {
   const UNITS: [&str; 5] = ["", "K", "M", "B", "T"];
+  if !human {
+    return fmt_float(v);
+  }
   if v < 999.95 {
     return fmt_float(v);
   }
@@ -639,9 +754,17 @@ fn fmt_usage(v: f64) -> String {
     unit_idx += 1;
   }
 
-  let body = format!("{scaled:.1}");
-  let body = body.strip_suffix(".0").unwrap_or(&body);
-  format!("{body}{}", UNITS[unit_idx])
+  format!("{scaled:.1}{}", UNITS[unit_idx])
+}
+
+fn human_unit(v: f64) -> usize {
+  let mut scaled = v;
+  let mut unit_idx = 0usize;
+  while scaled >= 999.95 && unit_idx < 4 {
+    scaled /= 1000.0;
+    unit_idx += 1;
+  }
+  unit_idx
 }
 
 #[cfg(test)]
@@ -674,34 +797,54 @@ mod tests {
     }
   }
 
-  fn opts(show_cost: bool, avg: Option<AvgBy>, bytes: bool, fit_width: Option<usize>) -> TableOpts {
+  fn opts(show_cost: bool, avg: Option<AvgBy>, bytes: bool, human: bool, fit_width: Option<usize>) -> TableOpts {
     TableOpts {
       show_cost,
       use_color: false,
       split_input: false,
       avg,
       bytes,
+      human,
       fit_width,
     }
   }
 
   fn render_test_table(aggs: &[Aggregate], dims: &[GroupDim], fit_width: Option<usize>) -> String {
-    render_table(aggs, dims, &opts(true, None, false, fit_width))
+    render_table(aggs, dims, &opts(true, None, false, false, fit_width))
   }
 
   #[test]
-  fn table_compacts_usage_fields_but_not_counts_or_costs() {
+  fn table_uses_plain_numbers_by_default() {
     let table = render_table(
       &[aggregate(&["codex"])],
       &[GroupDim::Source],
-      &opts(true, None, false, None),
+      &opts(true, None, false, false, None),
+    );
+
+    assert!(table.contains("~1,234"), "table output: {table}");
+    assert!(table.contains("2,500,000"), "table output: {table}");
+    assert!(table.contains("1,000,000"), "table output: {table}");
+    assert!(table.contains("3,501,233"), "table output: {table}");
+    assert!(table.contains("1,234"), "table output: {table}");
+    assert!(table.contains("2,345"), "table output: {table}");
+    assert!(table.contains("3,456"), "table output: {table}");
+    assert!(table.contains("12.3456"), "table output: {table}");
+    assert!(table.contains("23.4567"), "table output: {table}");
+  }
+
+  #[test]
+  fn human_table_compacts_usage_fields_but_not_counts_or_costs() {
+    let table = render_table(
+      &[aggregate(&["codex"])],
+      &[GroupDim::Source],
+      &opts(true, None, false, true, None),
     );
 
     assert!(table.contains("~1.2K"), "table output: {table}");
     assert!(table.contains("2.5M"), "table output: {table}");
     assert!(table.contains("999"), "table output: {table}");
     assert!(table.contains("1.5K"), "table output: {table}");
-    assert!(table.contains("1M"), "table output: {table}");
+    assert!(table.contains("1.0M"), "table output: {table}");
     assert!(table.contains("3.5M"), "table output: {table}");
     assert!(table.contains("1,234"), "table output: {table}");
     assert!(table.contains("2,345"), "table output: {table}");
@@ -724,7 +867,7 @@ mod tests {
     let table = render_table(
       &[agg],
       &[GroupDim::Source],
-      &opts(false, Some(AvgBy::Turn), false, None),
+      &opts(false, Some(AvgBy::Turn), false, true, None),
     );
 
     assert!(table.contains("~1.2K"), "table output: {table}");
@@ -732,7 +875,7 @@ mod tests {
     assert!(table.contains("99.90"), "table output: {table}");
     assert!(table.contains("1.2K"), "table output: {table}");
     assert!(table.contains("123.5K"), "table output: {table}");
-    assert!(table.contains("250K"), "table output: {table}");
+    assert!(table.contains("250.0K"), "table output: {table}");
   }
 
   #[test]
@@ -740,13 +883,27 @@ mod tests {
     let table = render_table(
       &[aggregate(&["codex"])],
       &[GroupDim::Source],
-      &opts(false, None, true, None),
+      &opts(false, None, true, true, None),
     );
 
     assert!(table.contains("input(B)"), "table output: {table}");
     assert!(table.contains("output(B)"), "table output: {table}");
     assert!(table.contains("~1.5K"), "table output: {table}");
     assert!(table.contains("2.5B"), "table output: {table}");
+  }
+
+  #[test]
+  fn human_table_mutes_values_below_largest_column_unit() {
+    let small = aggregate(&["small"]);
+    let mut large = aggregate(&["large"]);
+    large.output = 5_000_000;
+    let mut table_opts = opts(false, None, false, true, None);
+    table_opts.use_color = true;
+
+    let table = render_table(&[small, large], &[GroupDim::Source], &table_opts);
+
+    assert!(table.contains("\x1b[90m"), "table output: {table:?}");
+    assert!(table.contains("5.0M"), "table output: {table:?}");
   }
 
   #[test]

@@ -293,6 +293,7 @@ fn main() -> Result<()> {
               split_input: args.split_input,
               avg: args.avg,
               bytes: args.bytes,
+              human: args.human,
               fit_width: table_fit_width(&args),
             },
           )
