@@ -7,157 +7,45 @@ pub struct TableOpts {
   pub split_input: bool,
   pub avg: Option<AvgBy>,
   pub bytes: bool,
+  pub fit_width: Option<usize>,
 }
 
 pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> String {
   let mut headers: Vec<Col> = dims.iter().map(|d| Col::text(d.label())).collect();
+  let mut meta: Vec<ColumnMeta> = dims
+    .iter()
+    .map(|d| ColumnMeta::required_dim(d.label().to_string()))
+    .collect();
   let avg_suffix = match opts.avg {
     Some(AvgBy::Turn) => "/t",
     Some(AvgBy::Round) => "/r",
     Some(AvgBy::Session) => "/s",
     None => "",
   };
-  headers.push(Col::num(&format!(
-    "{}{}{}",
-    if opts.split_input { "input_u" } else { "input" },
-    if opts.bytes { "(B)" } else { "" },
-    avg_suffix
-  )));
-  headers.push(Col::num(&format!(
-    "output{}{}",
-    if opts.bytes { "(B)" } else { "" },
-    avg_suffix
-  )));
-  headers.push(Col::num(&format!("reasoning{avg_suffix}")));
-  headers.push(Col::num(&format!("cache_r{avg_suffix}")));
-  headers.push(Col::num(&format!("cache_w{avg_suffix}")));
-  headers.push(Col::num(&format!("total{avg_suffix}")));
-  headers.push(Col::num("turns"));
-  headers.push(Col::num("rounds"));
-  headers.push(Col::num("sessions"));
-  if opts.show_cost {
-    headers.push(Col::num("cost($)"));
-    headers.push(Col::num("cost_mult($)"));
+
+  let active_specs = active_stat_specs(opts);
+  for spec in &active_specs {
+    headers.push(Col::num(&spec.header(opts, avg_suffix)));
+    meta.push(ColumnMeta::from_stat_spec(spec));
   }
 
-  let (mut tot_in, mut tot_out, mut tot_re, mut tot_cr, mut tot_cw, mut tot_tot, mut tot_t, mut tot_r, mut tot_s) =
-    (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
-  let (mut tot_base, mut tot_mult) = (0.0_f64, 0.0_f64);
+  let mut totals = TableTotals::default();
 
   let mut rows: Vec<Vec<Col>> = Vec::new();
   for a in aggs {
     let mut row: Vec<Col> = a.keys.iter().map(|k| Col::text(k)).collect();
-    let shown_input = if opts.split_input {
-      if opts.bytes {
-        a.input_bytes
-      } else {
-        a.input.saturating_sub(a.cache_read).saturating_sub(a.cache_write)
-      }
-    } else {
-      if opts.bytes {
-        a.input_bytes
-      } else {
-        a.input
-      }
-    };
-    row.push(Col::num(&fmt_est_usage_avg(
-      shown_input,
-      if opts.bytes {
-        a.input_bytes_estimated
-      } else {
-        a.input_estimated
-      },
-      avg_den(a, opts.avg),
-    )));
-    row.push(Col::num(&fmt_est_usage_avg(
-      if opts.bytes { a.output_bytes } else { a.output },
-      if opts.bytes {
-        a.output_bytes_estimated
-      } else {
-        a.output_estimated
-      },
-      avg_den(a, opts.avg),
-    )));
-    row.push(Col::num(&fmt_usage_avg(a.reasoning, avg_den(a, opts.avg))));
-    row.push(Col::num(&fmt_usage_avg(a.cache_read, avg_den(a, opts.avg))));
-    row.push(Col::num(&fmt_usage_avg(a.cache_write, avg_den(a, opts.avg))));
-    row.push(Col::num(&fmt_usage_avg(a.total, avg_den(a, opts.avg))));
-    row.push(Col::num(&fmt_int(a.turns)));
-    row.push(Col::num(&fmt_int(a.rounds)));
-    row.push(Col::num(&fmt_int(a.sessions)));
-    if opts.show_cost {
-      row.push(Col::num(&fmt_cost_avg(a.cost_base, avg_den(a, opts.avg))));
-      row.push(Col::num(&fmt_cost_avg(a.cost_multiplied, avg_den(a, opts.avg))));
-      tot_base += a.cost_base;
-      tot_mult += a.cost_multiplied;
+    for spec in &active_specs {
+      row.push(spec.row_col(a, opts));
     }
     rows.push(row);
-    tot_in += a.input;
-    tot_out += a.output;
-    tot_re += a.reasoning;
-    tot_cr += a.cache_read;
-    tot_cw += a.cache_write;
-    tot_tot += a.total;
-    tot_t += a.turns;
-    tot_r += a.rounds;
-    tot_s += a.sessions;
+    totals.add(a);
   }
 
   let mut total_row: Vec<Col> = (0..dims.len())
     .map(|i| if i == 0 { Col::text("TOTAL") } else { Col::text("") })
     .collect();
-  let shown_total_input = if opts.split_input {
-    if opts.bytes {
-      aggs.iter().map(|a| a.input_bytes).sum()
-    } else {
-      tot_in.saturating_sub(tot_cr).saturating_sub(tot_cw)
-    }
-  } else {
-    if opts.bytes {
-      aggs.iter().map(|a| a.input_bytes).sum()
-    } else {
-      tot_in
-    }
-  };
-  let tot_out_display = if opts.bytes {
-    aggs.iter().map(|a| a.output_bytes).sum()
-  } else {
-    tot_out
-  };
-  let total_den = match opts.avg {
-    Some(AvgBy::Turn) => tot_t,
-    Some(AvgBy::Round) => tot_r,
-    Some(AvgBy::Session) => tot_s,
-    None => 1,
-  };
-  total_row.push(Col::num(&fmt_est_usage_avg(
-    shown_total_input,
-    if opts.bytes {
-      aggs.iter().any(|a| a.input_bytes_estimated)
-    } else {
-      aggs.iter().any(|a| a.input_estimated)
-    },
-    total_den,
-  )));
-  total_row.push(Col::num(&fmt_est_usage_avg(
-    tot_out_display,
-    if opts.bytes {
-      aggs.iter().any(|a| a.output_bytes_estimated)
-    } else {
-      aggs.iter().any(|a| a.output_estimated)
-    },
-    total_den,
-  )));
-  total_row.push(Col::num(&fmt_usage_avg(tot_re, total_den)));
-  total_row.push(Col::num(&fmt_usage_avg(tot_cr, total_den)));
-  total_row.push(Col::num(&fmt_usage_avg(tot_cw, total_den)));
-  total_row.push(Col::num(&fmt_usage_avg(tot_tot, total_den)));
-  total_row.push(Col::num(&fmt_int(tot_t)));
-  total_row.push(Col::num(&fmt_int(tot_r)));
-  total_row.push(Col::num(&fmt_int(tot_s)));
-  if opts.show_cost {
-    total_row.push(Col::num(&fmt_cost_avg(tot_base, total_den)));
-    total_row.push(Col::num(&fmt_cost_avg(tot_mult, total_den)));
+  for spec in &active_specs {
+    total_row.push(spec.total_col(&totals, aggs, opts));
   }
 
   let show_total = aggs.len() > 1;
@@ -176,6 +64,15 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
       widths[i] = widths[i].max(c.text.len());
     }
   }
+
+  let fit = fit_columns(&meta, &widths, opts.fit_width);
+  let headers = project_row(&headers, &fit.visible);
+  let rows = rows
+    .iter()
+    .map(|row| project_row(row, &fit.visible))
+    .collect::<Vec<_>>();
+  let total_row = project_row(&total_row, &fit.visible);
+  let widths = project_widths(&fit.widths, &fit.visible);
 
   let mut out = String::new();
 
@@ -200,9 +97,400 @@ pub fn render_table(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) -> 
     out.push('\n');
   }
 
+  if !fit.hidden.is_empty() {
+    out.push_str("hidden columns: ");
+    out.push_str(&fit.hidden.join(", "));
+    out.push('\n');
+  }
+
   out
 }
 
+#[derive(Clone, Copy)]
+enum StatColumnId {
+  Input,
+  Output,
+  Reasoning,
+  CacheRead,
+  CacheWrite,
+  Total,
+  Turns,
+  Rounds,
+  Sessions,
+  CostBase,
+  CostMultiplied,
+}
+
+struct StatColumnSpec {
+  id: StatColumnId,
+  label: &'static str,
+  priority: u8,
+  required: bool,
+  cost: bool,
+}
+
+const STAT_COLUMNS: &[StatColumnSpec] = &[
+  StatColumnSpec {
+    id: StatColumnId::Input,
+    label: "input",
+    priority: 90,
+    required: false,
+    cost: false,
+  },
+  StatColumnSpec {
+    id: StatColumnId::Output,
+    label: "output",
+    priority: 90,
+    required: false,
+    cost: false,
+  },
+  StatColumnSpec {
+    id: StatColumnId::Reasoning,
+    label: "reasoning",
+    priority: 60,
+    required: false,
+    cost: false,
+  },
+  StatColumnSpec {
+    id: StatColumnId::CacheRead,
+    label: "cache_r",
+    priority: 60,
+    required: false,
+    cost: false,
+  },
+  StatColumnSpec {
+    id: StatColumnId::CacheWrite,
+    label: "cache_w",
+    priority: 60,
+    required: false,
+    cost: false,
+  },
+  StatColumnSpec {
+    id: StatColumnId::Total,
+    label: "total",
+    priority: u8::MAX,
+    required: true,
+    cost: false,
+  },
+  StatColumnSpec {
+    id: StatColumnId::Turns,
+    label: "turns",
+    priority: 80,
+    required: false,
+    cost: false,
+  },
+  StatColumnSpec {
+    id: StatColumnId::Rounds,
+    label: "rounds",
+    priority: 50,
+    required: false,
+    cost: false,
+  },
+  StatColumnSpec {
+    id: StatColumnId::Sessions,
+    label: "sessions",
+    priority: 50,
+    required: false,
+    cost: false,
+  },
+  StatColumnSpec {
+    id: StatColumnId::CostBase,
+    label: "cost($)",
+    priority: 70,
+    required: false,
+    cost: true,
+  },
+  StatColumnSpec {
+    id: StatColumnId::CostMultiplied,
+    label: "cost_mult($)",
+    priority: 70,
+    required: false,
+    cost: true,
+  },
+];
+
+impl StatColumnSpec {
+  fn header(&self, opts: &TableOpts, avg_suffix: &str) -> String {
+    match self.id {
+      StatColumnId::Input => format!(
+        "{}{}{}",
+        if opts.split_input { "input_u" } else { "input" },
+        if opts.bytes { "(B)" } else { "" },
+        avg_suffix
+      ),
+      StatColumnId::Output => format!("output{}{}", if opts.bytes { "(B)" } else { "" }, avg_suffix),
+      StatColumnId::Reasoning | StatColumnId::CacheRead | StatColumnId::CacheWrite | StatColumnId::Total => {
+        format!("{}{avg_suffix}", self.label)
+      }
+      StatColumnId::Turns
+      | StatColumnId::Rounds
+      | StatColumnId::Sessions
+      | StatColumnId::CostBase
+      | StatColumnId::CostMultiplied => self.label.to_string(),
+    }
+  }
+
+  fn row_col(&self, a: &Aggregate, opts: &TableOpts) -> Col {
+    let den = avg_den(a, opts.avg);
+    let text = match self.id {
+      StatColumnId::Input => fmt_est_usage_avg(shown_input(a, opts), input_estimated(a, opts), den),
+      StatColumnId::Output => fmt_est_usage_avg(
+        if opts.bytes { a.output_bytes } else { a.output },
+        if opts.bytes {
+          a.output_bytes_estimated
+        } else {
+          a.output_estimated
+        },
+        den,
+      ),
+      StatColumnId::Reasoning => fmt_usage_avg(a.reasoning, den),
+      StatColumnId::CacheRead => fmt_usage_avg(a.cache_read, den),
+      StatColumnId::CacheWrite => fmt_usage_avg(a.cache_write, den),
+      StatColumnId::Total => fmt_usage_avg(a.total, den),
+      StatColumnId::Turns => fmt_int(a.turns),
+      StatColumnId::Rounds => fmt_int(a.rounds),
+      StatColumnId::Sessions => fmt_int(a.sessions),
+      StatColumnId::CostBase => fmt_cost_avg(a.cost_base, den),
+      StatColumnId::CostMultiplied => fmt_cost_avg(a.cost_multiplied, den),
+    };
+    Col::num(&text)
+  }
+
+  fn total_col(&self, totals: &TableTotals, aggs: &[Aggregate], opts: &TableOpts) -> Col {
+    let den = totals.avg_den(opts.avg);
+    let text = match self.id {
+      StatColumnId::Input => fmt_est_usage_avg(totals.shown_input(opts), any_input_estimated(aggs, opts), den),
+      StatColumnId::Output => fmt_est_usage_avg(totals.shown_output(opts), any_output_estimated(aggs, opts), den),
+      StatColumnId::Reasoning => fmt_usage_avg(totals.reasoning, den),
+      StatColumnId::CacheRead => fmt_usage_avg(totals.cache_read, den),
+      StatColumnId::CacheWrite => fmt_usage_avg(totals.cache_write, den),
+      StatColumnId::Total => fmt_usage_avg(totals.total, den),
+      StatColumnId::Turns => fmt_int(totals.turns),
+      StatColumnId::Rounds => fmt_int(totals.rounds),
+      StatColumnId::Sessions => fmt_int(totals.sessions),
+      StatColumnId::CostBase => fmt_cost_avg(totals.cost_base, den),
+      StatColumnId::CostMultiplied => fmt_cost_avg(totals.cost_multiplied, den),
+    };
+    Col::num(&text)
+  }
+}
+
+fn active_stat_specs(opts: &TableOpts) -> Vec<&'static StatColumnSpec> {
+  STAT_COLUMNS
+    .iter()
+    .filter(|spec| !spec.cost || opts.show_cost)
+    .collect()
+}
+
+#[derive(Default)]
+struct TableTotals {
+  input: u64,
+  output: u64,
+  input_bytes: u64,
+  output_bytes: u64,
+  reasoning: u64,
+  cache_read: u64,
+  cache_write: u64,
+  total: u64,
+  turns: u64,
+  rounds: u64,
+  sessions: u64,
+  cost_base: f64,
+  cost_multiplied: f64,
+}
+
+impl TableTotals {
+  fn add(&mut self, a: &Aggregate) {
+    self.input += a.input;
+    self.output += a.output;
+    self.input_bytes += a.input_bytes;
+    self.output_bytes += a.output_bytes;
+    self.reasoning += a.reasoning;
+    self.cache_read += a.cache_read;
+    self.cache_write += a.cache_write;
+    self.total += a.total;
+    self.turns += a.turns;
+    self.rounds += a.rounds;
+    self.sessions += a.sessions;
+    self.cost_base += a.cost_base;
+    self.cost_multiplied += a.cost_multiplied;
+  }
+
+  fn shown_input(&self, opts: &TableOpts) -> u64 {
+    if opts.bytes {
+      self.input_bytes
+    } else if opts.split_input {
+      self
+        .input
+        .saturating_sub(self.cache_read)
+        .saturating_sub(self.cache_write)
+    } else {
+      self.input
+    }
+  }
+
+  fn shown_output(&self, opts: &TableOpts) -> u64 {
+    if opts.bytes {
+      self.output_bytes
+    } else {
+      self.output
+    }
+  }
+
+  fn avg_den(&self, avg: Option<AvgBy>) -> u64 {
+    match avg {
+      Some(AvgBy::Turn) => self.turns,
+      Some(AvgBy::Round) => self.rounds,
+      Some(AvgBy::Session) => self.sessions,
+      None => 1,
+    }
+  }
+}
+
+fn shown_input(a: &Aggregate, opts: &TableOpts) -> u64 {
+  if opts.bytes {
+    a.input_bytes
+  } else if opts.split_input {
+    a.input.saturating_sub(a.cache_read).saturating_sub(a.cache_write)
+  } else {
+    a.input
+  }
+}
+
+fn input_estimated(a: &Aggregate, opts: &TableOpts) -> bool {
+  if opts.bytes {
+    a.input_bytes_estimated
+  } else {
+    a.input_estimated
+  }
+}
+
+fn any_input_estimated(aggs: &[Aggregate], opts: &TableOpts) -> bool {
+  if opts.bytes {
+    aggs.iter().any(|a| a.input_bytes_estimated)
+  } else {
+    aggs.iter().any(|a| a.input_estimated)
+  }
+}
+
+fn any_output_estimated(aggs: &[Aggregate], opts: &TableOpts) -> bool {
+  if opts.bytes {
+    aggs.iter().any(|a| a.output_bytes_estimated)
+  } else {
+    aggs.iter().any(|a| a.output_estimated)
+  }
+}
+
+struct ColumnMeta {
+  label: String,
+  priority: u8,
+  required: bool,
+  dim: bool,
+}
+
+impl ColumnMeta {
+  fn required_dim(label: String) -> Self {
+    Self {
+      label,
+      priority: u8::MAX,
+      required: true,
+      dim: true,
+    }
+  }
+
+  fn from_stat_spec(spec: &StatColumnSpec) -> Self {
+    Self {
+      label: spec.label.to_string(),
+      priority: spec.priority,
+      required: spec.required,
+      dim: false,
+    }
+  }
+}
+
+struct FitResult {
+  visible: Vec<bool>,
+  widths: Vec<usize>,
+  hidden: Vec<String>,
+}
+
+fn fit_columns(meta: &[ColumnMeta], widths: &[usize], target: Option<usize>) -> FitResult {
+  let Some(target) = target else {
+    return FitResult {
+      visible: vec![true; meta.len()],
+      widths: widths.to_vec(),
+      hidden: Vec::new(),
+    };
+  };
+
+  let mut visible = vec![true; meta.len()];
+  let mut adjusted = widths.to_vec();
+  let mut hidden = Vec::new();
+  let mut optional: Vec<usize> = meta
+    .iter()
+    .enumerate()
+    .filter_map(|(idx, m)| (!m.required).then_some(idx))
+    .collect();
+  optional.sort_by_key(|idx| (meta[*idx].priority, *idx));
+
+  for idx in optional {
+    if table_width(&adjusted, &visible) <= target {
+      break;
+    }
+    visible[idx] = false;
+    hidden.push(meta[idx].label.clone());
+  }
+
+  fit_dimension_widths(meta, &mut adjusted, &visible, target);
+
+  FitResult {
+    visible,
+    widths: adjusted,
+    hidden,
+  }
+}
+
+fn fit_dimension_widths(meta: &[ColumnMeta], widths: &mut [usize], visible: &[bool], target: usize) {
+  while table_width(widths, visible) > target {
+    let Some(idx) = meta
+      .iter()
+      .enumerate()
+      .filter(|(idx, m)| visible[*idx] && m.dim && widths[*idx] > m.label.len().max(1))
+      .max_by_key(|(idx, _)| widths[*idx])
+      .map(|(idx, _)| idx)
+    else {
+      break;
+    };
+    widths[idx] -= 1;
+  }
+}
+
+fn table_width(widths: &[usize], visible: &[bool]) -> usize {
+  let visible_widths = widths
+    .iter()
+    .zip(visible)
+    .filter_map(|(width, visible)| visible.then_some(*width))
+    .collect::<Vec<_>>();
+  visible_widths.iter().sum::<usize>() + 2 * visible_widths.len().saturating_sub(1)
+}
+
+fn project_row(cols: &[Col], visible: &[bool]) -> Vec<Col> {
+  cols
+    .iter()
+    .zip(visible)
+    .filter_map(|(col, visible)| visible.then(|| col.clone()))
+    .collect()
+}
+
+fn project_widths(widths: &[usize], visible: &[bool]) -> Vec<usize> {
+  widths
+    .iter()
+    .zip(visible)
+    .filter_map(|(width, visible)| visible.then_some(*width))
+    .collect()
+}
+
+#[derive(Clone)]
 struct Col {
   text: String,
   right: bool,
@@ -241,13 +529,29 @@ fn format_row(cols: &[Col], widths: &[usize]) -> String {
   let mut parts: Vec<String> = Vec::with_capacity(cols.len());
   for (i, c) in cols.iter().enumerate() {
     let w = widths[i];
+    let text = fit_cell(&c.text, w);
     if c.right {
-      parts.push(format!("{:>width$}", c.text, width = w));
+      parts.push(format!("{text:>width$}", width = w));
     } else {
-      parts.push(format!("{:<width$}", c.text, width = w));
+      parts.push(format!("{text:<width$}", width = w));
     }
   }
   parts.join("  ")
+}
+
+fn fit_cell(text: &str, width: usize) -> String {
+  if text.chars().count() <= width {
+    return text.to_string();
+  }
+  if width == 0 {
+    return String::new();
+  }
+  if width == 1 {
+    return "…".to_string();
+  }
+  let mut out = text.chars().take(width - 1).collect::<String>();
+  out.push('…');
+  out
 }
 
 fn separator(widths: &[usize]) -> String {
@@ -364,6 +668,21 @@ mod tests {
     }
   }
 
+  fn render_test_table(aggs: &[Aggregate], dims: &[GroupDim], fit_width: Option<usize>) -> String {
+    render_table(
+      aggs,
+      dims,
+      &TableOpts {
+        show_cost: true,
+        use_color: false,
+        split_input: false,
+        avg: None,
+        bytes: false,
+        fit_width,
+      },
+    )
+  }
+
   #[test]
   fn table_compacts_usage_fields_but_not_counts_or_costs() {
     let table = render_table(
@@ -375,6 +694,7 @@ mod tests {
         split_input: false,
         avg: None,
         bytes: false,
+        fit_width: None,
       },
     );
 
@@ -411,6 +731,7 @@ mod tests {
         split_input: false,
         avg: Some(AvgBy::Turn),
         bytes: false,
+        fit_width: None,
       },
     );
 
@@ -433,6 +754,7 @@ mod tests {
         split_input: false,
         avg: None,
         bytes: true,
+        fit_width: None,
       },
     );
 
@@ -440,5 +762,62 @@ mod tests {
     assert!(table.contains("output(B)"), "table output: {table}");
     assert!(table.contains("~1.5K"), "table output: {table}");
     assert!(table.contains("2.5B"), "table output: {table}");
+  }
+
+  #[test]
+  fn wide_table_width_keeps_all_columns_and_no_hidden_footer() {
+    let table = render_test_table(&[aggregate(&["codex"])], &[GroupDim::Source], Some(160));
+    let header = table.lines().next().unwrap_or_default();
+
+    for expected in [
+      "input",
+      "output",
+      "reasoning",
+      "cache_r",
+      "cache_w",
+      "total",
+      "turns",
+      "rounds",
+      "sessions",
+      "cost($)",
+      "cost_mult($)",
+    ] {
+      assert!(header.contains(expected), "header: {header}");
+    }
+    assert!(!table.contains("hidden columns:"), "table output: {table}");
+  }
+
+  #[test]
+  fn narrow_table_width_hides_columns_by_priority_and_keeps_total() {
+    let table = render_test_table(&[aggregate(&["codex"])], &[GroupDim::Source], Some(60));
+    let header = table.lines().next().unwrap_or_default();
+
+    assert!(header.contains("source"), "header: {header}");
+    assert!(header.contains("total"), "header: {header}");
+    assert!(!header.contains("rounds"), "header: {header}");
+    assert!(!header.contains("sessions"), "header: {header}");
+    assert!(!header.contains("reasoning"), "header: {header}");
+    assert!(!header.contains("cache_r"), "header: {header}");
+    assert!(!header.contains("cache_w"), "header: {header}");
+    assert!(
+      table.contains("hidden columns: rounds, sessions, reasoning, cache_r, cache_w"),
+      "table output: {table}"
+    );
+  }
+
+  #[test]
+  fn very_narrow_width_truncates_dimension_values_and_keeps_total() {
+    let table = render_test_table(
+      &[aggregate(&["very-long-source-name", "extremely-long-model-name"])],
+      &[GroupDim::Source, GroupDim::Model],
+      Some(32),
+    );
+    let header = table.lines().next().unwrap_or_default();
+
+    assert!(header.contains("source"), "header: {header}");
+    assert!(header.contains("model"), "header: {header}");
+    assert!(header.contains("total"), "header: {header}");
+    assert!(table.contains('…'), "table output: {table}");
+    assert!(table.contains("hidden columns:"), "table output: {table}");
   }
 }

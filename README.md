@@ -57,6 +57,8 @@ llm-tokei dump --copilot --out ./dumped-sessions
 | `--format table\|json` | Output format |
 | `--sort total\|input\|output\|cost\|cost-base\|date\|turns` | Sort key (desc; `--asc` to invert). `cost` = multiplied. |
 | `--limit <N>` | Truncate rows |
+| `--table-width <N>` | Fit table output to a fixed width by hiding low-priority statistic columns |
+| `--no-fit` | Disable automatic table column fitting |
 | `--no-cost` | Hide cost column |
 | `--avg turn\|round\|session` | Show per-unit averages in table output |
 | `--split-input` | Show uncached input as `input_u` |
@@ -69,6 +71,11 @@ Table output uses compact human-readable units for usage columns such as
 `input`, `output`, `reasoning`, `cache_r`, `cache_w`, and `total` (for example,
 `1.2K` or `3.4M`). Count columns and cost columns remain exact. JSON output
 keeps raw numeric values for scripting.
+
+When table output has a target width, `llm-tokei` hides lower-priority statistic
+columns and prints a `hidden columns:` footer. `--table-width` forces a width;
+otherwise automatic fitting uses the current terminal width when stdout is a
+terminal. Grouping columns are kept and long values are truncated if needed.
 
 ## Pricing
 

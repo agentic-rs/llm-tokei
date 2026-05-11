@@ -121,6 +121,14 @@ pub struct Args {
   #[arg(long)]
   pub no_color: bool,
 
+  /// Disable automatic table column fitting.
+  #[arg(long, conflicts_with = "table_width")]
+  pub no_fit: bool,
+
+  /// Force table output to fit this width.
+  #[arg(long)]
+  pub table_width: Option<usize>,
+
   /// Hide cost column.
   #[arg(long)]
   pub no_cost: bool,

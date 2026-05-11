@@ -11,6 +11,7 @@ mod time;
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::collections::HashSet;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tracing::debug;
@@ -292,6 +293,7 @@ fn main() -> Result<()> {
               split_input: args.split_input,
               avg: args.avg,
               bytes: args.bytes,
+              fit_width: table_fit_width(&args),
             },
           )
         );
@@ -303,6 +305,30 @@ fn main() -> Result<()> {
   }
 
   Ok(())
+}
+
+fn table_fit_width(args: &Args) -> Option<usize> {
+  if args.no_fit {
+    return None;
+  }
+  if let Some(width) = args.table_width {
+    return Some(width);
+  }
+  if !std::io::stdout().is_terminal() {
+    return None;
+  }
+  terminal_width().or_else(columns_env_width)
+}
+
+fn columns_env_width() -> Option<usize> {
+  std::env::var("COLUMNS")
+    .ok()
+    .and_then(|v| v.parse::<usize>().ok())
+    .filter(|w| *w > 0)
+}
+
+fn terminal_width() -> Option<usize> {
+  terminal_size::terminal_size().map(|(terminal_size::Width(width), _)| width as usize)
 }
 
 fn collect_one_record_source_with_cache<F>(

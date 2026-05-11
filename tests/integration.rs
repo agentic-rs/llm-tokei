@@ -323,6 +323,67 @@ fn bytes_mode_table_header_uses_byte_suffix() {
 }
 
 #[test]
+fn table_width_fits_table_output() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot/workspaceStorage");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "copilot",
+      "--copilot-dir",
+      fixtures.to_str().unwrap(),
+      "--group-by",
+      "source,model",
+      "--table-width",
+      "50",
+    ])
+    .output()
+    .expect("run llm-tokei fitted table");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let table = String::from_utf8_lossy(&out.stdout);
+  let header = table.lines().next().unwrap_or_default();
+  assert!(header.contains("source"), "table output: {table}");
+  assert!(header.contains("model"), "table output: {table}");
+  assert!(header.contains("total"), "table output: {table}");
+  assert!(table.contains("hidden columns:"), "table output: {table}");
+}
+
+#[test]
+fn table_width_does_not_affect_json_output() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--format",
+      "json",
+      "--table-width",
+      "20",
+    ])
+    .output()
+    .expect("run llm-tokei json with table width");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  let row = &v.as_array().unwrap()[0];
+  assert_eq!(row["input"], 500);
+  assert_eq!(row["output"], 220);
+  assert_eq!(row["total"], 770);
+}
+
+#[test]
+fn no_fit_conflicts_with_table_width() {
+  let out = Command::new(bin())
+    .args(["--no-fit", "--table-width", "80"])
+    .output()
+    .expect("run llm-tokei with conflicting fit args");
+  assert!(!out.status.success());
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(stderr.contains("--no-fit"), "stderr: {stderr}");
+  assert!(stderr.contains("--table-width"), "stderr: {stderr}");
+}
+
+#[test]
 fn missing_cache_write_price_falls_back_to_input_price() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_cli/session-state");
   let pricing_path = temp_file_path("pricing-override");
