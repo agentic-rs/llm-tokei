@@ -60,10 +60,20 @@ fn split_args(input: &str) -> Vec<String> {
 }
 
 fn render_svg(command: &str, ansi: &str) -> String {
-  let lines: Vec<Vec<Span>> = ansi.lines().map(parse_ansi_line).collect();
-  let char_width = 9usize;
-  let line_height = 26usize;
-  let padding_x = 24usize;
+  let mut raw_lines: Vec<&str> = ansi.lines().collect();
+  while raw_lines.last().is_some_and(|line| line.trim().is_empty()) {
+    raw_lines.pop();
+  }
+  let lines: Vec<Vec<Span>> = raw_lines.into_iter().map(parse_ansi_line).collect();
+  let font_size = 14usize;
+  let char_width = 8usize;
+  let line_height = 22usize;
+  let padding_x = 22usize;
+  let header_height = 48usize;
+  let command_y = header_height + 25;
+  let table_start_y = command_y + line_height + 6;
+  let footer_padding = 10usize;
+  let trailing_blank_lines = 1usize;
   let content_width = lines
     .iter()
     .map(|line| line.iter().map(|span| span.text.chars().count()).sum::<usize>())
@@ -71,7 +81,8 @@ fn render_svg(command: &str, ansi: &str) -> String {
     .unwrap_or(80)
     .max(command.chars().count());
   let width = padding_x * 2 + content_width * char_width;
-  let height = 88 + lines.len() * line_height + 28;
+  let height = table_start_y + (lines.len().saturating_sub(1) + trailing_blank_lines) * line_height + footer_padding;
+  let content_height = height - header_height - 2;
 
   let mut svg = String::new();
   svg.push_str(&format!(
@@ -80,22 +91,47 @@ fn render_svg(command: &str, ansi: &str) -> String {
   svg.push_str("  <title id=\"title\">llm-tokei terminal output</title>\n");
   svg.push_str("  <desc id=\"desc\">A colored terminal table produced by llm-tokei.</desc>\n");
   svg.push_str(&format!(
-    "  <rect width=\"{width}\" height=\"{height}\" rx=\"14\" fill=\"#0d1117\"/>\n"
+    "  <rect width=\"{width}\" height=\"{height}\" rx=\"16\" fill=\"#0d1117\"/>\n"
   ));
-  svg.push_str("  <circle cx=\"28\" cy=\"26\" r=\"6\" fill=\"#ff5f56\"/>\n");
-  svg.push_str("  <circle cx=\"48\" cy=\"26\" r=\"6\" fill=\"#ffbd2e\"/>\n");
-  svg.push_str("  <circle cx=\"68\" cy=\"26\" r=\"6\" fill=\"#27c93f\"/>\n");
-  svg.push_str(&text_element(padding_x, 62, "#8b949e", &format!("$ {command}")));
+  svg.push_str(&format!(
+    "  <rect x=\"0\" y=\"0\" width=\"{width}\" height=\"48\" rx=\"16\" fill=\"#161b22\"/>\n"
+  ));
+  svg.push_str(&format!(
+    "  <rect x=\"0\" y=\"32\" width=\"{width}\" height=\"16\" fill=\"#161b22\"/>\n"
+  ));
+  svg.push_str("  <circle cx=\"24\" cy=\"24\" r=\"6\" fill=\"#ff5f56\"/>\n");
+  svg.push_str("  <circle cx=\"44\" cy=\"24\" r=\"6\" fill=\"#ffbd2e\"/>\n");
+  svg.push_str("  <circle cx=\"64\" cy=\"24\" r=\"6\" fill=\"#27c93f\"/>\n");
+  svg.push_str(&format!(
+    "  <text x=\"{}\" y=\"29\" text-anchor=\"middle\" fill=\"#8b949e\" font-family=\"{}\" font-size=\"13\">llm-tokei</text>\n",
+    width / 2,
+    font_family()
+  ));
+  svg.push_str("  <defs>\n");
+  svg.push_str(&format!(
+    "    <clipPath id=\"terminal-content\"><rect x=\"{padding_x}\" y=\"{header_height}\" width=\"{}\" height=\"{content_height}\"/></clipPath>\n",
+    width - padding_x * 2
+  ));
+  svg.push_str("  </defs>\n");
+  svg.push_str("  <g clip-path=\"url(#terminal-content)\">\n");
+  svg.push_str(&line_element(
+    padding_x,
+    command_y,
+    font_size,
+    &[Span {
+      color: "#8b949e",
+      text: format!("$ {command}"),
+    }],
+  ));
 
   for (idx, line) in lines.iter().enumerate() {
-    let y = 102 + idx * line_height;
-    let mut x = padding_x;
-    for span in line {
-      svg.push_str(&text_element(x, y, span.color, &span.text));
-      x += span.text.chars().count() * char_width;
-    }
+    let y = table_start_y + idx * line_height;
+    svg.push_str(&line_element(padding_x, y, font_size, line));
   }
+  let blank_y = table_start_y + lines.len() * line_height;
+  svg.push_str(&line_element(padding_x, blank_y, font_size, &[]));
 
+  svg.push_str("  </g>\n");
   svg.push_str("</svg>\n");
   svg
 }
@@ -147,11 +183,24 @@ fn push_span(spans: &mut Vec<Span>, color: &'static str, buf: &mut String) {
   }
 }
 
-fn text_element(x: usize, y: usize, fill: &str, text: &str) -> String {
-  format!(
-    "  <text x=\"{x}\" y=\"{y}\" fill=\"{fill}\" font-family=\"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace\" font-size=\"15\" xml:space=\"preserve\">{}</text>\n",
-    escape_xml(text)
-  )
+fn line_element(x: usize, y: usize, font_size: usize, spans: &[Span]) -> String {
+  let mut out = format!(
+    "    <text x=\"{x}\" y=\"{y}\" font-family=\"{}\" font-size=\"{font_size}\" xml:space=\"preserve\">",
+    font_family()
+  );
+  for span in spans {
+    out.push_str(&format!(
+      "<tspan fill=\"{}\">{}</tspan>",
+      span.color,
+      escape_xml(&span.text)
+    ));
+  }
+  out.push_str("</text>\n");
+  out
+}
+
+fn font_family() -> &'static str {
+  "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace"
 }
 
 fn escape_xml(text: &str) -> String {
