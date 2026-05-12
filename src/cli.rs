@@ -180,6 +180,14 @@ pub struct Args {
   #[arg(long, help_heading = CONFIG_HELP)]
   pub no_config: bool,
 
+  /// Save current main CLI flags as config defaults, then run.
+  #[arg(long, help_heading = CONFIG_HELP)]
+  pub save_default: bool,
+
+  /// Do not apply saved config defaults for this run.
+  #[arg(long, help_heading = CONFIG_HELP)]
+  pub no_default: bool,
+
   /// Filter: include records on/after this time (e.g. 7d, 24h, 2025-04-01, RFC3339).
   #[arg(long, help_heading = "Filters")]
   pub since: Option<String>,
@@ -244,6 +252,12 @@ pub struct Args {
 
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
+  /// Manage llm-tokei config defaults.
+  Config {
+    #[command(subcommand)]
+    cmd: ConfigCmd,
+  },
+
   /// Fetch current models.dev prices into the runtime price cache.
   Update {
     /// Print help.
@@ -270,6 +284,21 @@ pub enum Cmd {
     out: Option<PathBuf>,
     /// Print help.
     #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics", display_order = 30)]
+    help: Option<bool>,
+  },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigCmd {
+  /// Parse CLI args and save them as config defaults.
+  Args {
+    /// Argument string to parse and save, e.g. `--cost official --group-by provider`.
+    args: Option<String>,
+    /// Clear saved main-flag defaults from the config file.
+    #[arg(long)]
+    reset: bool,
+    /// Print help.
+    #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics")]
     help: Option<bool>,
   },
 }

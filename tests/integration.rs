@@ -565,6 +565,122 @@ no-cache = true
 }
 
 #[test]
+fn config_args_saves_structured_defaults() {
+  let (config_path, config_dir) = temp_config_file("config-args-save", "");
+  let save = Command::new(bin())
+    .args([
+      "--config",
+      config_path.to_str().unwrap(),
+      "config",
+      "args",
+      "--",
+      "--cost official --group-by provider --human --source codex",
+    ])
+    .output()
+    .expect("run config args");
+  assert!(
+    save.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&save.stderr)
+  );
+
+  let contents = std::fs::read_to_string(&config_path).expect("read saved config");
+  let _ = std::fs::remove_dir_all(config_dir);
+  assert!(contents.contains("cost = \"official\""), "config: {contents}");
+  assert!(contents.contains("group-by = [\"provider\"]"), "config: {contents}");
+  assert!(contents.contains("human = true"), "config: {contents}");
+  assert!(contents.contains("source = [\"codex\"]"), "config: {contents}");
+}
+
+#[test]
+fn save_default_saves_current_main_flags_and_runs() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (config_path, config_dir) = temp_config_file("config-save-default", "");
+  let out = Command::new(bin())
+    .args([
+      "--config",
+      config_path.to_str().unwrap(),
+      "--save-default",
+      "--format",
+      "json",
+      "--source",
+      "codex",
+      "--group-by",
+      "provider",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run save-default");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  assert_eq!(v.as_array().unwrap()[0]["keys"]["provider"], "openai");
+
+  let contents = std::fs::read_to_string(&config_path).expect("read saved config");
+  let _ = std::fs::remove_dir_all(config_dir);
+  assert!(contents.contains("format = \"json\""), "config: {contents}");
+  assert!(contents.contains("group-by = [\"provider\"]"), "config: {contents}");
+  assert!(!contents.contains("save-default"), "config: {contents}");
+}
+
+#[test]
+fn no_default_skips_saved_config_defaults() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (config_path, config_dir) = temp_config_file(
+    "config-no-default",
+    r#"
+format = "json"
+source = ["codex"]
+group-by = ["provider"]
+no-cache = true
+"#,
+  );
+  let out = Command::new(bin())
+    .args([
+      "--config",
+      config_path.to_str().unwrap(),
+      "--no-default",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+      "--format",
+      "json",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run no-default");
+  let _ = std::fs::remove_dir_all(config_dir);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  assert_eq!(v.as_array().unwrap()[0]["keys"]["model"], "gpt-5");
+}
+
+#[test]
+fn config_args_reset_clears_defaults() {
+  let (config_path, config_dir) = temp_config_file(
+    "config-args-reset",
+    r#"
+format = "json"
+group-by = ["provider"]
+"#,
+  );
+  let out = Command::new(bin())
+    .args(["--config", config_path.to_str().unwrap(), "config", "args", "--reset"])
+    .output()
+    .expect("run config args reset");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let contents = std::fs::read_to_string(&config_path).expect("read reset config");
+  let _ = std::fs::remove_dir_all(config_dir);
+  assert!(contents.trim().is_empty(), "config: {contents}");
+}
+
+#[test]
 fn missing_cache_write_price_falls_back_to_input_price() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_cli/session-state");
   let pricing_path = temp_file_path("pricing-override");

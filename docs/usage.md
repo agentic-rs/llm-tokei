@@ -195,6 +195,20 @@ llm-tokei --config ./llm-tokei.toml
 llm-tokei --no-config
 ```
 
+Save structured defaults from CLI args:
+
+```sh
+llm-tokei config args "--cost official --group-by provider --human"
+llm-tokei config args --reset
+llm-tokei --cost actual --group-by source,model --save-default
+llm-tokei --no-default
+```
+
+`config args "..."` and `--save-default` both parse normal main CLI flags and
+write the corresponding structured TOML keys. `--save-default` then continues
+to run the command normally. `--no-default` skips applying saved config defaults
+for one run.
+
 Config keys mirror the main CLI flags using kebab-case names, for example
 `date-bucket`, `table-width`, `cost-per`, `codex-dir`, and `copilot-cli-dir`.
 Subcommand-specific options are not read from config.

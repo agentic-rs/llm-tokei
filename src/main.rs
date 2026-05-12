@@ -19,7 +19,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
-use crate::cli::{Args, Cmd, Format, Period};
+use crate::cli::{Args, Cmd, ConfigCmd, Format, Period};
 use crate::format::{json::render_json, table::render_table};
 use crate::model::UsageRecord;
 use crate::pricing::{update_cached_prices, PricingTable};
@@ -545,12 +545,35 @@ fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
       ..
     } => run_dump(*copilot, *codex, files, out.as_deref(), args),
     Cmd::Update { .. } => run_update(),
+    Cmd::Config { cmd } => run_config(cmd, args),
   }
 }
 
 fn run_update() -> Result<()> {
   let path = update_cached_prices()?;
   eprintln!("updated pricing cache: {}", path.display());
+  Ok(())
+}
+
+fn run_config(cmd: &ConfigCmd, args: &Args) -> Result<()> {
+  let path = args
+    .config
+    .clone()
+    .or_else(config::default_config_path)
+    .context("cannot determine config path")?;
+  match cmd {
+    ConfigCmd::Args { args, reset, .. } => {
+      if *reset {
+        config::reset_defaults(&path)?;
+        eprintln!("reset config defaults: {}", path.display());
+      } else if let Some(arg_string) = args {
+        config::save_default_arg_string(&path, arg_string)?;
+        eprintln!("saved config defaults: {}", path.display());
+      } else {
+        anyhow::bail!("config args: provide an argument string or --reset");
+      }
+    }
+  }
   Ok(())
 }
 
