@@ -1,5 +1,5 @@
 use crate::model::UsageRecord;
-use crate::pricing::PricingTable;
+use crate::pricing::{CostMode, PricingTable};
 use crate::time::date_bucket;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -59,8 +59,7 @@ pub struct Aggregate {
   pub rounds: u64,
   pub sessions: u64,
   pub cost_embedded: f64,
-  pub cost_base: f64,
-  pub cost_multiplied: f64,
+  pub cost: f64,
   pub cost_per: BTreeMap<String, f64>,
   pub first_ts: Option<DateTime<Utc>>,
   pub last_ts: Option<DateTime<Utc>>,
@@ -147,6 +146,7 @@ pub fn aggregate(
   filters: &Filters,
   pricing: &PricingTable,
   cost_per: Option<GroupDim>,
+  cost_mode: CostMode,
 ) -> Vec<Aggregate> {
   let mut map: BTreeMap<Vec<String>, Aggregate> = BTreeMap::new();
   let mut session_sets: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
@@ -170,8 +170,7 @@ pub fn aggregate(
       rounds: 0,
       sessions: 0,
       cost_embedded: 0.0,
-      cost_base: 0.0,
-      cost_multiplied: 0.0,
+      cost: 0.0,
       cost_per: BTreeMap::new(),
       first_ts: None,
       last_ts: None,
@@ -196,15 +195,14 @@ pub fn aggregate(
     if let Some(c) = r.cost_embedded {
       agg.cost_embedded += c;
     }
-    if let Some((base, mult)) = pricing.cost_for(r) {
-      agg.cost_base += base;
-      agg.cost_multiplied += mult;
+    if let Some(cost) = pricing.cost_for(r, cost_mode) {
+      agg.cost += cost;
       if let Some(dim) = cost_per {
         let split_key = key_for(r, &[dim], date_bucket_unit, pricing)
           .into_iter()
           .next()
           .unwrap_or_else(|| "-".to_string());
-        *agg.cost_per.entry(split_key).or_default() += mult;
+        *agg.cost_per.entry(split_key).or_default() += cost;
       }
     }
     agg.first_ts = Some(match agg.first_ts {
@@ -241,7 +239,7 @@ impl SortKey {
       "total" => SortKey::Total,
       "input" => SortKey::Input,
       "output" => SortKey::Output,
-      "cost" | "cost-multiplied" | "cost_multiplied" => SortKey::Cost,
+      "cost" => SortKey::Cost,
       "cost-base" | "cost_base" | "base" => SortKey::CostBase,
       "date" | "time" => SortKey::Date,
       "turns" => SortKey::Turns,
@@ -268,14 +266,7 @@ pub fn sort_aggs(aggs: &mut [Aggregate], key: SortKey, descending: bool, use_byt
           a.output.cmp(&b.output)
         }
       }
-      SortKey::Cost => a
-        .cost_multiplied
-        .partial_cmp(&b.cost_multiplied)
-        .unwrap_or(std::cmp::Ordering::Equal),
-      SortKey::CostBase => a
-        .cost_base
-        .partial_cmp(&b.cost_base)
-        .unwrap_or(std::cmp::Ordering::Equal),
+      SortKey::Cost | SortKey::CostBase => a.cost.partial_cmp(&b.cost).unwrap_or(std::cmp::Ordering::Equal),
       SortKey::Date => a.last_ts.cmp(&b.last_ts),
       SortKey::Turns => a.turns.cmp(&b.turns),
     };

@@ -72,11 +72,8 @@ fn codex_fixture_parses_last_total() {
   // Billing uses uncached_input = 300.
   // 300*1.25 + 220*10 + 50*10 (reasoning falls back to output) + 200*0.125
   //   = 375 + 2200 + 500 + 25 = 3100 → / 1e6 = 0.003100
-  let base = row["cost_base"].as_f64().unwrap();
-  assert!((base - 0.003100).abs() < 1e-9, "got {base}");
-  // openai provider has no multiplier override → defaults to 1.0.
-  let mult = row["cost_multiplied"].as_f64().unwrap();
-  assert!((mult - base).abs() < 1e-9);
+  let cost = row["cost"].as_f64().unwrap();
+  assert!((cost - 0.003100).abs() < 1e-9, "got {cost}");
 }
 
 #[test]
@@ -401,8 +398,7 @@ fn bytes_mode_switches_input_output_units_only() {
   assert_eq!(bytes_row["input"], 82);
   assert_eq!(bytes_row["output"], 49);
   assert_eq!(token_row["total"], bytes_row["total"]);
-  assert_eq!(token_row["cost_base"], bytes_row["cost_base"]);
-  assert_eq!(token_row["cost_multiplied"], bytes_row["cost_multiplied"]);
+  assert_eq!(token_row["cost"], bytes_row["cost"]);
 }
 
 #[test]
@@ -506,7 +502,15 @@ fn missing_cache_write_price_falls_back_to_input_price() {
       "cache_read": 0.0,
       "cache_write": null
     }
-  ]
+  ],
+  "providers": {
+    "github-copilot": {
+      "included": false,
+      "models": {
+        "gpt-5-mini": { "included": false, "multiplier": 1.0 }
+      }
+    }
+  }
 }
 "#,
   )
@@ -536,8 +540,8 @@ fn missing_cache_write_price_falls_back_to_input_price() {
   assert_eq!(arr.len(), 1);
   let row = &arr[0];
 
-  let base = row["cost_base"].as_f64().unwrap();
-  assert!((base - 0.000015).abs() < 1e-9, "got {base}");
+  let cost = row["cost"].as_f64().unwrap();
+  assert!((cost - 0.000015).abs() < 1e-9, "got {cost}");
 }
 
 #[test]
@@ -586,8 +590,32 @@ fn explicit_zero_cache_write_price_stays_zero() {
   assert_eq!(arr.len(), 1);
   let row = &arr[0];
 
-  let base = row["cost_base"].as_f64().unwrap();
-  assert!((base - 0.000013).abs() < 1e-9, "got {base}");
+  let cost = row["cost"].as_f64().unwrap();
+  assert!(cost.abs() < 1e-12, "got {cost}");
+}
+
+#[test]
+fn cost_mode_mixed_uses_official_price_for_included_provider() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_cli/session-state");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "copilot-cli",
+      "--copilot-cli-dir",
+      fixtures.to_str().unwrap(),
+      "--cost",
+      "mixed",
+      "--format",
+      "json",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run llm-tokei mixed cost");
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  let cost = v.as_array().unwrap()[0]["cost"].as_f64().unwrap();
+  assert!(cost > 0.0, "got {cost}");
 }
 
 #[test]

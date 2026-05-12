@@ -110,6 +110,8 @@ Useful table flags:
 | `--no-fit` | Disable automatic table fitting |
 | `--no-color` | Disable ANSI colors |
 | `--no-cost` | Hide cost columns |
+| `--cost actual\|mixed\|official` | Select cost mode |
+| `--cost-per <dimension>` | Add top cost split columns, for example by provider |
 
 By default, table numbers are exact and comma-separated. With `--human`, usage
 columns use `K`, `M`, `B`, and `T` units and keep one decimal when a unit is
@@ -141,11 +143,9 @@ With `--bytes`, only the JSON `input` and `output` fields switch to bytes.
 llm-tokei --sort total
 llm-tokei --sort input --asc
 llm-tokei --sort cost --limit 10
-llm-tokei --sort cost-base --limit 10
 ```
 
-Sort keys: `total`, `input`, `output`, `cost`, `cost-base`, `date`, and `turns`.
-`cost` means multiplied cost. `cost-base` means raw provider-rate cost.
+Sort keys: `total`, `input`, `output`, `cost`, `date`, and `turns`.
 
 ## Token Semantics
 
@@ -178,12 +178,31 @@ are marked with `~` in table output and `*_estimated` booleans in JSON output.
 Bundled prices are generated from [models.dev](https://models.dev) plus local
 metadata under `data/`.
 
-Two cost columns are reported:
+One cost column is reported:
 
 | Column | Meaning |
 | --- | --- |
-| `cost($)` / `cost_base` | Base USD from model token rates |
-| `cost_mult($)` / `cost_multiplied` | Base cost after provider/model multiplier, or `0` when included |
+| `cost($)` / `cost` | USD in the selected cost mode |
+
+Cost modes:
+
+| Mode | Meaning |
+| --- | --- |
+| `actual` | Provider-specific pricing with multipliers; included providers/models cost `$0` |
+| `mixed` | Provider-specific pricing, but included providers/models fall back to official model rates |
+| `official` | Official model-provider rates only, ignoring the source provider |
+
+Examples:
+
+```sh
+llm-tokei --cost actual
+llm-tokei --cost mixed --cost-per provider
+llm-tokei --cost official --group-by model --sort cost
+```
+
+`--cost-per <dimension>` appends the top 3 cost contributors for a dimension as
+extra table columns. Table headers use the split value directly and truncate it
+to 10 characters. JSON output includes a `cost_per` object with full keys.
 
 Runtime pricing overrides are JSON files merged over the bundled table:
 
@@ -219,10 +238,10 @@ Example override:
 }
 ```
 
-Pricing lookup uses canonical model aliases before grouping and costing. Base
-price lookup tries the exact `(provider, model)` row first, then the model's
-official provider row, then no cost. Multipliers and included status can be set
-per provider and overridden per model.
+Pricing lookup uses canonical model aliases before grouping and costing.
+Provider-specific lookup tries the exact `(provider, model)` row. Official lookup
+uses the model's official provider mapping. Multipliers and included status can
+be set per provider and overridden per model.
 
 ## Sources
 

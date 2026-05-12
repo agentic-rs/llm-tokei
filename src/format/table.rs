@@ -191,7 +191,6 @@ enum StatColumnId {
   Rounds,
   Sessions,
   CostBase,
-  CostMultiplied,
 }
 
 struct StatColumnSpec {
@@ -213,7 +212,6 @@ const STAT_COLUMNS: &[StatColumnSpec] = &[
   stat(StatColumnId::Rounds, "rounds", 50, false, false),
   stat(StatColumnId::Sessions, "sessions", 50, false, false),
   stat(StatColumnId::CostBase, "cost($)", 70, false, true),
-  stat(StatColumnId::CostMultiplied, "cost_mult($)", 70, false, true),
 ];
 
 const fn stat(id: StatColumnId, label: &'static str, priority: u8, required: bool, cost: bool) -> StatColumnSpec {
@@ -239,11 +237,9 @@ impl StatColumnSpec {
       StatColumnId::Reasoning | StatColumnId::CacheRead | StatColumnId::CacheWrite | StatColumnId::Total => {
         format!("{}{avg_suffix}", self.label)
       }
-      StatColumnId::Turns
-      | StatColumnId::Rounds
-      | StatColumnId::Sessions
-      | StatColumnId::CostBase
-      | StatColumnId::CostMultiplied => self.label.to_string(),
+      StatColumnId::Turns | StatColumnId::Rounds | StatColumnId::Sessions | StatColumnId::CostBase => {
+        self.label.to_string()
+      }
     }
   }
 
@@ -268,8 +264,7 @@ impl StatColumnSpec {
       StatColumnId::Turns => fmt_int(a.turns),
       StatColumnId::Rounds => fmt_int(a.rounds),
       StatColumnId::Sessions => fmt_int(a.sessions),
-      StatColumnId::CostBase => fmt_cost_avg(a.cost_base, den),
-      StatColumnId::CostMultiplied => fmt_cost_avg(a.cost_multiplied, den),
+      StatColumnId::CostBase => fmt_cost_avg(a.cost, den),
     };
     let muted = opts.human
       && self
@@ -300,8 +295,7 @@ impl StatColumnSpec {
       StatColumnId::Turns => fmt_int(totals.turns),
       StatColumnId::Rounds => fmt_int(totals.rounds),
       StatColumnId::Sessions => fmt_int(totals.sessions),
-      StatColumnId::CostBase => fmt_cost_avg(totals.cost_base, den),
-      StatColumnId::CostMultiplied => fmt_cost_avg(totals.cost_multiplied, den),
+      StatColumnId::CostBase => fmt_cost_avg(totals.cost, den),
     };
     let muted = opts.human
       && self
@@ -356,7 +350,6 @@ impl StatColumnId {
       StatColumnId::Rounds => 7,
       StatColumnId::Sessions => 8,
       StatColumnId::CostBase => 9,
-      StatColumnId::CostMultiplied => 10,
     }
   }
 }
@@ -402,8 +395,7 @@ struct TableTotals {
   turns: u64,
   rounds: u64,
   sessions: u64,
-  cost_base: f64,
-  cost_multiplied: f64,
+  cost: f64,
 }
 
 impl TableTotals {
@@ -419,8 +411,7 @@ impl TableTotals {
     self.turns += a.turns;
     self.rounds += a.rounds;
     self.sessions += a.sessions;
-    self.cost_base += a.cost_base;
-    self.cost_multiplied += a.cost_multiplied;
+    self.cost += a.cost;
   }
 
   fn shown_input(&self, opts: &TableOpts) -> u64 {
@@ -839,8 +830,7 @@ mod tests {
       rounds: 2_345,
       sessions: 3_456,
       cost_embedded: 0.0,
-      cost_base: 12.3456,
-      cost_multiplied: 23.4567,
+      cost: 12.3456,
       cost_per: BTreeMap::new(),
       first_ts: None,
       last_ts: None,
@@ -879,7 +869,6 @@ mod tests {
     assert!(table.contains("2,345"), "table output: {table}");
     assert!(table.contains("3,456"), "table output: {table}");
     assert!(table.contains("12.3456"), "table output: {table}");
-    assert!(table.contains("23.4567"), "table output: {table}");
   }
 
   #[test]
@@ -900,7 +889,6 @@ mod tests {
     assert!(table.contains("2,345"), "table output: {table}");
     assert!(table.contains("3,456"), "table output: {table}");
     assert!(table.contains("12.3456"), "table output: {table}");
-    assert!(table.contains("23.4567"), "table output: {table}");
   }
 
   #[test]
@@ -972,7 +960,6 @@ mod tests {
       "rounds",
       "sessions",
       "cost($)",
-      "cost_mult($)",
     ] {
       assert!(header.contains(expected), "header: {header}");
     }

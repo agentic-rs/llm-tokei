@@ -1,9 +1,20 @@
 use anyhow::{Context, Result};
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::model::UsageRecord;
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum CostMode {
+  /// Provider-specific cost; included providers are treated as $0.
+  Actual,
+  /// Provider-specific cost; included providers fall back to official model rates.
+  Mixed,
+  /// Official model-provider rates only.
+  Official,
+}
 
 /// USD per 1M tokens for each category.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -201,6 +212,15 @@ impl PricingTable {
     None
   }
 
+  pub fn lookup_official_base(&self, provider: Option<&str>, model: Option<&str>) -> Option<&Price> {
+    let canonical = self.canonical_model(provider, model);
+    if canonical == "-" {
+      return None;
+    }
+    let info = self.models.get(&canonical)?;
+    self.prices.get(&(norm(&info.provider), canonical))
+  }
+
   pub fn lookup_multiplier(&self, provider: Option<&str>, model: Option<&str>) -> f64 {
     let provider = match provider {
       Some(p) => norm(p),
@@ -237,26 +257,44 @@ impl PricingTable {
     entry.included.unwrap_or(false)
   }
 
-  /// Returns (cost_base, cost_multiplied) in USD.
-  /// `cost_multiplied` is forced to 0.0 when the (provider, model) is `included`.
-  pub fn cost_for(&self, r: &UsageRecord) -> Option<(f64, f64)> {
-    let p = self.lookup_base(r.provider.as_deref(), r.model.as_deref())?;
-    let m = 1_000_000.0_f64;
-    let reasoning_rate = p.reasoning.unwrap_or(p.output);
-    let cache_write_rate = p.cache_write.unwrap_or(p.input);
-    let base = (r.input as f64 * p.input
-      + r.output as f64 * p.output
-      + r.cache_read as f64 * p.cache_read
-      + r.cache_write as f64 * cache_write_rate
-      + r.reasoning as f64 * reasoning_rate)
-      / m;
-    let multiplied = if self.lookup_included(r.provider.as_deref(), r.model.as_deref()) {
-      0.0
-    } else {
-      base * self.lookup_multiplier(r.provider.as_deref(), r.model.as_deref())
-    };
-    Some((base, multiplied))
+  pub fn cost_for(&self, r: &UsageRecord, mode: CostMode) -> Option<f64> {
+    let provider_base = self
+      .lookup_base(r.provider.as_deref(), r.model.as_deref())
+      .map(|p| token_cost(r, p));
+    let official_base = self
+      .lookup_official_base(r.provider.as_deref(), r.model.as_deref())
+      .map(|p| token_cost(r, p));
+
+    match mode {
+      CostMode::Actual => {
+        if self.lookup_included(r.provider.as_deref(), r.model.as_deref()) {
+          Some(0.0)
+        } else {
+          provider_base.map(|base| base * self.lookup_multiplier(r.provider.as_deref(), r.model.as_deref()))
+        }
+      }
+      CostMode::Mixed => {
+        if self.lookup_included(r.provider.as_deref(), r.model.as_deref()) {
+          official_base
+        } else {
+          provider_base
+        }
+      }
+      CostMode::Official => official_base,
+    }
   }
+}
+
+fn token_cost(r: &UsageRecord, p: &Price) -> f64 {
+  let m = 1_000_000.0_f64;
+  let reasoning_rate = p.reasoning.unwrap_or(p.output);
+  let cache_write_rate = p.cache_write.unwrap_or(p.input);
+  (r.input as f64 * p.input
+    + r.output as f64 * p.output
+    + r.cache_read as f64 * p.cache_read
+    + r.cache_write as f64 * cache_write_rate
+    + r.reasoning as f64 * reasoning_rate)
+    / m
 }
 
 fn norm(s: &str) -> String {

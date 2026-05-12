@@ -1,3 +1,4 @@
+use crate::pricing::CostMode;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
@@ -67,6 +68,10 @@ pub struct Args {
   /// Hide cost column.
   #[arg(long, help_heading = "Output")]
   pub no_cost: bool,
+
+  /// Cost mode: actual, mixed, or official.
+  #[arg(long, value_enum, default_value_t = CostMode::Actual, help_heading = "Output")]
+  pub cost: CostMode,
 
   /// Add top cost split columns for a grouping dimension.
   #[arg(long, help_heading = "Output")]

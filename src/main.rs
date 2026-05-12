@@ -267,7 +267,15 @@ fn main() -> Result<()> {
     .map(|s| GroupDim::parse(s).with_context(|| format!("parsing --cost-per dimension '{s}'")))
     .transpose()?;
 
-  let mut aggs = aggregate(&all, &dims, args.date_bucket.as_str(), &filters, &pricing, cost_per);
+  let mut aggs = aggregate(
+    &all,
+    &dims,
+    args.date_bucket.as_str(),
+    &filters,
+    &pricing,
+    cost_per,
+    args.cost,
+  );
 
   let sort_key = SortKey::parse(&args.sort).unwrap_or(SortKey::Total);
   sort_aggs(&mut aggs, sort_key, !args.asc, args.bytes);
