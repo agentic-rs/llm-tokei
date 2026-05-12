@@ -172,7 +172,7 @@ pub struct Args {
   #[arg(long, value_enum, default_value_t = default_date_bucket(), help_heading = "Grouping")]
   pub date_bucket: DateBucket,
 
-  /// Config file path (default: $XDG_CONFIG_HOME/llm-tokei/config.toml).
+  /// Config file path (default: $XDG_CONFIG_HOME/llm-tokei.toml).
   #[arg(long, help_heading = CONFIG_HELP)]
   pub config: Option<PathBuf>,
 
@@ -290,6 +290,13 @@ pub enum Cmd {
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigCmd {
+  /// Print the current config file.
+  List {
+    /// Print help.
+    #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics")]
+    help: Option<bool>,
+  },
+
   /// Parse CLI args and save them as config defaults.
   Args {
     /// Argument string to parse and save, e.g. `--cost official --group-by provider`.

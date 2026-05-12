@@ -573,6 +573,10 @@ fn run_config(cmd: &ConfigCmd, args: &Args) -> Result<()> {
         anyhow::bail!("config args: provide an argument string or --reset");
       }
     }
+    ConfigCmd::List { .. } => {
+      println!("# {}", path.display());
+      print!("{}", config::list_config(&path)?);
+    }
   }
   Ok(())
 }

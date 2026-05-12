@@ -175,8 +175,8 @@ are marked with `~` in table output and `*_estimated` booleans in JSON output.
 
 ## Config
 
-`llm-tokei` loads defaults from `~/.config/llm-tokei/config.toml` when present,
-or from `$XDG_CONFIG_HOME/llm-tokei/config.toml` if `XDG_CONFIG_HOME` is set.
+`llm-tokei` loads defaults from `~/.config/llm-tokei.toml` when present, or from
+`$XDG_CONFIG_HOME/llm-tokei.toml` if `XDG_CONFIG_HOME` is set.
 CLI flags always override config values.
 
 ```toml
@@ -199,6 +199,7 @@ Save structured defaults from CLI args:
 
 ```sh
 llm-tokei config args "--cost official --group-by provider --human"
+llm-tokei config list
 llm-tokei config args --reset
 llm-tokei --cost actual --group-by source,model --save-default
 llm-tokei --no-default

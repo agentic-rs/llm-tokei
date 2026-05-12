@@ -32,6 +32,14 @@ fn temp_config_file(name: &str, contents: &str) -> (std::path::PathBuf, std::pat
 }
 
 fn bin() -> std::path::PathBuf {
+  static TEST_CONFIG_HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+  let config_home = TEST_CONFIG_HOME.get_or_init(|| {
+    let dir = temp_cache_home("xdg-config-home");
+    std::fs::create_dir_all(&dir).expect("create test config home");
+    dir
+  });
+  std::env::set_var("XDG_CONFIG_HOME", config_home);
+
   let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
   p.push("target");
   p.push(if cfg!(debug_assertions) { "debug" } else { "release" });
@@ -678,6 +686,112 @@ group-by = ["provider"]
   let contents = std::fs::read_to_string(&config_path).expect("read reset config");
   let _ = std::fs::remove_dir_all(config_dir);
   assert!(contents.trim().is_empty(), "config: {contents}");
+}
+
+#[test]
+fn xdg_default_config_path_is_flat_file() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let config_home = temp_cache_home("flat-xdg-config");
+  std::fs::create_dir_all(&config_home).expect("create xdg config home");
+  let config_path = config_home.join("llm-tokei.toml");
+  std::fs::write(
+    &config_path,
+    r#"
+format = "json"
+source = ["codex"]
+group-by = ["provider"]
+no-cache = true
+"#,
+  )
+  .expect("write default config");
+
+  let out = Command::new(bin())
+    .env("XDG_CONFIG_HOME", &config_home)
+    .args([
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+    ])
+    .output()
+    .expect("run with xdg config");
+  let _ = std::fs::remove_dir_all(config_home);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  assert_eq!(v.as_array().unwrap()[0]["keys"]["provider"], "openai");
+}
+
+#[test]
+fn config_list_prints_current_config() {
+  let (config_path, config_dir) = temp_config_file(
+    "config-list",
+    r#"
+cost = "official"
+human = true
+"#,
+  );
+  let out = Command::new(bin())
+    .args(["--config", config_path.to_str().unwrap(), "config", "list"])
+    .output()
+    .expect("run config list");
+  let _ = std::fs::remove_dir_all(config_dir);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let stdout = String::from_utf8_lossy(&out.stdout);
+  assert!(stdout.contains(config_path.to_str().unwrap()), "stdout: {stdout}");
+  assert!(stdout.contains("cost = \"official\""), "stdout: {stdout}");
+  assert!(stdout.contains("human = true"), "stdout: {stdout}");
+}
+
+#[test]
+fn config_save_canonicalizes_alias_flags() {
+  let (config_path, config_dir) = temp_config_file("config-canonical-alias", "");
+  let out = Command::new(bin())
+    .args([
+      "--config",
+      config_path.to_str().unwrap(),
+      "config",
+      "args",
+      "--",
+      "--24h -h -v",
+    ])
+    .output()
+    .expect("run config args aliases");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let contents = std::fs::read_to_string(&config_path).expect("read saved config");
+  let _ = std::fs::remove_dir_all(config_dir);
+  assert!(contents.contains("period = \"24h\""), "config: {contents}");
+  assert!(!contents.contains("24h = true"), "config: {contents}");
+  assert!(contents.contains("human = true"), "config: {contents}");
+  assert!(contents.contains("verbose = true"), "config: {contents}");
+}
+
+#[test]
+fn cli_period_alias_overrides_config_period_without_conflict() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (config_path, config_dir) = temp_config_file(
+    "config-period-override",
+    r#"
+format = "json"
+source = ["codex"]
+period = "month"
+group-by = ["source", "model"]
+no-cache = true
+"#,
+  );
+  let out = Command::new(bin())
+    .args([
+      "--config",
+      config_path.to_str().unwrap(),
+      "--24h",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+    ])
+    .output()
+    .expect("run period override");
+  let _ = std::fs::remove_dir_all(config_dir);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
 }
 
 #[test]

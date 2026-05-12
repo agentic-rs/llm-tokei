@@ -96,7 +96,7 @@ pub fn default_config_path() -> Option<PathBuf> {
   std::env::var_os("XDG_CONFIG_HOME")
     .map(PathBuf::from)
     .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|p| p.join(".config")))
-    .map(|base| base.join("llm-tokei").join("config.toml"))
+    .map(|base| base.join("llm-tokei.toml"))
 }
 
 pub fn save_default_arg_string(path: &Path, arg_string: &str) -> Result<()> {
@@ -112,6 +112,14 @@ pub fn save_default_arg_string(path: &Path, arg_string: &str) -> Result<()> {
 
 pub fn reset_defaults(path: &Path) -> Result<()> {
   save_config(path, &ConfigFile::default())
+}
+
+pub fn list_config(path: &Path) -> Result<String> {
+  if path.exists() {
+    std::fs::read_to_string(path).with_context(|| format!("reading config file {}", path.display()))
+  } else {
+    Ok(String::new())
+  }
 }
 
 fn read_config(path: &Path) -> Result<ConfigFile> {
@@ -157,12 +165,24 @@ fn args_from_matches(matches: &clap::ArgMatches) -> Result<ConfigFile> {
   if cli_set(matches, "period") {
     out.period = value_name::<Period>(matches, "period");
   }
-  out.period_24h = flag_if_set(matches, "period_24h");
-  out.period_7d = flag_if_set(matches, "period_7d");
-  out.period_1m = flag_if_set(matches, "period_1m");
-  out.today = flag_if_set(matches, "today");
-  out.week = flag_if_set(matches, "week");
-  out.month = flag_if_set(matches, "month");
+  if cli_set(matches, "period_24h") {
+    out.period = Some("24h".to_string());
+  }
+  if cli_set(matches, "period_7d") {
+    out.period = Some("7d".to_string());
+  }
+  if cli_set(matches, "period_1m") {
+    out.period = Some("1m".to_string());
+  }
+  if cli_set(matches, "today") {
+    out.period = Some("today".to_string());
+  }
+  if cli_set(matches, "week") {
+    out.period = Some("week".to_string());
+  }
+  if cli_set(matches, "month") {
+    out.period = Some("month".to_string());
+  }
   out.no_color = flag_if_set(matches, "no_color");
   out.human = flag_if_set(matches, "human");
   out.no_fit = flag_if_set(matches, "no_fit");
@@ -218,7 +238,15 @@ fn config_to_args(config: &ConfigFile, current: &clap::ArgMatches) -> Vec<String
   push_bool(&mut out, current, "no_cost", "--no-cost", config.no_cost);
   push_opt(&mut out, current, "cost", "--cost", config.cost.as_deref());
   push_opt(&mut out, current, "cost_per", "--cost-per", config.cost_per.as_deref());
-  push_opt(&mut out, current, "period", "--period", config.period.as_deref());
+  if !cli_set(current, "period_24h")
+    && !cli_set(current, "period_7d")
+    && !cli_set(current, "period_1m")
+    && !cli_set(current, "today")
+    && !cli_set(current, "week")
+    && !cli_set(current, "month")
+  {
+    push_opt(&mut out, current, "period", "--period", config.period.as_deref());
+  }
   push_bool(&mut out, current, "period_24h", "--24h", config.period_24h);
   push_bool(&mut out, current, "period_7d", "--7d", config.period_7d);
   push_bool(&mut out, current, "period_1m", "--1m", config.period_1m);
