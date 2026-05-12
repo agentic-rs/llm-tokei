@@ -180,11 +180,20 @@ are marked with `~` in table output and `*_estimated` booleans in JSON output.
 CLI flags always override config values.
 
 ```toml
+[output]
 format = "table"
 cost = "mixed"
+
+[grouping]
 group-by = ["source", "model"]
+
+[table]
 human = true
+
+[period]
 period = "month"
+
+[sources]
 source = ["codex", "opencode"]
 ```
 
@@ -210,8 +219,9 @@ write the corresponding structured TOML keys. `--save-default` then continues
 to run the command normally. `--no-default` skips applying saved config defaults
 for one run.
 
-Config keys mirror the main CLI flags using kebab-case names, for example
-`date-bucket`, `table-width`, `cost-per`, `codex-dir`, and `copilot-cli-dir`.
+Config keys mirror the main CLI flags using kebab-case names inside sections, for
+example `grouping.date-bucket`, `table.table-width`, `output.cost-per`,
+`sources.codex-dir`, and `sources.copilot-cli-dir`.
 Subcommand-specific options are not read from config.
 
 ## Pricing
