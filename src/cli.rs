@@ -70,7 +70,7 @@ pub struct Args {
   pub no_cost: bool,
 
   /// Cost mode: actual, mixed, or official.
-  #[arg(long, value_enum, default_value_t = CostMode::Actual, help_heading = "Output")]
+  #[arg(long, value_enum, default_value_t = CostMode::Mixed, help_heading = "Output")]
   pub cost: CostMode,
 
   /// Add top cost split columns for a grouping dimension.

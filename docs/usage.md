@@ -110,7 +110,7 @@ Useful table flags:
 | `--no-fit` | Disable automatic table fitting |
 | `--no-color` | Disable ANSI colors |
 | `--no-cost` | Hide cost columns |
-| `--cost actual\|mixed\|official` | Select cost mode |
+| `--cost actual\|mixed\|official` | Select cost mode (default: `mixed`) |
 | `--cost-per <dimension>` | Add top cost split columns, for example by provider |
 
 By default, table numbers are exact and comma-separated. With `--human`, usage
@@ -189,7 +189,7 @@ Cost modes:
 | Mode | Meaning |
 | --- | --- |
 | `actual` | Provider-specific pricing with multipliers; included providers/models cost `$0` |
-| `mixed` | Provider-specific pricing, but included providers/models fall back to official model rates |
+| `mixed` | Default. Provider-specific pricing, but included providers/models fall back to official model rates |
 | `official` | Official model-provider rates only, ignoring the source provider |
 
 Examples:
@@ -379,6 +379,7 @@ Generate the README showcase SVG from live CLI output:
 
 ```sh
 cargo run --example gen-showcase -- --args "--24h --group-by source,model" --out docs/assets/showcase.svg
+cargo run --example gen-showcase -- --args "--cost-per provider --cost official --month -h" --out docs/assets/showcase.svg
 ```
 
 Hand-curated pricing inputs:

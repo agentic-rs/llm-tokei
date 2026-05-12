@@ -13,7 +13,7 @@ fast, grouped usage reports: input, output, reasoning, cache tokens, sessions,
 turns, and estimated cost.
 
 ```sh
-llm-tokei --source codex --codex-dir tests/fixtures/codex/sessions --opencode-db /nonexistent/opencode.db --no-cache -h
+llm-tokei --cost-per provider --cost official --month -h
 ```
 
 ![llm-tokei terminal table output](docs/assets/showcase.svg)
@@ -92,5 +92,5 @@ overrides, token semantics, source caveats, caching, and the `dump` subcommand.
 To regenerate the showcase SVG from real CLI output:
 
 ```sh
-cargo run --example gen-showcase -- --args "--source codex --codex-dir tests/fixtures/codex/sessions --opencode-db /nonexistent/opencode.db --no-cache -h" --out docs/assets/readme-showcase.svg
+cargo run --example gen-showcase -- --args "--cost-per provider --cost official --month -h" --out docs/assets/showcase.svg
 ```

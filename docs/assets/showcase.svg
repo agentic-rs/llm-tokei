@@ -1,16 +1,77 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1308" height="324" viewBox="0 0 1308 324" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1380" height="506" viewBox="0 0 1380 506" role="img" aria-labelledby="title desc">
   <title id="title">llm-tokei terminal output</title>
   <desc id="desc">A colored terminal table produced by llm-tokei.</desc>
-  <rect width="1308" height="324" rx="14" fill="#0d1117"/>
+  <rect width="1380" height="506" rx="14" fill="#0d1117"/>
   <circle cx="28" cy="26" r="6" fill="#ff5f56"/>
   <circle cx="48" cy="26" r="6" fill="#ffbd2e"/>
   <circle cx="68" cy="26" r="6" fill="#27c93f"/>
-  <text x="24" y="62" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">$ llm-tokei --24h --group-by source,model</text>
-  <text x="24" y="102" fill="#39c5cf" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">source    model                 input   output  reasoning     cache_r    cache_w       total  turns  rounds  sessions  cost($)  cost_mult($)</text>
-  <text x="24" y="128" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
-  <text x="24" y="154" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  claude-opus-4.7  47,499,688  439,437          0  45,366,455  2,132,422  47,939,125    695      25         4  47.0008             -</text>
-  <text x="24" y="180" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  gpt-5.5          11,354,678   35,644      6,766   9,153,024          0  11,397,088    110       3         2  16.8571             -</text>
-  <text x="24" y="206" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  gpt-5.4           1,200,077    8,703      9,251   1,111,168          0   1,218,031     24       2         1   0.7694             -</text>
-  <text x="24" y="232" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
-  <text x="24" y="258" fill="#d29922" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">TOTAL                      60,054,443  483,784     16,017  55,630,647  2,132,422  60,554,244    829      30         7  64.6273             -</text>
+  <text x="24" y="62" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">$ llm-tokei --cost-per provider --cost official --month -h</text>
+  <text x="24" y="102" fill="#39c5cf" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">source    model               input  output  reasoning  cache_r  cache_w   total  turns  rounds  sessions   cost($)  github-cop   openai  zai-coding</text>
+  <text x="24" y="128" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+  <text x="24" y="154" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  claude-opus-4.7    154.9M    1.5M  </text>
+  <text x="429" y="154" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">        0</text>
+  <text x="510" y="154" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">   146.6M     6.0M  156.4M  2,321      99        22  159.0517    159.0517        -           -</text>
+  <text x="24" y="180" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  gpt-5.5            109.5M  </text>
+  <text x="357" y="180" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">315.1K</text>
+  <text x="411" y="180" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      72.4K   104.9M  </text>
+  <text x="609" y="180" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      0</text>
+  <text x="672" y="180" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  109.9M  1,040      31        10   87.3042     71.7242  15.5801           -</text>
+  <text x="24" y="206" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  claude-opus-4.6     74.9M  </text>
+  <text x="357" y="206" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">307.6K</text>
+  <text x="411" y="206" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="429" y="206" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">        0</text>
+  <text x="510" y="206" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">    71.7M     3.2M   75.2M    909      21         9   63.5555     63.5555        -           -</text>
+  <text x="24" y="232" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  gpt-5.4             44.3M  </text>
+  <text x="357" y="232" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">267.0K</text>
+  <text x="411" y="232" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">     145.0K    41.6M  </text>
+  <text x="609" y="232" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      0</text>
+  <text x="672" y="232" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">   44.7M    521      42        13   23.2785     23.2785        -           -</text>
+  <text x="24" y="258" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">codex     gpt-5.4             40.9M  </text>
+  <text x="357" y="258" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">138.9K</text>
+  <text x="411" y="258" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      39.0K    39.8M  </text>
+  <text x="609" y="258" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      0</text>
+  <text x="672" y="258" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">   41.1M    402      18         2   15.4945           -  15.4945           -</text>
+  <text x="24" y="284" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  glm-5.1             30.5M  </text>
+  <text x="357" y="284" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">159.0K</text>
+  <text x="411" y="284" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      51.7K    28.2M  </text>
+  <text x="609" y="284" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      0</text>
+  <text x="672" y="284" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">   30.7M    468      56        24   11.5245           -        -     11.5245</text>
+  <text x="24" y="310" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  gpt-5.3-codex       11.0M  </text>
+  <text x="357" y="310" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve"> 44.8K</text>
+  <text x="411" y="310" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      35.2K    10.4M  </text>
+  <text x="609" y="310" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      0</text>
+  <text x="672" y="310" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">   11.1M    125      11         3    4.0247      3.3344   0.6903           -</text>
+  <text x="24" y="336" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">codex     gpt-5.4-mini         3.2M  </text>
+  <text x="357" y="336" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  5.9K</text>
+  <text x="411" y="336" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">       1.9K     2.6M  </text>
+  <text x="609" y="336" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      0</text>
+  <text x="672" y="336" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">    3.2M     20       2         1    0.6976           -   0.6976           -</text>
+  <text x="24" y="362" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  gpt-5-mini         </text>
+  <text x="285" y="362" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">178.0K</text>
+  <text x="339" y="362" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="357" y="362" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  3.7K</text>
+  <text x="411" y="362" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="429" y="362" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">        0</text>
+  <text x="510" y="362" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="528" y="362" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve"> 134.0K</text>
+  <text x="591" y="362" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="609" y="362" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      0</text>
+  <text x="672" y="362" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="690" y="362" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">181.7K</text>
+  <text x="744" y="362" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">     15       9         5    0.0217      0.0217        -           -</text>
+  <text x="24" y="388" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">opencode  claude-sonnet-4.6  </text>
+  <text x="285" y="388" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">133.5K</text>
+  <text x="339" y="388" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="357" y="388" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  4.2K</text>
+  <text x="411" y="388" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="429" y="388" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">        0</text>
+  <text x="510" y="388" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="528" y="388" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  73.0K</text>
+  <text x="591" y="388" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="609" y="388" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      0</text>
+  <text x="672" y="388" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">  </text>
+  <text x="690" y="388" fill="#6e7681" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">137.7K</text>
+  <text x="744" y="388" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">      8       2         2    0.2667      0.2667        -           -</text>
+  <text x="24" y="414" fill="#c9d1d9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+  <text x="24" y="440" fill="#d29922" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" xml:space="preserve">TOTAL                        469.7M    2.7M     345.2K   446.1M     9.2M  472.7M  5,829     291        91  365.2197    321.2328  32.4625     11.5245</text>
 </svg>
