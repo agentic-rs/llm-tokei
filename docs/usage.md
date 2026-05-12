@@ -173,6 +173,32 @@ Some sources provide exact token counts. Some sources require estimates because
 the local session files do not persist full token accounting. Estimated values
 are marked with `~` in table output and `*_estimated` booleans in JSON output.
 
+## Config
+
+`llm-tokei` loads defaults from `~/.config/llm-tokei/config.toml` when present,
+or from `$XDG_CONFIG_HOME/llm-tokei/config.toml` if `XDG_CONFIG_HOME` is set.
+CLI flags always override config values.
+
+```toml
+format = "table"
+cost = "mixed"
+group-by = ["source", "model"]
+human = true
+period = "month"
+source = ["codex", "opencode"]
+```
+
+Use a custom config file or disable config loading:
+
+```sh
+llm-tokei --config ./llm-tokei.toml
+llm-tokei --no-config
+```
+
+Config keys mirror the main CLI flags using kebab-case names, for example
+`date-bucket`, `table-width`, `cost-per`, `codex-dir`, and `copilot-cli-dir`.
+Subcommand-specific options are not read from config.
+
 ## Pricing
 
 Bundled prices are generated from [models.dev](https://models.dev) plus local
@@ -204,7 +230,9 @@ llm-tokei --cost official --group-by model --sort cost
 extra table columns. Table headers use the split value directly and truncate it
 to 10 characters. JSON output includes a `cost_per` object with full keys.
 
-Runtime pricing overrides are JSON files merged over the bundled table:
+Runtime pricing overrides are complete JSON pricing files. Exactly one pricing
+file is active: explicit `--pricing`, otherwise the update cache when present,
+otherwise bundled prices.
 
 ```sh
 llm-tokei --pricing ./pricing.json

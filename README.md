@@ -86,8 +86,9 @@ Use `--source` and source path flags to narrow or override discovery.
 
 Read the full usage guide: [docs/usage.md](docs/usage.md).
 
-The guide covers periods, filters, grouping, table fitting, JSON output, pricing
-overrides, token semantics, source caveats, caching, and the `dump` subcommand.
+The guide covers config defaults, periods, filters, grouping, table fitting,
+JSON output, pricing overrides, token semantics, source caveats, caching, and
+the `dump` subcommand.
 
 To regenerate the showcase SVG from real CLI output:
 

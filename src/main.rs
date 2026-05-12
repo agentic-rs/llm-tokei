@@ -1,6 +1,7 @@
 mod aggregate;
 mod cache;
 mod cli;
+mod config;
 mod format;
 mod model;
 mod pricing;
@@ -9,7 +10,6 @@ mod text_count;
 mod time;
 
 use anyhow::{Context, Result};
-use clap::Parser;
 use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -29,7 +29,7 @@ use crate::sources::{
 };
 
 fn main() -> Result<()> {
-  let args = Args::parse();
+  let args = config::parse_args()?;
   init_tracing(args.verbose);
 
   if let Some(cmd) = args.cmd.as_ref() {

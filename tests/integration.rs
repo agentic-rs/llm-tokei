@@ -23,6 +23,14 @@ fn isolated_cmd(name: &str) -> (Command, std::path::PathBuf) {
   (cmd, cache_home)
 }
 
+fn temp_config_file(name: &str, contents: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+  let dir = temp_cache_home(name);
+  let path = dir.join("config.toml");
+  std::fs::create_dir_all(&dir).expect("create config dir");
+  std::fs::write(&path, contents).expect("write config file");
+  (path, dir)
+}
+
 fn bin() -> std::path::PathBuf {
   let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
   p.push("target");
@@ -484,6 +492,76 @@ fn no_fit_conflicts_with_table_width() {
   let stderr = String::from_utf8_lossy(&out.stderr);
   assert!(stderr.contains("--no-fit"), "stderr: {stderr}");
   assert!(stderr.contains("--table-width"), "stderr: {stderr}");
+}
+
+#[test]
+fn config_file_sets_main_flag_defaults() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (config_path, config_dir) = temp_config_file(
+    "config-defaults",
+    r#"
+format = "json"
+source = ["codex"]
+group-by = ["provider"]
+cost = "official"
+no-cache = true
+"#,
+  );
+
+  let out = Command::new(bin())
+    .args([
+      "--config",
+      config_path.to_str().unwrap(),
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+    ])
+    .output()
+    .expect("run llm-tokei with config");
+  let _ = std::fs::remove_dir_all(config_dir);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  let row = &v.as_array().unwrap()[0];
+  assert_eq!(row["keys"]["provider"], "openai");
+  assert!(row["keys"].get("model").is_none());
+}
+
+#[test]
+fn cli_flags_override_config_file_defaults() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (config_path, config_dir) = temp_config_file(
+    "config-cli-override",
+    r#"
+format = "json"
+source = ["codex"]
+group-by = ["provider"]
+no-cache = true
+"#,
+  );
+
+  let out = Command::new(bin())
+    .args([
+      "--config",
+      config_path.to_str().unwrap(),
+      "--group-by",
+      "source,model",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+    ])
+    .output()
+    .expect("run llm-tokei with config override");
+  let _ = std::fs::remove_dir_all(config_dir);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  let row = &v.as_array().unwrap()[0];
+  assert_eq!(row["keys"]["source"], "codex");
+  assert_eq!(row["keys"]["model"], "gpt-5");
+  assert!(row["keys"].get("provider").is_none());
 }
 
 #[test]

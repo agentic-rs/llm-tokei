@@ -2,6 +2,28 @@ use crate::pricing::CostMode;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+const CONFIG_HELP: &str = "Config";
+
+fn default_format() -> Format {
+  Format::Table
+}
+
+fn default_sort() -> String {
+  "total".to_string()
+}
+
+fn default_cost() -> CostMode {
+  CostMode::Mixed
+}
+
+fn default_group_by() -> Vec<String> {
+  vec!["source".to_string(), "model".to_string()]
+}
+
+fn default_date_bucket() -> DateBucket {
+  DateBucket::Day
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum Format {
   Table,
@@ -50,11 +72,11 @@ pub enum AvgBy {
 #[command(name = "llm-tokei", version, about, disable_help_flag = true)]
 pub struct Args {
   /// Output format.
-  #[arg(long, value_enum, default_value_t = Format::Table, help_heading = "Output")]
+  #[arg(long, value_enum, default_value_t = default_format(), help_heading = "Output")]
   pub format: Format,
 
   /// Sort key: total|input|output|cost|date|turns.
-  #[arg(long, default_value = "total", help_heading = "Output")]
+  #[arg(long, default_value_t = default_sort(), help_heading = "Output")]
   pub sort: String,
 
   /// Sort ascending instead of descending.
@@ -70,7 +92,7 @@ pub struct Args {
   pub no_cost: bool,
 
   /// Cost mode: actual, mixed, or official.
-  #[arg(long, value_enum, default_value_t = CostMode::Mixed, help_heading = "Output")]
+  #[arg(long, value_enum, default_value_t = default_cost(), help_heading = "Output")]
   pub cost: CostMode,
 
   /// Add top cost split columns for a grouping dimension.
@@ -141,14 +163,22 @@ pub struct Args {
   #[arg(
     long,
     value_delimiter = ',',
-    default_value = "source,model",
+    default_values_t = default_group_by(),
     help_heading = "Grouping"
   )]
   pub group_by: Vec<String>,
 
   /// Date bucket unit (used when grouping by date).
-  #[arg(long, value_enum, default_value_t = DateBucket::Day, help_heading = "Grouping")]
+  #[arg(long, value_enum, default_value_t = default_date_bucket(), help_heading = "Grouping")]
   pub date_bucket: DateBucket,
+
+  /// Config file path (default: $XDG_CONFIG_HOME/llm-tokei/config.toml).
+  #[arg(long, help_heading = CONFIG_HELP)]
+  pub config: Option<PathBuf>,
+
+  /// Disable loading the config file.
+  #[arg(long, help_heading = CONFIG_HELP)]
+  pub no_config: bool,
 
   /// Filter: include records on/after this time (e.g. 7d, 24h, 2025-04-01, RFC3339).
   #[arg(long, help_heading = "Filters")]
