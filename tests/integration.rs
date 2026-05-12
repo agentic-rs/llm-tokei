@@ -503,6 +503,9 @@ fn missing_cache_write_price_falls_back_to_input_price() {
       "cache_write": null
     }
   ],
+  "models": {
+    "gpt-5-mini": { "provider": "github-copilot" }
+  },
   "providers": {
     "github-copilot": {
       "included": false,
@@ -557,12 +560,23 @@ fn explicit_zero_cache_write_price_stays_zero() {
     {
       "provider": "github-copilot",
       "model": "gpt-5-mini",
-      "input": 1.0,
+      "input": 0.0,
       "output": 0.0,
       "cache_read": 0.0,
       "cache_write": 0.0
     }
-  ]
+  ],
+  "models": {
+    "gpt-5-mini": { "provider": "github-copilot" }
+  },
+  "providers": {
+    "github-copilot": {
+      "included": false,
+      "models": {
+        "gpt-5-mini": { "included": false, "multiplier": 1.0 }
+      }
+    }
+  }
 }
 "#,
   )

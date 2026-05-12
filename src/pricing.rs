@@ -1,8 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::path::Path;
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use crate::model::UsageRecord;
 
@@ -107,6 +108,10 @@ pub struct PricingTable {
 }
 
 const BUNDLED: &str = include_str!(concat!(env!("OUT_DIR"), "/prices.json"));
+const BUNDLED_MODELS: &str = include_str!("../data/models.json");
+const BUNDLED_PROVIDERS: &str = include_str!("../data/providers.json");
+const MODELS_DEV_URL: &str = "https://models.dev/api.json";
+const CACHE_PRICE_FILE: &str = "llm-tokei.price.json";
 
 impl PricingTable {
   pub fn load_bundled() -> Self {
@@ -115,6 +120,21 @@ impl PricingTable {
       t.merge(file);
     }
     t
+  }
+
+  pub fn load_default() -> Result<Self> {
+    if let Some(path) = cached_price_path() {
+      if path.exists() {
+        return Self::load_file(&path);
+      }
+    }
+    Ok(Self::load_bundled())
+  }
+
+  pub fn load_file(path: &Path) -> Result<Self> {
+    let mut t = Self::default();
+    t.merge_file(path)?;
+    Ok(t)
   }
 
   pub fn merge_file(&mut self, path: &Path) -> Result<()> {
@@ -283,6 +303,347 @@ impl PricingTable {
       CostMode::Official => official_base,
     }
   }
+}
+
+pub fn cached_price_path() -> Option<PathBuf> {
+  std::env::var_os("XDG_CACHE_HOME")
+    .map(PathBuf::from)
+    .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|p| p.join(".cache")))
+    .map(|base| base.join(CACHE_PRICE_FILE))
+}
+
+pub fn update_cached_prices() -> Result<PathBuf> {
+  let path = cached_price_path().context("cannot determine cache directory")?;
+  let body = fetch_models_dev_json()?;
+  let file = pricing_file_from_models_dev_json(&body)?;
+  if let Some(parent) = path.parent() {
+    std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+  }
+  let json = format_pricing_file(&file)?;
+  let temp = path.with_extension("json.tmp");
+  std::fs::write(&temp, json).with_context(|| format!("writing {}", temp.display()))?;
+  std::fs::rename(&temp, &path).with_context(|| format!("renaming {} to {}", temp.display(), path.display()))?;
+  Ok(path)
+}
+
+fn fetch_models_dev_json() -> Result<String> {
+  let config = ureq::Agent::config_builder()
+    .timeout_global(Some(std::time::Duration::from_secs(30)))
+    .build();
+  let agent: ureq::Agent = config.into();
+  let mut response = agent.get(MODELS_DEV_URL).call().context("requesting models.dev")?;
+  response
+    .body_mut()
+    .read_to_string()
+    .context("reading models.dev response body")
+}
+
+fn pricing_file_from_models_dev_json(body: &str) -> Result<PricingFile> {
+  let api: BTreeMap<String, Value> = serde_json::from_str(body).context("parsing models.dev JSON")?;
+  let models = read_bundled_models()?;
+  let aliases = build_alias_map(&models)?;
+  let rows = flatten_models_dev(&api, &aliases);
+  let mut providers = infer_providers(&rows);
+  let explicit_providers = read_bundled_providers(&aliases)?;
+  merge_providers(&mut providers, explicit_providers);
+  normalize_providers(&mut providers);
+  let mut prices = build_prices(&rows, &providers);
+  prices.sort_by(|a, b| (&a.provider, &a.model, &a.name).cmp(&(&b.provider, &b.model, &b.name)));
+  prices = dedupe_prices(prices);
+  Ok(PricingFile {
+    providers,
+    models,
+    prices,
+  })
+}
+
+fn read_bundled_models() -> Result<BTreeMap<String, ModelInfo>> {
+  let raw: BTreeMap<String, ModelInfo> = serde_json::from_str(BUNDLED_MODELS).context("parsing bundled models.json")?;
+  let mut out = BTreeMap::new();
+  for (k, mut v) in raw {
+    v.provider = norm(&v.provider);
+    v.aliases = v.aliases.into_iter().map(|a| norm(&a)).collect();
+    out.insert(norm(&k), v);
+  }
+  Ok(out)
+}
+
+fn build_alias_map(models: &BTreeMap<String, ModelInfo>) -> Result<BTreeMap<String, String>> {
+  let canonicals: BTreeSet<&str> = models.keys().map(|s| s.as_str()).collect();
+  let mut map = BTreeMap::new();
+  for (model, info) in models {
+    insert_alias(&mut map, model, model)?;
+    for alias in &info.aliases {
+      if canonicals.contains(alias.as_str()) && alias != model {
+        bail!("alias {alias:?} conflicts with canonical model {alias:?}");
+      }
+      insert_alias(&mut map, alias, model)?;
+    }
+  }
+  Ok(map)
+}
+
+fn insert_alias(map: &mut BTreeMap<String, String>, alias: &str, model: &str) -> Result<()> {
+  match map.insert(norm(alias), norm(model)) {
+    Some(prev) if prev != norm(model) => bail!("alias {alias:?} maps to both {prev:?} and {model:?}"),
+    _ => Ok(()),
+  }
+}
+
+fn read_bundled_providers(aliases: &BTreeMap<String, String>) -> Result<BTreeMap<String, ProviderEntry>> {
+  let raw: BTreeMap<String, ProviderEntry> =
+    serde_json::from_str(BUNDLED_PROVIDERS).context("parsing bundled providers.json")?;
+  let mut out = BTreeMap::new();
+  for (provider, entry) in raw {
+    let provider = norm(&provider);
+    let dst = out.entry(provider.clone()).or_insert_with(ProviderEntry::default);
+    dst.multiplier = entry.multiplier;
+    dst.included = entry.included;
+    dst.source = entry.source;
+    for (model, mo) in entry.models {
+      let model = resolve_alias(aliases, &provider, &norm(&model));
+      dst.models.insert(model, mo);
+    }
+  }
+  Ok(out)
+}
+
+#[derive(Debug, Clone, Default)]
+struct ModelsDevRow {
+  provider: String,
+  model: String,
+  name: Option<String>,
+  input_cost: Option<f64>,
+  output_cost: Option<f64>,
+  reasoning_cost: Option<f64>,
+  cache_read_cost: Option<f64>,
+  cache_write_cost: Option<f64>,
+}
+
+fn flatten_models_dev(api: &BTreeMap<String, Value>, aliases: &BTreeMap<String, String>) -> Vec<ModelsDevRow> {
+  let mut rows = Vec::new();
+  for (provider_id, pv) in api {
+    let provider = norm(provider_id);
+    let Some(provider_models) = pv.get("models").and_then(|v| v.as_object()) else {
+      continue;
+    };
+    for (name, mv) in provider_models {
+      let Some(cost) = mv.get("cost").filter(|v| !v.is_null()) else {
+        continue;
+      };
+      let name = norm(name);
+      let model = resolve_alias(aliases, &provider, &name);
+      rows.push(ModelsDevRow {
+        provider: provider.clone(),
+        name: (model != name).then_some(name),
+        model,
+        input_cost: cost_value(cost, &["input"]),
+        output_cost: cost_value(cost, &["output"]),
+        reasoning_cost: cost_value(cost, &["reasoning"]),
+        cache_read_cost: cost_value(cost, &["cache_read"]),
+        cache_write_cost: cost_value(cost, &["cache_write"]),
+      });
+    }
+  }
+  rows
+}
+
+fn infer_providers(rows: &[ModelsDevRow]) -> BTreeMap<String, ProviderEntry> {
+  let included_pairs: BTreeSet<(String, String)> = rows
+    .iter()
+    .filter(|r| zero_signal(r))
+    .map(|r| (r.provider.clone(), r.model.clone()))
+    .collect();
+  let mut by_provider: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+  for row in rows {
+    by_provider
+      .entry(row.provider.clone())
+      .or_default()
+      .insert(row.model.clone());
+  }
+  let mut providers = BTreeMap::new();
+  for (provider, models) in by_provider {
+    let all_included = models.len() >= 2
+      && models
+        .iter()
+        .all(|m| included_pairs.contains(&(provider.clone(), m.clone())));
+    let entry = providers.entry(provider.clone()).or_insert_with(ProviderEntry::default);
+    if all_included {
+      entry.included = Some(true);
+    } else {
+      for model in models {
+        if included_pairs.contains(&(provider.clone(), model.clone())) {
+          entry.models.entry(model).or_default().included = Some(true);
+        }
+      }
+    }
+  }
+  providers
+}
+
+fn merge_providers(dst: &mut BTreeMap<String, ProviderEntry>, src: BTreeMap<String, ProviderEntry>) {
+  for (provider, src_entry) in src {
+    let dst_entry = dst.entry(provider).or_default();
+    if src_entry.multiplier.is_some() {
+      dst_entry.multiplier = src_entry.multiplier;
+    }
+    if src_entry.included.is_some() {
+      dst_entry.included = src_entry.included;
+    }
+    if src_entry.source.is_some() {
+      dst_entry.source = src_entry.source;
+    }
+    for (model, src_model) in src_entry.models {
+      let dst_model = dst_entry.models.entry(model).or_default();
+      if src_model.multiplier.is_some() {
+        dst_model.multiplier = src_model.multiplier;
+      }
+      if src_model.included.is_some() {
+        dst_model.included = src_model.included;
+      }
+    }
+  }
+}
+
+fn normalize_providers(providers: &mut BTreeMap<String, ProviderEntry>) {
+  for entry in providers.values_mut() {
+    if entry.multiplier == Some(1.0) {
+      entry.multiplier = None;
+    }
+    if entry.included == Some(false) {
+      entry.included = None;
+    }
+    if entry.source == Some(false) {
+      entry.source = None;
+    }
+    let provider_included = entry.included.unwrap_or(false);
+    entry.models.retain(|_, mo| {
+      if mo.included == Some(provider_included) {
+        mo.included = None;
+      }
+      mo.multiplier.is_some() || mo.included.is_some()
+    });
+  }
+  providers.retain(|_, e| e.multiplier.is_some() || e.included.is_some() || e.source.is_some() || !e.models.is_empty());
+}
+
+fn build_prices(rows: &[ModelsDevRow], providers: &BTreeMap<String, ProviderEntry>) -> Vec<PriceRow> {
+  rows
+    .iter()
+    .filter(|row| !zero_signal(row))
+    .filter(|row| !included_for(providers, &row.provider, &row.model))
+    .map(|row| PriceRow {
+      provider: row.provider.clone(),
+      model: row.model.clone(),
+      name: row.name.clone(),
+      input: row.input_cost.unwrap_or(0.0),
+      output: row.output_cost.unwrap_or(0.0),
+      reasoning: row.reasoning_cost,
+      cache_read: row.cache_read_cost.unwrap_or(0.0),
+      cache_write: row.cache_write_cost,
+    })
+    .filter(|row| !price_is_zero(row))
+    .collect()
+}
+
+fn included_for(providers: &BTreeMap<String, ProviderEntry>, provider: &str, model: &str) -> bool {
+  let Some(entry) = providers.get(provider) else {
+    return false;
+  };
+  entry
+    .models
+    .get(model)
+    .and_then(|m| m.included)
+    .unwrap_or_else(|| entry.included.unwrap_or(false))
+}
+
+fn zero_signal(row: &ModelsDevRow) -> bool {
+  let costs = [
+    row.input_cost,
+    row.output_cost,
+    row.reasoning_cost,
+    row.cache_read_cost,
+    row.cache_write_cost,
+  ];
+  costs.iter().any(Option::is_some) && costs.iter().all(|v| v.unwrap_or(0.0) == 0.0)
+}
+
+fn price_is_zero(row: &PriceRow) -> bool {
+  row.input == 0.0
+    && row.output == 0.0
+    && row.reasoning.unwrap_or(0.0) == 0.0
+    && row.cache_read == 0.0
+    && row.cache_write.unwrap_or(0.0) == 0.0
+}
+
+fn resolve_alias(aliases: &BTreeMap<String, String>, provider: &str, model: &str) -> String {
+  aliases
+    .get(&format!("{}/{}", norm(provider), norm(model)))
+    .or_else(|| aliases.get(&norm(model)))
+    .cloned()
+    .unwrap_or_else(|| norm(model))
+}
+
+fn cost_value(v: &Value, keys: &[&str]) -> Option<f64> {
+  for key in keys {
+    if let Some(n) = v.get(*key).and_then(|x| x.as_f64()) {
+      return Some(n);
+    }
+  }
+  None
+}
+
+fn format_pricing_file(file: &PricingFile) -> Result<String> {
+  let providers = indent_json(&serde_json::to_string_pretty(&file.providers)?, 2);
+  let models = indent_json(&serde_json::to_string_pretty(&file.models)?, 2);
+  let mut out = String::new();
+  out.push_str("{\n");
+  out.push_str("  \"providers\": ");
+  out.push_str(providers.trim_start());
+  out.push_str(",\n");
+  out.push_str("  \"models\": ");
+  out.push_str(models.trim_start());
+  out.push_str(",\n");
+  out.push_str("  \"prices\": [\n");
+  for (i, price) in file.prices.iter().enumerate() {
+    if i > 0 {
+      out.push_str(",\n");
+    }
+    out.push_str("    ");
+    out.push_str(&serde_json::to_string(price)?);
+  }
+  out.push_str("\n  ]\n}\n");
+  Ok(out)
+}
+
+fn indent_json(s: &str, spaces: usize) -> String {
+  let pad = " ".repeat(spaces);
+  s.lines()
+    .map(|line| format!("{pad}{line}"))
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
+fn dedupe_prices(rows: Vec<PriceRow>) -> Vec<PriceRow> {
+  let mut out: BTreeMap<(String, String), PriceRow> = BTreeMap::new();
+  for row in rows {
+    let key = (row.provider.clone(), row.model.clone());
+    out
+      .entry(key)
+      .and_modify(|existing| {
+        if prefer_price(&row, existing) {
+          *existing = row.clone();
+        }
+      })
+      .or_insert(row);
+  }
+  out.into_values().collect()
+}
+
+fn prefer_price(new: &PriceRow, old: &PriceRow) -> bool {
+  let new_name_matches = new.name.as_deref().is_none_or(|n| n == new.model);
+  let old_name_matches = old.name.as_deref().is_none_or(|n| n == old.model);
+  new_name_matches && !old_name_matches
 }
 
 fn token_cost(r: &UsageRecord, p: &Price) -> f64 {

@@ -22,7 +22,7 @@ use crate::cache::{CacheDb, CacheStats};
 use crate::cli::{Args, Cmd, Format, Period};
 use crate::format::{json::render_json, table::render_table};
 use crate::model::UsageRecord;
-use crate::pricing::PricingTable;
+use crate::pricing::{update_cached_prices, PricingTable};
 use crate::sources::{
   claude::ClaudeSource, codex::CodexSource, copilot::CopilotSource, copilot_cli::CopilotCliSource,
   opencode::OpenCodeSource, UsageSource,
@@ -248,10 +248,11 @@ fn main() -> Result<()> {
   };
 
   // Pricing.
-  let mut pricing = PricingTable::load_bundled();
-  if let Some(p) = &args.pricing {
-    pricing.merge_file(p)?;
-  }
+  let pricing = if let Some(p) = &args.pricing {
+    PricingTable::load_file(p)?
+  } else {
+    PricingTable::load_default()?
+  };
 
   // Group dims.
   let dims: Vec<GroupDim> = args.group_by.iter().filter_map(|s| GroupDim::parse(s)).collect();
@@ -543,7 +544,14 @@ fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
       out,
       ..
     } => run_dump(*copilot, *codex, files, out.as_deref(), args),
+    Cmd::Update { .. } => run_update(),
   }
+}
+
+fn run_update() -> Result<()> {
+  let path = update_cached_prices()?;
+  eprintln!("updated pricing cache: {}", path.display());
+  Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]

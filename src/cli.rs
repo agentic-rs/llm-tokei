@@ -214,6 +214,13 @@ pub struct Args {
 
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
+  /// Fetch current models.dev prices into the runtime price cache.
+  Update {
+    /// Print help.
+    #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics")]
+    help: Option<bool>,
+  },
+
   /// Dump per-session JSONL transcripts of user-side messages.
   ///
   /// With `--out`, writes one `<session-id>.jsonl` per session. Without
