@@ -1,5 +1,6 @@
 use crate::aggregate::{Aggregate, GroupDim};
 use crate::cli::AvgBy;
+use std::collections::BTreeMap;
 
 pub struct TableOpts {
   pub show_cost: bool,
@@ -55,6 +56,16 @@ fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) ->
     columns.push(ColumnLayout::from_stat_spec(spec));
   }
 
+  let cost_per_columns = if opts.show_cost {
+    top_cost_per_columns(aggs)
+  } else {
+    Vec::new()
+  };
+  for key in &cost_per_columns {
+    headers.push(Col::num(&short_cost_per_header(key)));
+    columns.push(ColumnLayout::optional_stat(short_cost_per_header(key), 65));
+  }
+
   let mut totals = TableTotals::default();
 
   let max_units = max_human_units(aggs, opts);
@@ -65,6 +76,9 @@ fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) ->
     for spec in active_stat_specs(opts) {
       row.push(spec.row_col(a, opts, &max_units));
     }
+    for key in &cost_per_columns {
+      row.push(Col::num(&fmt_cost(*a.cost_per.get(key).unwrap_or(&0.0))));
+    }
     rows.push(row);
     totals.add(a);
   }
@@ -74,6 +88,10 @@ fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) ->
     .collect();
   for spec in active_stat_specs(opts) {
     total_row.push(spec.total_col(&totals, aggs, opts, &max_units));
+  }
+  for key in &cost_per_columns {
+    let total = aggs.iter().map(|a| a.cost_per.get(key).copied().unwrap_or(0.0)).sum();
+    total_row.push(Col::num(&fmt_cost(total)));
   }
 
   TableModel {
@@ -497,6 +515,15 @@ impl ColumnLayout {
       dim: false,
     }
   }
+
+  fn optional_stat(label: String, priority: u8) -> Self {
+    Self {
+      label,
+      priority,
+      required: false,
+      dim: false,
+    }
+  }
 }
 
 struct FitResult {
@@ -699,6 +726,27 @@ fn fmt_cost(v: f64) -> String {
   }
 }
 
+fn top_cost_per_columns(aggs: &[Aggregate]) -> Vec<String> {
+  let mut totals: BTreeMap<String, f64> = BTreeMap::new();
+  for agg in aggs {
+    for (key, cost) in &agg.cost_per {
+      *totals.entry(key.clone()).or_default() += *cost;
+    }
+  }
+  let mut items = totals.into_iter().collect::<Vec<_>>();
+  items.sort_by(|a, b| {
+    b.1
+      .partial_cmp(&a.1)
+      .unwrap_or(std::cmp::Ordering::Equal)
+      .then_with(|| a.0.cmp(&b.0))
+  });
+  items.into_iter().take(3).map(|(key, _)| key).collect()
+}
+
+fn short_cost_per_header(key: &str) -> String {
+  key.chars().take(10).collect()
+}
+
 fn avg_den(a: &Aggregate, avg: Option<AvgBy>) -> u64 {
   match avg {
     Some(AvgBy::Turn) => a.turns,
@@ -793,6 +841,7 @@ mod tests {
       cost_embedded: 0.0,
       cost_base: 12.3456,
       cost_multiplied: 23.4567,
+      cost_per: BTreeMap::new(),
       first_ts: None,
       last_ts: None,
     }

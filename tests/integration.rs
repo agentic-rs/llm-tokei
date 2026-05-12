@@ -591,6 +591,94 @@ fn explicit_zero_cache_write_price_stays_zero() {
 }
 
 #[test]
+fn cost_per_provider_adds_top_provider_columns_and_json_object() {
+  let codex_fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let copilot_fixtures =
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot/workspaceStorage");
+  let pricing_path = temp_file_path("pricing-cost-per");
+  std::fs::write(
+    &pricing_path,
+    r#"{
+  "prices": [
+    { "provider": "openai", "model": "gpt-5", "input": 1000.0, "output": 0.0, "cache_read": 0.0 },
+    { "provider": "github-copilot", "model": "gpt-5.3-codex", "input": 1.0, "output": 0.0, "cache_read": 0.0 }
+  ],
+  "providers": {
+    "github-copilot": { "included": false }
+  }
+}
+"#,
+  )
+  .expect("write pricing override");
+
+  let table_out = Command::new(bin())
+    .args([
+      "--source",
+      "codex,copilot",
+      "--codex-dir",
+      codex_fixtures.to_str().unwrap(),
+      "--copilot-dir",
+      copilot_fixtures.to_str().unwrap(),
+      "--pricing",
+      pricing_path.to_str().unwrap(),
+      "--group-by",
+      "source",
+      "--cost-per",
+      "provider",
+      "--no-cache",
+      "--no-color",
+    ])
+    .output()
+    .expect("run llm-tokei cost-per table");
+  assert!(
+    table_out.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&table_out.stderr)
+  );
+  let table = String::from_utf8_lossy(&table_out.stdout);
+  let header = table.lines().next().unwrap_or_default();
+  assert!(header.contains("openai"), "table output: {table}");
+  assert!(header.contains("github-cop"), "table output: {table}");
+  assert!(!header.contains("provider:"), "table output: {table}");
+
+  let json_out = Command::new(bin())
+    .args([
+      "--source",
+      "codex,copilot",
+      "--codex-dir",
+      codex_fixtures.to_str().unwrap(),
+      "--copilot-dir",
+      copilot_fixtures.to_str().unwrap(),
+      "--pricing",
+      pricing_path.to_str().unwrap(),
+      "--group-by",
+      "source",
+      "--cost-per",
+      "provider",
+      "--format",
+      "json",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run llm-tokei cost-per json");
+  let _ = std::fs::remove_file(&pricing_path);
+
+  assert!(
+    json_out.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&json_out.stderr)
+  );
+  let v: serde_json::Value = serde_json::from_slice(&json_out.stdout).expect("valid json");
+  let rows = v.as_array().unwrap();
+  assert!(rows
+    .iter()
+    .any(|row| row["cost_per"]["openai"].as_f64().unwrap_or(0.0) > 0.0));
+  assert!(rows
+    .iter()
+    .any(|row| row["cost_per"]["github-copilot"].as_f64().unwrap_or(0.0) > 0.0));
+}
+
+#[test]
 fn copilot_dump_fixture_bytes_cover_schema_variants() {
   // Exercises schema-driven bytes paths: message.text fallback,
   // progressTaskSerialized.content.value, toolInvocationSerialized

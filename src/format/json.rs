@@ -1,5 +1,6 @@
 use crate::aggregate::{Aggregate, GroupDim};
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Serialize)]
 struct JsonRow<'a> {
@@ -18,6 +19,8 @@ struct JsonRow<'a> {
   cost_embedded: f64,
   cost_base: f64,
   cost_multiplied: f64,
+  #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+  cost_per: &'a BTreeMap<String, f64>,
   first_ts: Option<&'a chrono::DateTime<chrono::Utc>>,
   last_ts: Option<&'a chrono::DateTime<chrono::Utc>>,
 }
@@ -57,6 +60,7 @@ pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim], use_bytes: bool) -> St
         cost_embedded: a.cost_embedded,
         cost_base: a.cost_base,
         cost_multiplied: a.cost_multiplied,
+        cost_per: &a.cost_per,
         first_ts: a.first_ts.as_ref(),
         last_ts: a.last_ts.as_ref(),
       }

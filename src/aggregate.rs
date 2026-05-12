@@ -61,6 +61,7 @@ pub struct Aggregate {
   pub cost_embedded: f64,
   pub cost_base: f64,
   pub cost_multiplied: f64,
+  pub cost_per: BTreeMap<String, f64>,
   pub first_ts: Option<DateTime<Utc>>,
   pub last_ts: Option<DateTime<Utc>>,
 }
@@ -145,6 +146,7 @@ pub fn aggregate(
   date_bucket_unit: &str,
   filters: &Filters,
   pricing: &PricingTable,
+  cost_per: Option<GroupDim>,
 ) -> Vec<Aggregate> {
   let mut map: BTreeMap<Vec<String>, Aggregate> = BTreeMap::new();
   let mut session_sets: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
@@ -170,6 +172,7 @@ pub fn aggregate(
       cost_embedded: 0.0,
       cost_base: 0.0,
       cost_multiplied: 0.0,
+      cost_per: BTreeMap::new(),
       first_ts: None,
       last_ts: None,
     });
@@ -196,6 +199,13 @@ pub fn aggregate(
     if let Some((base, mult)) = pricing.cost_for(r) {
       agg.cost_base += base;
       agg.cost_multiplied += mult;
+      if let Some(dim) = cost_per {
+        let split_key = key_for(r, &[dim], date_bucket_unit, pricing)
+          .into_iter()
+          .next()
+          .unwrap_or_else(|| "-".to_string());
+        *agg.cost_per.entry(split_key).or_default() += mult;
+      }
     }
     agg.first_ts = Some(match agg.first_ts {
       Some(t) if t < r.ts => t,

@@ -68,6 +68,10 @@ pub struct Args {
   #[arg(long, help_heading = "Output")]
   pub no_cost: bool,
 
+  /// Add top cost split columns for a grouping dimension.
+  #[arg(long, help_heading = "Output")]
+  pub cost_per: Option<String>,
+
   /// Shortcut: filter to a recent or calendar time window.
   #[arg(long, value_enum, help_heading = "Period", conflicts_with_all = ["period_24h", "period_7d", "period_1m", "today", "week", "month"])]
   pub period: Option<Period>,
