@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::model::UsageRecord;
+use crate::model_name::{fuzzy_resolve, norm};
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum CostMode {
@@ -159,7 +160,7 @@ impl PricingTable {
       let models = v
         .models
         .into_iter()
-        .map(|(mk, mv)| (self.canonical_model(Some(&provider), Some(&mk)), mv))
+        .map(|(mk, mv)| (self.canonical_model_strict(Some(&provider), Some(&mk)), mv))
         .collect::<Vec<_>>();
       let entry = self.providers.entry(provider.clone()).or_default();
       if v.multiplier.is_some() {
@@ -184,7 +185,7 @@ impl PricingTable {
 
     for row in file.prices {
       let provider = norm(&row.provider);
-      let model = self.canonical_model(Some(&provider), Some(&row.model));
+      let model = self.canonical_model_strict(Some(&provider), Some(&row.model));
       self.prices.insert((provider, model), row.into());
     }
   }
@@ -197,6 +198,19 @@ impl PricingTable {
         self.aliases.insert(norm(alias), model.clone());
       }
     }
+  }
+
+  fn canonical_model_strict(&self, provider: Option<&str>, model: Option<&str>) -> String {
+    let Some(model) = model else {
+      return "-".into();
+    };
+    let model = norm(model);
+    if let Some(provider) = provider {
+      if let Some(canonical) = self.aliases.get(&format!("{}/{}", norm(provider), model)) {
+        return canonical.clone();
+      }
+    }
+    self.aliases.get(&model).cloned().unwrap_or(model)
   }
 
   pub fn canonical_model(&self, provider: Option<&str>, model: Option<&str>) -> String {
@@ -212,37 +226,10 @@ impl PricingTable {
     if let Some(canonical) = self.aliases.get(&model) {
       return canonical.clone();
     }
-    if let Some(canonical) = self.fuzzy_match(&model) {
+    if let Some(canonical) = fuzzy_resolve(&self.aliases, &model) {
       return canonical;
     }
     model
-  }
-
-  fn fuzzy_match(&self, model: &str) -> Option<String> {
-    let candidate = model;
-    for pass in 0..7 {
-      let next = match pass {
-        0 => strip_date_suffix(candidate),
-        1 => strip_mode_suffix(candidate),
-        2 => strip_chat_suffix(candidate),
-        3 => strip_provider_prefix(candidate),
-        4 => strip_slash_prefix(candidate),
-        5 => normalize_version_sep(candidate, &self.aliases),
-        6 => {
-          let s = strip_provider_prefix(candidate);
-          normalize_version_sep(&s, &self.aliases)
-        }
-        _ => return None,
-      };
-      if next == candidate {
-        continue;
-      }
-      if let Some(canonical) = self.aliases.get(&next) {
-        return Some(canonical.clone());
-      }
-      return self.fuzzy_match(&next);
-    }
-    None
   }
 
   pub fn lookup_base(&self, provider: Option<&str>, model: Option<&str>) -> Option<&Price> {
@@ -691,118 +678,10 @@ fn token_cost(r: &UsageRecord, p: &Price) -> f64 {
     / m
 }
 
-fn strip_date_suffix(s: &str) -> String {
-  let s = s.strip_suffix("@default").unwrap_or(s);
-  if let Some(pos) = s.rfind('-') {
-    let tail = &s[pos + 1..];
-    if tail.len() == 8 && tail.chars().all(|c| c.is_ascii_digit()) {
-      return s[..pos].to_string();
-    }
-  }
-  if let Some(pos) = s.rfind('-') {
-    let tail = &s[pos + 1..];
-    if tail.len() == 6 && tail.chars().all(|c| c.is_ascii_digit()) {
-      return s[..pos].to_string();
-    }
-  }
-  if let Some(pos) = s.rfind('@') {
-    let tail = &s[pos + 1..];
-    if tail.len() == 8 && tail.chars().all(|c| c.is_ascii_digit()) {
-      return s[..pos].to_string();
-    }
-  }
-  if s.len() >= 11 {
-    let candidate = &s[s.len() - 11..];
-    if candidate.starts_with('-')
-      && candidate.as_bytes()[5] == b'-'
-      && candidate.as_bytes()[8] == b'-'
-    {
-      let tail = &candidate[1..];
-      let parts: Vec<&str> = tail.split('-').collect();
-      if parts.len() == 3
-        && parts.iter().all(|p| p.len() == 4 || p.len() == 2)
-        && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
-      {
-        return s[..s.len() - 11].to_string();
-      }
-    }
-  }
-  s.to_string()
-}
-
-fn strip_mode_suffix(s: &str) -> String {
-  for suffix in [":thinking", "-thinking", "-think", "-fast"] {
-    if let Some(stripped) = s.strip_suffix(suffix) {
-      return stripped.to_string();
-    }
-  }
-  s.to_string()
-}
-
-fn strip_chat_suffix(s: &str) -> String {
-  for suffix in ["-latest", "-chat-latest", "-chat", "-preview"] {
-    if let Some(stripped) = s.strip_suffix(suffix) {
-      return stripped.to_string();
-    }
-  }
-  s.to_string()
-}
-
-const PROVIDER_PREFIXES: &[&str] = &[
-  "zai-org-",
-  "anthropic-",
-  "openai-",
-  "copilot-",
-  "google-",
-  "zai-",
-  "deepseek-",
-  "alibaba-",
-  "minimax-",
-];
-
-fn strip_provider_prefix(s: &str) -> String {
-  for prefix in PROVIDER_PREFIXES {
-    if let Some(stripped) = s.strip_prefix(prefix) {
-      return stripped.to_string();
-    }
-  }
-  s.to_string()
-}
-
-fn strip_slash_prefix(s: &str) -> String {
-  if let Some((_prefix, rest)) = s.split_once('/') {
-    if !rest.is_empty() {
-      return rest.to_string();
-    }
-  }
-  s.to_string()
-}
-
-fn normalize_version_sep(s: &str, aliases: &BTreeMap<String, String>) -> String {
-  let bytes = s.as_bytes();
-  let mut candidates = Vec::new();
-  for i in 1..bytes.len() {
-    if bytes[i] == b'-' && i > 0 && bytes[i - 1].is_ascii_digit() && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
-      let mut replaced = s.to_string();
-      replaced.replace_range(i..i + 1, ".");
-      candidates.push(replaced);
-    }
-  }
-  for candidate in &candidates {
-    if aliases.contains_key(candidate) {
-      return candidate.clone();
-    }
-  }
-  s.to_string()
-}
-
-fn norm(s: &str) -> String {
-  s.trim().to_lowercase()
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::model_name;
 
   fn table() -> PricingTable {
     PricingTable::load_bundled()
@@ -918,42 +797,61 @@ mod tests {
 
   #[test]
   fn strip_date_suffix_cases() {
-    assert_eq!(super::strip_date_suffix("claude-opus-4-5-20251101"), "claude-opus-4-5");
-    assert_eq!(super::strip_date_suffix("claude-opus-4-5@20251101"), "claude-opus-4-5");
-    assert_eq!(super::strip_date_suffix("gpt-5-2025-08-07"), "gpt-5");
-    assert_eq!(super::strip_date_suffix("claude-opus-4-6@default"), "claude-opus-4-6");
-    assert_eq!(super::strip_date_suffix("gpt-5"), "gpt-5");
+    assert_eq!(model_name::strip_date_suffix("claude-opus-4-5-20251101"), "claude-opus-4-5");
+    assert_eq!(model_name::strip_date_suffix("claude-opus-4-5@20251101"), "claude-opus-4-5");
+    assert_eq!(model_name::strip_date_suffix("gpt-5-2025-08-07"), "gpt-5");
+    assert_eq!(model_name::strip_date_suffix("claude-opus-4-6@default"), "claude-opus-4-6");
+    assert_eq!(model_name::strip_date_suffix("gpt-5"), "gpt-5");
   }
 
   #[test]
   fn strip_mode_suffix_cases() {
-    assert_eq!(super::strip_mode_suffix("claude-opus-4-5-thinking"), "claude-opus-4-5");
-    assert_eq!(super::strip_mode_suffix("claude-opus-4-5:thinking"), "claude-opus-4-5");
-    assert_eq!(super::strip_mode_suffix("claude-opus-4-6-fast"), "claude-opus-4-6");
-    assert_eq!(super::strip_mode_suffix("gpt-5"), "gpt-5");
+    assert_eq!(model_name::strip_mode_suffix("claude-opus-4-5-thinking"), "claude-opus-4-5");
+    assert_eq!(model_name::strip_mode_suffix("claude-opus-4-5:thinking"), "claude-opus-4-5");
+    assert_eq!(model_name::strip_mode_suffix("claude-opus-4-6-fast"), "claude-opus-4-6");
+    assert_eq!(model_name::strip_mode_suffix("gpt-5"), "gpt-5");
   }
 
   #[test]
-  fn strip_chat_suffix_cases() {
-    assert_eq!(super::strip_chat_suffix("gpt-5-chat-latest"), "gpt-5-chat");
-    assert_eq!(super::strip_chat_suffix("gpt-5-chat"), "gpt-5");
-    assert_eq!(super::strip_chat_suffix("gpt-5.3-chat-latest"), "gpt-5.3-chat");
-    assert_eq!(super::strip_chat_suffix("gpt-5"), "gpt-5");
-    assert_eq!(super::strip_chat_suffix("gemini-3.1-pro-preview"), "gemini-3.1-pro");
+  fn strip_variant_suffix_cases() {
+    assert_eq!(model_name::strip_variant_suffix("gpt-5-chat-latest"), "gpt-5-chat");
+    assert_eq!(model_name::strip_variant_suffix("gpt-5-chat"), "gpt-5");
+    assert_eq!(model_name::strip_variant_suffix("gpt-5.3-chat-latest"), "gpt-5.3-chat");
+    assert_eq!(model_name::strip_variant_suffix("gpt-5"), "gpt-5");
+    assert_eq!(model_name::strip_variant_suffix("gemini-3.1-pro-preview"), "gemini-3.1-pro");
   }
 
   #[test]
   fn strip_provider_prefix_cases() {
-    assert_eq!(super::strip_provider_prefix("openai-gpt-5"), "gpt-5");
-    assert_eq!(super::strip_provider_prefix("anthropic-claude-opus-4.5"), "claude-opus-4.5");
-    assert_eq!(super::strip_provider_prefix("zai-org-glm-5.1"), "glm-5.1");
-    assert_eq!(super::strip_provider_prefix("gpt-5"), "gpt-5");
+    assert_eq!(model_name::strip_provider_prefix("openai-gpt-5"), "gpt-5");
+    assert_eq!(model_name::strip_provider_prefix("anthropic-claude-opus-4.5"), "claude-opus-4.5");
+    assert_eq!(model_name::strip_provider_prefix("zai-org-glm-5.1"), "glm-5.1");
+    assert_eq!(model_name::strip_provider_prefix("gpt-5"), "gpt-5");
   }
 
   #[test]
   fn strip_slash_prefix_cases() {
-    assert_eq!(super::strip_slash_prefix("anthropic/claude-sonnet-4-5"), "claude-sonnet-4-5");
-    assert_eq!(super::strip_slash_prefix("openai/gpt-5"), "gpt-5");
-    assert_eq!(super::strip_slash_prefix("gpt-5"), "gpt-5");
+    assert_eq!(model_name::strip_slash_prefix("anthropic/claude-sonnet-4-5"), "claude-sonnet-4-5");
+    assert_eq!(model_name::strip_slash_prefix("openai/gpt-5"), "gpt-5");
+    assert_eq!(model_name::strip_slash_prefix("gpt-5"), "gpt-5");
+  }
+
+  #[test]
+  fn regression_reported_cases() {
+    let t = table();
+    let cases = vec![
+      ("openai/gpt-5.1-chat", "gpt-5.1"),
+      ("google/gemini-3-flash-preview", "gemini-3-flash"),
+      ("zai-org/glm-5.1", "glm-5.1"),
+      ("claude-sonnet-4-6", "claude-sonnet-4.6"),
+      ("claude-opus-4-6-fast", "claude-opus-4.6"),
+      ("openai/gpt-5.1-codex-max", "gpt-5.1-codex"),
+      ("anthropic/claude-opus-4-6", "claude-opus-4.6"),
+      ("claude-3-5-haiku-20241022", "claude-3.5-haiku"),
+    ];
+    for (input, expected) in cases {
+      let got = t.canonical_model(None, Some(input));
+      assert_eq!(got, expected, "canonical_model({input:?})");
+    }
   }
 }

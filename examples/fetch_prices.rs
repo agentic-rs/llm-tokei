@@ -594,10 +594,7 @@ fn write_csv(path: &Path, rows: &[CsvRow]) -> Result<()> {
 }
 
 fn resolve_alias(aliases: &BTreeMap<String, String>, provider: &str, model: &str) -> Option<String> {
-  aliases
-    .get(&format!("{}/{}", norm(provider), norm(model)))
-    .or_else(|| aliases.get(&norm(model)))
-    .cloned()
+  llm_tokei::model_name::resolve_alias(aliases, provider, model)
 }
 
 fn cost_value(v: &Value, keys: &[&str]) -> Option<f64> {

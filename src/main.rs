@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod format;
 mod model;
+mod model_name;
 mod pricing;
 mod sources;
 mod text_count;
