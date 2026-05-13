@@ -1404,10 +1404,7 @@ fn cli_period_freeform_absolute_date() {
 #[test]
 fn cli_period_freeform_invalid_rejected() {
   let (mut cmd, cache_home) = isolated_cmd("period-invalid");
-  let out = cmd
-    .args(["--period", "foobar"])
-    .output()
-    .expect("run period invalid");
+  let out = cmd.args(["--period", "foobar"]).output().expect("run period invalid");
   let _ = std::fs::remove_dir_all(cache_home);
   assert!(!out.status.success());
   let stderr = String::from_utf8_lossy(&out.stderr);

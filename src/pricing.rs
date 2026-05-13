@@ -690,10 +690,22 @@ mod tests {
   #[test]
   fn fuzzy_date_suffix() {
     let t = table();
-    assert_eq!(t.canonical_model(None, Some("claude-3-haiku-20240307")), "claude-3-haiku");
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5-20251101")), "claude-opus-4.5");
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5@20251101")), "claude-opus-4.5");
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-7-20251101")), "claude-opus-4.7");
+    assert_eq!(
+      t.canonical_model(None, Some("claude-3-haiku-20240307")),
+      "claude-3-haiku"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-5-20251101")),
+      "claude-opus-4.5"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-5@20251101")),
+      "claude-opus-4.5"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-7-20251101")),
+      "claude-opus-4.7"
+    );
     assert_eq!(t.canonical_model(None, Some("gpt-5-2025-08-07")), "gpt-5");
     assert_eq!(t.canonical_model(None, Some("gpt-5-mini-2025-08-07")), "gpt-5-mini");
     assert_eq!(t.canonical_model(None, Some("o4-mini-2025-04-16")), "openai-o4-mini");
@@ -702,13 +714,31 @@ mod tests {
   #[test]
   fn fuzzy_mode_suffix() {
     let t = table();
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5-20251101-thinking")), "claude-opus-4.5");
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5-20251101:thinking")), "claude-opus-4.5");
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-5-20251101-thinking")),
+      "claude-opus-4.5"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-5-20251101:thinking")),
+      "claude-opus-4.5"
+    );
     assert_eq!(t.canonical_model(None, Some("claude-opus-4-6-fast")), "claude-opus-4.6");
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-6-think")), "claude-opus-4.6");
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-6-thinking")), "claude-opus-4.6");
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4.7-thinking")), "claude-opus-4.7");
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-7-thinking")), "claude-opus-4.7");
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-6-think")),
+      "claude-opus-4.6"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-6-thinking")),
+      "claude-opus-4.6"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4.7-thinking")),
+      "claude-opus-4.7"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-7-thinking")),
+      "claude-opus-4.7"
+    );
   }
 
   #[test]
@@ -726,27 +756,54 @@ mod tests {
   #[test]
   fn fuzzy_preview_suffix() {
     let t = table();
-    assert_eq!(t.canonical_model(None, Some("gemini-3.1-pro-preview")), "gemini-3.1-pro");
-    assert_eq!(t.canonical_model(None, Some("gemini-3.1-flash-image-preview")), "gemini-3.1-flash-image");
-    assert_eq!(t.canonical_model(None, Some("gemini-3.1-flash-lite-preview")), "gemini-3.1-flash-lite");
+    assert_eq!(
+      t.canonical_model(None, Some("gemini-3.1-pro-preview")),
+      "gemini-3.1-pro"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("gemini-3.1-flash-image-preview")),
+      "gemini-3.1-flash-image"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("gemini-3.1-flash-lite-preview")),
+      "gemini-3.1-flash-lite"
+    );
     assert_eq!(t.canonical_model(None, Some("gemini-3-pro-preview")), "gemini-3-pro");
-    assert_eq!(t.canonical_model(None, Some("gemini-3-flash-preview")), "gemini-3-flash");
+    assert_eq!(
+      t.canonical_model(None, Some("gemini-3-flash-preview")),
+      "gemini-3-flash"
+    );
   }
 
   #[test]
   fn fuzzy_provider_dash_prefix() {
     let t = table();
     assert_eq!(t.canonical_model(None, Some("openai-gpt-5")), "gpt-5");
-    assert_eq!(t.canonical_model(None, Some("openai-gpt-5.1-codex-max")), "gpt-5.1-codex");
-    assert_eq!(t.canonical_model(None, Some("anthropic-claude-opus-4.5")), "claude-opus-4.5");
-    assert_eq!(t.canonical_model(None, Some("anthropic-claude-opus-4.6")), "claude-opus-4.6");
-    assert_eq!(t.canonical_model(None, Some("anthropic-claude-opus-4.7")), "claude-opus-4.7");
+    assert_eq!(
+      t.canonical_model(None, Some("openai-gpt-5.1-codex-max")),
+      "gpt-5.1-codex"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("anthropic-claude-opus-4.5")),
+      "claude-opus-4.5"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("anthropic-claude-opus-4.6")),
+      "claude-opus-4.6"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("anthropic-claude-opus-4.7")),
+      "claude-opus-4.7"
+    );
   }
 
   #[test]
   fn fuzzy_slash_prefix() {
     let t = table();
-    assert_eq!(t.canonical_model(None, Some("anthropic/claude-sonnet-4-5")), "claude-sonnet-4.5");
+    assert_eq!(
+      t.canonical_model(None, Some("anthropic/claude-sonnet-4-5")),
+      "claude-sonnet-4.5"
+    );
     assert_eq!(t.canonical_model(None, Some("openai/gpt-5")), "gpt-5");
     assert_eq!(t.canonical_model(None, Some("google/gemini-2.5-pro")), "gemini-2.5-pro");
     assert_eq!(t.canonical_model(None, Some("zai/glm-5.1")), "glm-5.1");
@@ -775,10 +832,22 @@ mod tests {
   #[test]
   fn fuzzy_combined_strips() {
     let t = table();
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-6@default")), "claude-opus-4.6");
-    assert_eq!(t.canonical_model(None, Some("claude-sonnet-4-5-20250929")), "claude-sonnet-4.5");
-    assert_eq!(t.canonical_model(None, Some("claude-sonnet-4-5@20250929")), "claude-sonnet-4.5");
-    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5-20251101-thinking")), "claude-opus-4.5");
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-6@default")),
+      "claude-opus-4.6"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-sonnet-4-5-20250929")),
+      "claude-sonnet-4.5"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-sonnet-4-5@20250929")),
+      "claude-sonnet-4.5"
+    );
+    assert_eq!(
+      t.canonical_model(None, Some("claude-opus-4-5-20251101-thinking")),
+      "claude-opus-4.5"
+    );
   }
 
   #[test]
@@ -797,17 +866,32 @@ mod tests {
 
   #[test]
   fn strip_date_suffix_cases() {
-    assert_eq!(model_name::strip_date_suffix("claude-opus-4-5-20251101"), "claude-opus-4-5");
-    assert_eq!(model_name::strip_date_suffix("claude-opus-4-5@20251101"), "claude-opus-4-5");
+    assert_eq!(
+      model_name::strip_date_suffix("claude-opus-4-5-20251101"),
+      "claude-opus-4-5"
+    );
+    assert_eq!(
+      model_name::strip_date_suffix("claude-opus-4-5@20251101"),
+      "claude-opus-4-5"
+    );
     assert_eq!(model_name::strip_date_suffix("gpt-5-2025-08-07"), "gpt-5");
-    assert_eq!(model_name::strip_date_suffix("claude-opus-4-6@default"), "claude-opus-4-6");
+    assert_eq!(
+      model_name::strip_date_suffix("claude-opus-4-6@default"),
+      "claude-opus-4-6"
+    );
     assert_eq!(model_name::strip_date_suffix("gpt-5"), "gpt-5");
   }
 
   #[test]
   fn strip_mode_suffix_cases() {
-    assert_eq!(model_name::strip_mode_suffix("claude-opus-4-5-thinking"), "claude-opus-4-5");
-    assert_eq!(model_name::strip_mode_suffix("claude-opus-4-5:thinking"), "claude-opus-4-5");
+    assert_eq!(
+      model_name::strip_mode_suffix("claude-opus-4-5-thinking"),
+      "claude-opus-4-5"
+    );
+    assert_eq!(
+      model_name::strip_mode_suffix("claude-opus-4-5:thinking"),
+      "claude-opus-4-5"
+    );
     assert_eq!(model_name::strip_mode_suffix("claude-opus-4-6-fast"), "claude-opus-4-6");
     assert_eq!(model_name::strip_mode_suffix("gpt-5"), "gpt-5");
   }
@@ -818,20 +902,29 @@ mod tests {
     assert_eq!(model_name::strip_variant_suffix("gpt-5-chat"), "gpt-5");
     assert_eq!(model_name::strip_variant_suffix("gpt-5.3-chat-latest"), "gpt-5.3-chat");
     assert_eq!(model_name::strip_variant_suffix("gpt-5"), "gpt-5");
-    assert_eq!(model_name::strip_variant_suffix("gemini-3.1-pro-preview"), "gemini-3.1-pro");
+    assert_eq!(
+      model_name::strip_variant_suffix("gemini-3.1-pro-preview"),
+      "gemini-3.1-pro"
+    );
   }
 
   #[test]
   fn strip_provider_prefix_cases() {
     assert_eq!(model_name::strip_provider_prefix("openai-gpt-5"), "gpt-5");
-    assert_eq!(model_name::strip_provider_prefix("anthropic-claude-opus-4.5"), "claude-opus-4.5");
+    assert_eq!(
+      model_name::strip_provider_prefix("anthropic-claude-opus-4.5"),
+      "claude-opus-4.5"
+    );
     assert_eq!(model_name::strip_provider_prefix("zai-org-glm-5.1"), "glm-5.1");
     assert_eq!(model_name::strip_provider_prefix("gpt-5"), "gpt-5");
   }
 
   #[test]
   fn strip_slash_prefix_cases() {
-    assert_eq!(model_name::strip_slash_prefix("anthropic/claude-sonnet-4-5"), "claude-sonnet-4-5");
+    assert_eq!(
+      model_name::strip_slash_prefix("anthropic/claude-sonnet-4-5"),
+      "claude-sonnet-4-5"
+    );
     assert_eq!(model_name::strip_slash_prefix("openai/gpt-5"), "gpt-5");
     assert_eq!(model_name::strip_slash_prefix("gpt-5"), "gpt-5");
   }

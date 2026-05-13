@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::collections::BTreeMap;
 
 pub fn norm(s: &str) -> String {
@@ -62,10 +63,7 @@ pub fn strip_date_suffix(s: &str) -> String {
   }
   if s.len() >= 11 {
     let candidate = &s[s.len() - 11..];
-    if candidate.starts_with('-')
-      && candidate.as_bytes()[5] == b'-'
-      && candidate.as_bytes()[8] == b'-'
-    {
+    if candidate.starts_with('-') && candidate.as_bytes()[5] == b'-' && candidate.as_bytes()[8] == b'-' {
       let tail = &candidate[1..];
       let parts: Vec<&str> = tail.split('-').collect();
       if parts.len() == 3
@@ -131,11 +129,7 @@ pub fn normalize_version_sep(s: &str, aliases: &BTreeMap<String, String>) -> Str
   let bytes = s.as_bytes();
   let mut candidates = Vec::new();
   for i in 1..bytes.len() {
-    if bytes[i] == b'-'
-      && bytes[i - 1].is_ascii_digit()
-      && i + 1 < bytes.len()
-      && bytes[i + 1].is_ascii_digit()
-    {
+    if bytes[i] == b'-' && bytes[i - 1].is_ascii_digit() && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
       let mut replaced = s.to_string();
       replaced.replace_range(i..i + 1, ".");
       candidates.push(replaced);

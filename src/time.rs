@@ -88,7 +88,6 @@ pub fn start_of_month() -> DateTime<Utc> {
   local_midnight(NaiveDate::from_ymd_opt(now.year(), now.month(), 1).unwrap())
 }
 
-
 fn local_midnight(date: NaiveDate) -> DateTime<Utc> {
   let naive = date.and_hms_opt(0, 0, 0).unwrap();
   match Local.from_local_datetime(&naive) {
@@ -116,8 +115,7 @@ mod tests {
   fn parse_period_named_week() {
     let dt = parse_period("week").unwrap();
     let local_now = Local::now();
-    let expected_monday =
-      local_now.date_naive() - Duration::days(local_now.weekday().num_days_from_monday() as i64);
+    let expected_monday = local_now.date_naive() - Duration::days(local_now.weekday().num_days_from_monday() as i64);
     assert_eq!(to_local_date(dt), expected_monday);
   }
 

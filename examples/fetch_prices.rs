@@ -643,12 +643,7 @@ fn auto_import_models<W: Write>(
       let canonical = name.clone();
       models.entry(canonical.clone()).or_insert_with(|| {
         imported += 1;
-        writeln!(
-          log,
-          "[auto-import] provider={} model={}",
-          provider, canonical
-        )
-        .ok();
+        writeln!(log, "[auto-import] provider={} model={}", provider, canonical).ok();
         eprintln!("  + {provider}/{canonical}");
         ModelInfo {
           provider: provider.clone(),
@@ -663,17 +658,23 @@ fn auto_import_models<W: Write>(
 
 fn has_nonzero_cost(cost: &Value) -> bool {
   let keys = [
-    "input", "output", "reasoning", "cache_read", "cache_write",
-    "audio_input", "input_audio", "audio_output", "output_audio",
+    "input",
+    "output",
+    "reasoning",
+    "cache_read",
+    "cache_write",
+    "audio_input",
+    "input_audio",
+    "audio_output",
+    "output_audio",
   ];
-  keys.iter().any(|k| {
-    cost.get(k).and_then(|v| v.as_f64()).is_some_and(|v| v != 0.0)
-  })
+  keys
+    .iter()
+    .any(|k| cost.get(k).and_then(|v| v.as_f64()).is_some_and(|v| v != 0.0))
 }
 
 fn write_models(path: &Path, models: &BTreeMap<String, ModelInfo>) -> Result<()> {
-  let json = serde_json::to_string_pretty(models)
-    .with_context(|| format!("serializing {}", path.display()))?;
+  let json = serde_json::to_string_pretty(models).with_context(|| format!("serializing {}", path.display()))?;
   std::fs::write(path, json).with_context(|| format!("writing {}", path.display()))
 }
 
