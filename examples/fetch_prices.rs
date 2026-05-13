@@ -16,12 +16,13 @@ const MODELS_DEV_CACHE_FILE: &str = "models.dev.api.json";
 const FETCH_LOG_FILE: &str = "fetch_prices.log";
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct ModelInfo {
   provider: String,
-  #[serde(default)]
+  #[serde(default, skip_serializing_if = "Option::is_none")]
   name: Option<String>,
-  #[serde(default)]
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
   aliases: Vec<String>,
 }
 
@@ -76,6 +77,7 @@ struct PriceKey {
 }
 
 fn main() -> Result<()> {
+  let auto_import = std::env::args().any(|a| a == "--auto-import");
   let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
   let models_path = manifest.join("data/models.json");
   let providers_path = manifest.join("data/providers.json");
@@ -86,13 +88,24 @@ fn main() -> Result<()> {
   let mut log =
     BufWriter::new(std::fs::File::create(&log_path).with_context(|| format!("creating {}", log_path.display()))?);
 
-  let models = read_models(&models_path)?;
-  let aliases = build_alias_map(&models)?;
+  let mut models = read_models(&models_path)?;
   let source_providers = read_source_providers(&providers_path)?;
 
   let body = load_models_dev_json(&cache_dir, &mut log)?;
   let api: BTreeMap<String, Value> = serde_json::from_str(&body).context("parsing models.dev JSON")?;
   eprintln!("  got {} providers", api.len());
+
+  if auto_import {
+    let imported = auto_import_models(&mut models, &api, &source_providers, &mut log)?;
+    if imported > 0 {
+      write_models(&models_path, &models)?;
+      eprintln!("  auto-imported {} models into {}", imported, models_path.display());
+    } else {
+      eprintln!("  no new models to auto-import");
+    }
+  }
+
+  let aliases = build_alias_map(&models)?;
   check_model_names_in_source_provider(&api, &models, &source_providers, &mut log)?;
   let source_prices = build_source_price_index(&api, &aliases, &models, &source_providers);
   let source_alias_stats =
@@ -595,6 +608,73 @@ fn write_csv(path: &Path, rows: &[CsvRow]) -> Result<()> {
 
 fn resolve_alias(aliases: &BTreeMap<String, String>, provider: &str, model: &str) -> Option<String> {
   llm_tokei::model_name::resolve_alias(aliases, provider, model)
+}
+
+fn auto_import_models<W: Write>(
+  models: &mut BTreeMap<String, ModelInfo>,
+  api: &BTreeMap<String, Value>,
+  source_providers: &BTreeSet<String>,
+  log: &mut W,
+) -> Result<usize> {
+  let aliases = build_alias_map(models)?;
+  let mut imported = 0;
+  for (provider_id, pv) in api {
+    let provider = norm(provider_id);
+    if !source_providers.contains(&provider) {
+      continue;
+    }
+    let Some(provider_models) = pv.get("models").and_then(|v| v.as_object()) else {
+      continue;
+    };
+    for (name, mv) in provider_models {
+      let Some(cost) = mv.get("cost").filter(|v| !v.is_null()) else {
+        continue;
+      };
+      let name = norm(name);
+      if resolve_alias(&aliases, &provider, &name).is_some() {
+        continue;
+      }
+      if !should_warn_unresolved_source_model(&name) {
+        continue;
+      }
+      if !has_nonzero_cost(cost) {
+        continue;
+      }
+      let canonical = name.clone();
+      models.entry(canonical.clone()).or_insert_with(|| {
+        imported += 1;
+        writeln!(
+          log,
+          "[auto-import] provider={} model={}",
+          provider, canonical
+        )
+        .ok();
+        eprintln!("  + {provider}/{canonical}");
+        ModelInfo {
+          provider: provider.clone(),
+          name: None,
+          aliases: Vec::new(),
+        }
+      });
+    }
+  }
+  Ok(imported)
+}
+
+fn has_nonzero_cost(cost: &Value) -> bool {
+  let keys = [
+    "input", "output", "reasoning", "cache_read", "cache_write",
+    "audio_input", "input_audio", "audio_output", "output_audio",
+  ];
+  keys.iter().any(|k| {
+    cost.get(k).and_then(|v| v.as_f64()).is_some_and(|v| v != 0.0)
+  })
+}
+
+fn write_models(path: &Path, models: &BTreeMap<String, ModelInfo>) -> Result<()> {
+  let json = serde_json::to_string_pretty(models)
+    .with_context(|| format!("serializing {}", path.display()))?;
+  std::fs::write(path, json).with_context(|| format!("writing {}", path.display()))
 }
 
 fn cost_value(v: &Value, keys: &[&str]) -> Option<f64> {
