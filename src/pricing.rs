@@ -209,7 +209,40 @@ impl PricingTable {
         return canonical.clone();
       }
     }
-    self.aliases.get(&model).cloned().unwrap_or(model)
+    if let Some(canonical) = self.aliases.get(&model) {
+      return canonical.clone();
+    }
+    if let Some(canonical) = self.fuzzy_match(&model) {
+      return canonical;
+    }
+    model
+  }
+
+  fn fuzzy_match(&self, model: &str) -> Option<String> {
+    let candidate = model;
+    for pass in 0..7 {
+      let next = match pass {
+        0 => strip_date_suffix(candidate),
+        1 => strip_mode_suffix(candidate),
+        2 => strip_chat_suffix(candidate),
+        3 => strip_provider_prefix(candidate),
+        4 => strip_slash_prefix(candidate),
+        5 => normalize_version_sep(candidate, &self.aliases),
+        6 => {
+          let s = strip_provider_prefix(candidate);
+          normalize_version_sep(&s, &self.aliases)
+        }
+        _ => return None,
+      };
+      if next == candidate {
+        continue;
+      }
+      if let Some(canonical) = self.aliases.get(&next) {
+        return Some(canonical.clone());
+      }
+      return self.fuzzy_match(&next);
+    }
+    None
   }
 
   pub fn lookup_base(&self, provider: Option<&str>, model: Option<&str>) -> Option<&Price> {
@@ -658,6 +691,269 @@ fn token_cost(r: &UsageRecord, p: &Price) -> f64 {
     / m
 }
 
+fn strip_date_suffix(s: &str) -> String {
+  let s = s.strip_suffix("@default").unwrap_or(s);
+  if let Some(pos) = s.rfind('-') {
+    let tail = &s[pos + 1..];
+    if tail.len() == 8 && tail.chars().all(|c| c.is_ascii_digit()) {
+      return s[..pos].to_string();
+    }
+  }
+  if let Some(pos) = s.rfind('-') {
+    let tail = &s[pos + 1..];
+    if tail.len() == 6 && tail.chars().all(|c| c.is_ascii_digit()) {
+      return s[..pos].to_string();
+    }
+  }
+  if let Some(pos) = s.rfind('@') {
+    let tail = &s[pos + 1..];
+    if tail.len() == 8 && tail.chars().all(|c| c.is_ascii_digit()) {
+      return s[..pos].to_string();
+    }
+  }
+  if s.len() >= 11 {
+    let candidate = &s[s.len() - 11..];
+    if candidate.starts_with('-')
+      && candidate.as_bytes()[5] == b'-'
+      && candidate.as_bytes()[8] == b'-'
+    {
+      let tail = &candidate[1..];
+      let parts: Vec<&str> = tail.split('-').collect();
+      if parts.len() == 3
+        && parts.iter().all(|p| p.len() == 4 || p.len() == 2)
+        && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
+      {
+        return s[..s.len() - 11].to_string();
+      }
+    }
+  }
+  s.to_string()
+}
+
+fn strip_mode_suffix(s: &str) -> String {
+  for suffix in [":thinking", "-thinking", "-think", "-fast"] {
+    if let Some(stripped) = s.strip_suffix(suffix) {
+      return stripped.to_string();
+    }
+  }
+  s.to_string()
+}
+
+fn strip_chat_suffix(s: &str) -> String {
+  for suffix in ["-latest", "-chat-latest", "-chat", "-preview"] {
+    if let Some(stripped) = s.strip_suffix(suffix) {
+      return stripped.to_string();
+    }
+  }
+  s.to_string()
+}
+
+const PROVIDER_PREFIXES: &[&str] = &[
+  "zai-org-",
+  "anthropic-",
+  "openai-",
+  "copilot-",
+  "google-",
+  "zai-",
+  "deepseek-",
+  "alibaba-",
+  "minimax-",
+];
+
+fn strip_provider_prefix(s: &str) -> String {
+  for prefix in PROVIDER_PREFIXES {
+    if let Some(stripped) = s.strip_prefix(prefix) {
+      return stripped.to_string();
+    }
+  }
+  s.to_string()
+}
+
+fn strip_slash_prefix(s: &str) -> String {
+  if let Some((_prefix, rest)) = s.split_once('/') {
+    if !rest.is_empty() {
+      return rest.to_string();
+    }
+  }
+  s.to_string()
+}
+
+fn normalize_version_sep(s: &str, aliases: &BTreeMap<String, String>) -> String {
+  let bytes = s.as_bytes();
+  let mut candidates = Vec::new();
+  for i in 1..bytes.len() {
+    if bytes[i] == b'-' && i > 0 && bytes[i - 1].is_ascii_digit() && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
+      let mut replaced = s.to_string();
+      replaced.replace_range(i..i + 1, ".");
+      candidates.push(replaced);
+    }
+  }
+  for candidate in &candidates {
+    if aliases.contains_key(candidate) {
+      return candidate.clone();
+    }
+  }
+  s.to_string()
+}
+
 fn norm(s: &str) -> String {
   s.trim().to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn table() -> PricingTable {
+    PricingTable::load_bundled()
+  }
+
+  #[test]
+  fn fuzzy_date_suffix() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("claude-3-haiku-20240307")), "claude-3-haiku");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5-20251101")), "claude-opus-4.5");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5@20251101")), "claude-opus-4.5");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-7-20251101")), "claude-opus-4.7");
+    assert_eq!(t.canonical_model(None, Some("gpt-5-2025-08-07")), "gpt-5");
+    assert_eq!(t.canonical_model(None, Some("gpt-5-mini-2025-08-07")), "gpt-5-mini");
+    assert_eq!(t.canonical_model(None, Some("o4-mini-2025-04-16")), "openai-o4-mini");
+  }
+
+  #[test]
+  fn fuzzy_mode_suffix() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5-20251101-thinking")), "claude-opus-4.5");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5-20251101:thinking")), "claude-opus-4.5");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-6-fast")), "claude-opus-4.6");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-6-think")), "claude-opus-4.6");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-6-thinking")), "claude-opus-4.6");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4.7-thinking")), "claude-opus-4.7");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-7-thinking")), "claude-opus-4.7");
+  }
+
+  #[test]
+  fn fuzzy_chat_suffix() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("gpt-5-chat-latest")), "gpt-5");
+    assert_eq!(t.canonical_model(None, Some("gpt-5-chat")), "gpt-5");
+    assert_eq!(t.canonical_model(None, Some("gpt-5.1-chat-latest")), "gpt-5.1");
+    assert_eq!(t.canonical_model(None, Some("gpt-5.1-chat")), "gpt-5.1");
+    assert_eq!(t.canonical_model(None, Some("gpt-5.2-chat")), "gpt-5.2");
+    assert_eq!(t.canonical_model(None, Some("gpt-5.2-chat-latest")), "gpt-5.2");
+    assert_eq!(t.canonical_model(None, Some("gpt-5.3-chat-latest")), "gpt-5.3-chat");
+  }
+
+  #[test]
+  fn fuzzy_preview_suffix() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("gemini-3.1-pro-preview")), "gemini-3.1-pro");
+    assert_eq!(t.canonical_model(None, Some("gemini-3.1-flash-image-preview")), "gemini-3.1-flash-image");
+    assert_eq!(t.canonical_model(None, Some("gemini-3.1-flash-lite-preview")), "gemini-3.1-flash-lite");
+    assert_eq!(t.canonical_model(None, Some("gemini-3-pro-preview")), "gemini-3-pro");
+    assert_eq!(t.canonical_model(None, Some("gemini-3-flash-preview")), "gemini-3-flash");
+  }
+
+  #[test]
+  fn fuzzy_provider_dash_prefix() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("openai-gpt-5")), "gpt-5");
+    assert_eq!(t.canonical_model(None, Some("openai-gpt-5.1-codex-max")), "gpt-5.1-codex");
+    assert_eq!(t.canonical_model(None, Some("anthropic-claude-opus-4.5")), "claude-opus-4.5");
+    assert_eq!(t.canonical_model(None, Some("anthropic-claude-opus-4.6")), "claude-opus-4.6");
+    assert_eq!(t.canonical_model(None, Some("anthropic-claude-opus-4.7")), "claude-opus-4.7");
+  }
+
+  #[test]
+  fn fuzzy_slash_prefix() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("anthropic/claude-sonnet-4-5")), "claude-sonnet-4.5");
+    assert_eq!(t.canonical_model(None, Some("openai/gpt-5")), "gpt-5");
+    assert_eq!(t.canonical_model(None, Some("google/gemini-2.5-pro")), "gemini-2.5-pro");
+    assert_eq!(t.canonical_model(None, Some("zai/glm-5.1")), "glm-5.1");
+    assert_eq!(t.canonical_model(None, Some("zai-org/glm-5.1")), "glm-5.1");
+  }
+
+  #[test]
+  fn fuzzy_version_sep() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("claude-sonnet-4-5")), "claude-sonnet-4.5");
+    assert_eq!(t.canonical_model(None, Some("claude-3-5-haiku")), "claude-3.5-haiku");
+    assert_eq!(t.canonical_model(None, Some("claude-3-5-sonnet")), "claude-3.5-sonnet");
+    assert_eq!(t.canonical_model(None, Some("claude-3-7-sonnet")), "claude-3.7-sonnet");
+    assert_eq!(t.canonical_model(None, Some("gpt-4-1")), "gpt-4.1");
+    assert_eq!(t.canonical_model(None, Some("gpt-4-1-mini")), "gpt-4.1-mini");
+    assert_eq!(t.canonical_model(None, Some("gpt-5-3-codex")), "gpt-5.3-codex");
+    assert_eq!(t.canonical_model(None, Some("gpt-5-4")), "gpt-5.4");
+    assert_eq!(t.canonical_model(None, Some("gpt-5-4-mini")), "gpt-5.4-mini");
+    assert_eq!(t.canonical_model(None, Some("gpt-5-5")), "gpt-5.5");
+    assert_eq!(t.canonical_model(None, Some("glm-4-7")), "glm-4.7");
+    assert_eq!(t.canonical_model(None, Some("glm-4-6")), "glm-4.6");
+    assert_eq!(t.canonical_model(None, Some("glm-4-5")), "glm-4.5");
+    assert_eq!(t.canonical_model(None, Some("glm-5-1")), "glm-5.1");
+  }
+
+  #[test]
+  fn fuzzy_combined_strips() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-6@default")), "claude-opus-4.6");
+    assert_eq!(t.canonical_model(None, Some("claude-sonnet-4-5-20250929")), "claude-sonnet-4.5");
+    assert_eq!(t.canonical_model(None, Some("claude-sonnet-4-5@20250929")), "claude-sonnet-4.5");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-5-20251101-thinking")), "claude-opus-4.5");
+  }
+
+  #[test]
+  fn fuzzy_provider_model_passthrough() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("o1-preview")), "openai-o1");
+    assert_eq!(t.canonical_model(None, Some("claude-opus-4-0")), "claude-opus-4");
+    assert_eq!(t.canonical_model(None, Some("claude-sonnet-4-0")), "claude-sonnet-4");
+  }
+
+  #[test]
+  fn fuzzy_unknown_returns_normalized() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("future-model-xyz")), "future-model-xyz");
+  }
+
+  #[test]
+  fn strip_date_suffix_cases() {
+    assert_eq!(super::strip_date_suffix("claude-opus-4-5-20251101"), "claude-opus-4-5");
+    assert_eq!(super::strip_date_suffix("claude-opus-4-5@20251101"), "claude-opus-4-5");
+    assert_eq!(super::strip_date_suffix("gpt-5-2025-08-07"), "gpt-5");
+    assert_eq!(super::strip_date_suffix("claude-opus-4-6@default"), "claude-opus-4-6");
+    assert_eq!(super::strip_date_suffix("gpt-5"), "gpt-5");
+  }
+
+  #[test]
+  fn strip_mode_suffix_cases() {
+    assert_eq!(super::strip_mode_suffix("claude-opus-4-5-thinking"), "claude-opus-4-5");
+    assert_eq!(super::strip_mode_suffix("claude-opus-4-5:thinking"), "claude-opus-4-5");
+    assert_eq!(super::strip_mode_suffix("claude-opus-4-6-fast"), "claude-opus-4-6");
+    assert_eq!(super::strip_mode_suffix("gpt-5"), "gpt-5");
+  }
+
+  #[test]
+  fn strip_chat_suffix_cases() {
+    assert_eq!(super::strip_chat_suffix("gpt-5-chat-latest"), "gpt-5-chat");
+    assert_eq!(super::strip_chat_suffix("gpt-5-chat"), "gpt-5");
+    assert_eq!(super::strip_chat_suffix("gpt-5.3-chat-latest"), "gpt-5.3-chat");
+    assert_eq!(super::strip_chat_suffix("gpt-5"), "gpt-5");
+    assert_eq!(super::strip_chat_suffix("gemini-3.1-pro-preview"), "gemini-3.1-pro");
+  }
+
+  #[test]
+  fn strip_provider_prefix_cases() {
+    assert_eq!(super::strip_provider_prefix("openai-gpt-5"), "gpt-5");
+    assert_eq!(super::strip_provider_prefix("anthropic-claude-opus-4.5"), "claude-opus-4.5");
+    assert_eq!(super::strip_provider_prefix("zai-org-glm-5.1"), "glm-5.1");
+    assert_eq!(super::strip_provider_prefix("gpt-5"), "gpt-5");
+  }
+
+  #[test]
+  fn strip_slash_prefix_cases() {
+    assert_eq!(super::strip_slash_prefix("anthropic/claude-sonnet-4-5"), "claude-sonnet-4-5");
+    assert_eq!(super::strip_slash_prefix("openai/gpt-5"), "gpt-5");
+    assert_eq!(super::strip_slash_prefix("gpt-5"), "gpt-5");
+  }
 }
