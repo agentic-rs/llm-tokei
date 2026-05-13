@@ -1,4 +1,4 @@
-use crate::cli::{Args, AvgBy, DateBucket, Format, Period};
+use crate::cli::{Args, AvgBy, DateBucket, Format};
 use crate::pricing::CostMode;
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, FromArgMatches, ValueEnum};
@@ -433,7 +433,7 @@ fn args_from_matches(matches: &clap::ArgMatches) -> Result<ConfigFile> {
     out.output.cost_per = matches.get_one::<String>("cost_per").cloned();
   }
   if cli_set(matches, "period") {
-    out.period.period = value_name::<Period>(matches, "period");
+    out.period.period = matches.get_one::<String>("period").cloned();
   }
   if cli_set(matches, "period_24h") {
     out.period.period = Some("24h".to_string());

@@ -19,7 +19,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
-use crate::cli::{Args, Cmd, ConfigCmd, Format, Period};
+use crate::cli::{Args, Cmd, ConfigCmd, Format};
 use crate::format::{json::render_json, table::render_table};
 use crate::model::UsageRecord;
 use crate::pricing::{update_cached_prices, PricingTable};
@@ -209,7 +209,7 @@ fn main() -> Result<()> {
   }
 
   // Filters.
-  let period_since = period_since(&args);
+  let period_since = period_since(&args).transpose().context("parsing --period")?;
 
   let since = args
     .since
@@ -408,25 +408,18 @@ where
   Ok((out, stats))
 }
 
-fn period_since(args: &Args) -> Option<chrono::DateTime<chrono::Utc>> {
+fn period_since(args: &Args) -> Option<anyhow::Result<chrono::DateTime<chrono::Utc>>> {
   let period = args
     .period
-    .or_else(|| args.period_24h.then_some(Period::Hours24))
-    .or_else(|| args.period_7d.then_some(Period::Days7))
-    .or_else(|| args.period_1m.then_some(Period::Month1))
-    .or_else(|| args.today.then_some(Period::Today))
-    .or_else(|| args.week.then_some(Period::Week))
-    .or_else(|| args.month.then_some(Period::Month));
+    .as_deref()
+    .or_else(|| args.period_24h.then_some("24h"))
+    .or_else(|| args.period_7d.then_some("7d"))
+    .or_else(|| args.period_1m.then_some("1m"))
+    .or_else(|| args.today.then_some("today"))
+    .or_else(|| args.week.then_some("week"))
+    .or_else(|| args.month.then_some("month"));
 
-  match period {
-    Some(Period::Hours24) => Some(crate::time::last_24h()),
-    Some(Period::Days7) => Some(crate::time::last_7d()),
-    Some(Period::Month1) => Some(crate::time::last_1m()),
-    Some(Period::Today) => Some(crate::time::start_of_today()),
-    Some(Period::Week) => Some(crate::time::start_of_week()),
-    Some(Period::Month) => Some(crate::time::start_of_month()),
-    None => None,
-  }
+  period.map(time::parse_period)
 }
 
 fn collect_opencode_with_cache(cache: &CacheDb, src: &OpenCodeSource) -> Result<(Vec<UsageRecord>, CacheStats)> {

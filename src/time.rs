@@ -26,6 +26,17 @@ pub fn parse_when(s: &str) -> Result<DateTime<Utc>> {
   ))
 }
 
+/// Parse a period expression: named calendar periods (today, week, month)
+/// or any expression accepted by `parse_when` (relative like 3d/12h/2w, absolute dates).
+pub fn parse_period(s: &str) -> Result<DateTime<Utc>> {
+  match s.trim().to_lowercase().as_str() {
+    "today" => Ok(start_of_today()),
+    "week" => Ok(start_of_week()),
+    "month" => Ok(start_of_month()),
+    _ => parse_when(s),
+  }
+}
+
 fn parse_relative(s: &str) -> Option<DateTime<Utc>> {
   let bytes = s.as_bytes();
   let mut idx = 0;
@@ -77,17 +88,6 @@ pub fn start_of_month() -> DateTime<Utc> {
   local_midnight(NaiveDate::from_ymd_opt(now.year(), now.month(), 1).unwrap())
 }
 
-pub fn last_24h() -> DateTime<Utc> {
-  Utc::now() - Duration::hours(24)
-}
-
-pub fn last_7d() -> DateTime<Utc> {
-  Utc::now() - Duration::days(7)
-}
-
-pub fn last_1m() -> DateTime<Utc> {
-  Utc::now() - Duration::days(30)
-}
 
 fn local_midnight(date: NaiveDate) -> DateTime<Utc> {
   let naive = date.and_hms_opt(0, 0, 0).unwrap();
@@ -95,5 +95,125 @@ fn local_midnight(date: NaiveDate) -> DateTime<Utc> {
     chrono::LocalResult::Single(dt) => dt.with_timezone(&Utc),
     chrono::LocalResult::Ambiguous(dt, _) => dt.with_timezone(&Utc),
     chrono::LocalResult::None => Utc.from_utc_datetime(&naive),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn to_local_date(dt: DateTime<Utc>) -> chrono::NaiveDate {
+    dt.with_timezone(&Local).date_naive()
+  }
+
+  #[test]
+  fn parse_period_named_today() {
+    let dt = parse_period("today").unwrap();
+    assert_eq!(to_local_date(dt), Local::now().date_naive());
+  }
+
+  #[test]
+  fn parse_period_named_week() {
+    let dt = parse_period("week").unwrap();
+    let local_now = Local::now();
+    let expected_monday =
+      local_now.date_naive() - Duration::days(local_now.weekday().num_days_from_monday() as i64);
+    assert_eq!(to_local_date(dt), expected_monday);
+  }
+
+  #[test]
+  fn parse_period_named_month() {
+    let dt = parse_period("month").unwrap();
+    let local_date = dt.with_timezone(&Local).date_naive();
+    assert_eq!(local_date.day(), 1);
+    let now = Local::now();
+    assert_eq!(local_date.month(), now.month());
+    assert_eq!(local_date.year(), now.year());
+  }
+
+  #[test]
+  fn parse_period_named_case_insensitive() {
+    assert!(parse_period("Today").is_ok());
+    assert!(parse_period("WEEK").is_ok());
+    assert!(parse_period("Month").is_ok());
+  }
+
+  #[test]
+  fn parse_period_relative_hours() {
+    let dt = parse_period("12h").unwrap();
+    let diff = Utc::now() - dt;
+    assert!(diff.num_hours() >= 11 && diff.num_hours() <= 13);
+  }
+
+  #[test]
+  fn parse_period_relative_days() {
+    let dt = parse_period("3d").unwrap();
+    let diff = Utc::now() - dt;
+    assert!(diff.num_days() >= 2 && diff.num_days() <= 4);
+  }
+
+  #[test]
+  fn parse_period_relative_weeks() {
+    let dt = parse_period("2w").unwrap();
+    let diff = Utc::now() - dt;
+    assert!(diff.num_days() >= 13 && diff.num_days() <= 15);
+  }
+
+  #[test]
+  fn parse_period_relative_months() {
+    let dt = parse_period("6mo").unwrap();
+    let diff = Utc::now() - dt;
+    assert!(diff.num_days() >= 179 && diff.num_days() <= 181);
+  }
+
+  #[test]
+  fn parse_period_relative_years() {
+    let dt = parse_period("1y").unwrap();
+    let diff = Utc::now() - dt;
+    assert!(diff.num_days() >= 364 && diff.num_days() <= 366);
+  }
+
+  #[test]
+  fn parse_period_absolute_date() {
+    let dt = parse_period("2025-01-15").unwrap();
+    assert_eq!(dt.format("%Y-%m-%d").to_string(), "2025-01-15");
+  }
+
+  #[test]
+  fn parse_period_rfc3339() {
+    let dt = parse_period("2025-06-01T12:00:00Z").unwrap();
+    assert_eq!(dt.format("%Y-%m-%dT%H:%M:%S").to_string(), "2025-06-01T12:00:00");
+  }
+
+  #[test]
+  fn parse_period_invalid() {
+    assert!(parse_period("foobar").is_err());
+  }
+
+  #[test]
+  fn parse_when_relative_minutes() {
+    let dt = parse_when("30m").unwrap();
+    let diff = Utc::now() - dt;
+    assert!(diff.num_minutes() >= 29 && diff.num_minutes() <= 31);
+  }
+
+  #[test]
+  fn parse_when_relative_seconds() {
+    let dt = parse_when("60s").unwrap();
+    let diff = Utc::now() - dt;
+    assert!(diff.num_seconds() >= 59 && diff.num_seconds() <= 61);
+  }
+
+  #[test]
+  fn parse_when_relative_word_units() {
+    assert!(parse_when("3 days").is_ok());
+    assert!(parse_when("2 hours").is_ok());
+    assert!(parse_when("1 week").is_ok());
+  }
+
+  #[test]
+  fn parse_when_empty_error() {
+    assert!(parse_when("").is_err());
+    assert!(parse_when("  ").is_err());
   }
 }

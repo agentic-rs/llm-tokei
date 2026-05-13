@@ -1331,3 +1331,85 @@ fn dump_subcommand_rejects_multiple_sources() {
   let stderr = String::from_utf8_lossy(&out.stderr);
   assert!(stderr.contains("select only one source"), "stderr: {stderr}");
 }
+
+#[test]
+fn cli_period_freeform_relative() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("period-freeform");
+  let out = cmd
+    .args([
+      "--format",
+      "json",
+      "--source",
+      "codex",
+      "--period",
+      "3d",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+    ])
+    .output()
+    .expect("run period freeform");
+  let _ = std::fs::remove_dir_all(cache_home);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn cli_period_freeform_calendar_today() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("period-today");
+  let out = cmd
+    .args([
+      "--format",
+      "json",
+      "--source",
+      "codex",
+      "--period",
+      "today",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+    ])
+    .output()
+    .expect("run period today");
+  let _ = std::fs::remove_dir_all(cache_home);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn cli_period_freeform_absolute_date() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("period-absolute");
+  let out = cmd
+    .args([
+      "--format",
+      "json",
+      "--source",
+      "codex",
+      "--period",
+      "2020-01-01",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+    ])
+    .output()
+    .expect("run period absolute");
+  let _ = std::fs::remove_dir_all(cache_home);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn cli_period_freeform_invalid_rejected() {
+  let (mut cmd, cache_home) = isolated_cmd("period-invalid");
+  let out = cmd
+    .args(["--period", "foobar"])
+    .output()
+    .expect("run period invalid");
+  let _ = std::fs::remove_dir_all(cache_home);
+  assert!(!out.status.success());
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(stderr.contains("parsing --period"), "stderr: {stderr}");
+}

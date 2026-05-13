@@ -48,19 +48,6 @@ impl DateBucket {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
-pub enum Period {
-  #[value(name = "24h")]
-  Hours24,
-  #[value(name = "7d")]
-  Days7,
-  #[value(name = "1m")]
-  Month1,
-  Today,
-  Week,
-  Month,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum AvgBy {
   Turn,
   Round,
@@ -99,9 +86,9 @@ pub struct Args {
   #[arg(long, help_heading = "Output")]
   pub cost_per: Option<String>,
 
-  /// Shortcut: filter to a recent or calendar time window.
-  #[arg(long, value_enum, help_heading = "Period", conflicts_with_all = ["period_24h", "period_7d", "period_1m", "today", "week", "month"])]
-  pub period: Option<Period>,
+  /// Filter to a recent or calendar time window (e.g. 3d, 12h, 2w, today, week, month).
+  #[arg(long, help_heading = "Period", conflicts_with_all = ["period_24h", "period_7d", "period_1m", "today", "week", "month"])]
+  pub period: Option<String>,
 
   /// Shortcut for `--period 24h`.
   #[arg(long = "24h", help_heading = "Period")]
