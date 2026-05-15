@@ -1,7 +1,7 @@
 use crate::model::{Source, UsageRecord};
 use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
-use crate::text_count::{count_value, Bytes, Counter};
+use crate::text_count::{count_value, extract_nested_text, Bytes, Counter, JoinString};
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
@@ -595,31 +595,7 @@ fn dump_message_content(content: Option<&serde_json::Value>) -> String {
 }
 
 fn dump_nested_text(value: Option<&serde_json::Value>) -> String {
-  let mut out = Vec::new();
-  collect_nested_text(value, &mut out);
-  join_non_empty(out)
-}
-
-fn collect_nested_text(value: Option<&serde_json::Value>, out: &mut Vec<String>) {
-  let Some(value) = value else {
-    return;
-  };
-  match value {
-    serde_json::Value::String(s) => out.push(s.clone()),
-    serde_json::Value::Array(items) => {
-      for item in items {
-        collect_nested_text(Some(item), out);
-      }
-    }
-    serde_json::Value::Object(map) => {
-      for key in ["text", "value", "output", "content"] {
-        if let Some(child) = map.get(key) {
-          collect_nested_text(Some(child), out);
-        }
-      }
-    }
-    _ => {}
-  }
+  extract_nested_text::<JoinString>(value)
 }
 
 fn join_non_empty<I>(items: I) -> String

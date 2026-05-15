@@ -4,7 +4,9 @@ use crate::sources::copilot_shutdown::{
 };
 use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
-use crate::text_count::{Bytes, Chars, Counter};
+use crate::text_count::{
+  extract_rich_text, extract_text_like, Bytes, Chars, CountBytes, CountChars, Counter, JoinString,
+};
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
@@ -803,17 +805,7 @@ fn collect_response_item_text(item: &Value) -> String {
 }
 
 fn collect_text_like(value: Option<&Value>) -> String {
-  match value {
-    Some(Value::String(s)) => s.clone(),
-    Some(Value::Object(map)) => map
-      .get("text")
-      .or_else(|| map.get("value"))
-      .and_then(|v| v.as_str())
-      .map(str::to_string)
-      .unwrap_or_default(),
-    Some(Value::Array(items)) => join_non_empty(items.iter().map(|item| collect_text_like(Some(item)))),
-    _ => String::new(),
-  }
+  extract_text_like::<JoinString>(value)
 }
 
 fn join_non_empty(parts: impl IntoIterator<Item = String>) -> String {
@@ -847,50 +839,7 @@ fn collect_tool_result_text(result: &Value) -> String {
 }
 
 fn collect_rich_text(value: &Value) -> String {
-  match value {
-    Value::String(s) => s.clone(),
-    Value::Array(items) => {
-      let mut buf = String::new();
-      for it in items {
-        let s = collect_rich_text(it);
-        if !s.is_empty() {
-          if !buf.is_empty() {
-            buf.push('\n');
-          }
-          buf.push_str(&s);
-        }
-      }
-      buf
-    }
-    Value::Object(map) => {
-      let mut buf = String::new();
-      if let Some(t) = map.get("text").and_then(|v| v.as_str()) {
-        buf.push_str(t);
-      }
-      if let Some(children) = map.get("children").and_then(|v| v.as_array()) {
-        for c in children {
-          let s = collect_rich_text(c);
-          if !s.is_empty() {
-            if !buf.is_empty() {
-              buf.push('\n');
-            }
-            buf.push_str(&s);
-          }
-        }
-      }
-      if let Some(node) = map.get("node") {
-        let s = collect_rich_text(node);
-        if !s.is_empty() {
-          if !buf.is_empty() {
-            buf.push('\n');
-          }
-          buf.push_str(&s);
-        }
-      }
-      buf
-    }
-    _ => String::new(),
-  }
+  extract_rich_text::<JoinString>(Some(value))
 }
 
 #[derive(Debug, Clone)]
@@ -974,110 +923,62 @@ fn message_text<C: Counter>(counter: &C, req: &Value) -> u64 {
 }
 
 fn sum_text_chars(node: Option<&Value>) -> u64 {
-  sum_text(&Chars, node)
+  extract_text_like::<CountChars>(node)
 }
 
 fn sum_text_bytes(node: Option<&Value>) -> u64 {
-  sum_text(&Bytes, node)
-}
-
-fn sum_text<C: Counter>(counter: &C, node: Option<&Value>) -> u64 {
-  let value = match node {
-    Some(v) => v,
-    None => return 0,
-  };
-  match value {
-    // Plain string (e.g. invocationMessage as a markdown string).
-    Value::String(s) => counter.count(s),
-    // Single object form, e.g. invocationMessage as { value: "..." }.
-    Value::Object(map) => map
-      .get("text")
-      .or_else(|| map.get("value"))
-      .and_then(|v| v.as_str())
-      .map(|s| counter.count(s))
-      .unwrap_or(0),
-    Value::Array(arr) => {
-      let mut total: u64 = 0;
-      for item in arr {
-        if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
-          total = total.saturating_add(counter.count(t));
-        } else if let Some(t) = item.get("value").and_then(|v| v.as_str()) {
-          total = total.saturating_add(counter.count(t));
-        }
-      }
-      total
-    }
-    _ => 0,
-  }
+  extract_text_like::<CountBytes>(node)
 }
 
 fn tool_result_chars(result: &Value) -> u64 {
-  tool_result(&Chars, result)
+  tool_result(result, |value| extract_rich_text::<CountChars>(Some(value)))
 }
 
 fn tool_result_bytes(result: &Value) -> u64 {
-  tool_result(&Bytes, result)
+  tool_result(result, |value| extract_rich_text::<CountBytes>(Some(value)))
 }
 
-fn tool_result<C: Counter>(counter: &C, result: &Value) -> u64 {
+fn tool_result(result: &Value, count_rich_text: fn(&Value) -> u64) -> u64 {
   result
     .get("content")
     .and_then(|v| v.as_array())
-    .map(|items| items.iter().map(|item| tool_result_content(counter, item)).sum())
+    .map(|items| {
+      items
+        .iter()
+        .map(|item| {
+          if let Some(value) = item.get("value") {
+            count_rich_text(value)
+          } else {
+            count_rich_text(item)
+          }
+        })
+        .sum()
+    })
     .unwrap_or(0)
 }
 
-fn tool_result_content<C: Counter>(counter: &C, item: &Value) -> u64 {
-  if let Some(value) = item.get("value") {
-    return rich_text(counter, value);
-  }
-  rich_text(counter, item)
-}
-
-fn rich_text<C: Counter>(counter: &C, value: &Value) -> u64 {
-  match value {
-    Value::String(s) => counter.count(s),
-    Value::Array(items) => items.iter().map(|item| rich_text(counter, item)).sum(),
-    Value::Object(map) => {
-      let mut total: u64 = map
-        .get("text")
-        .and_then(|v| v.as_str())
-        .map(|s| counter.count(s))
-        .unwrap_or(0);
-      if let Some(children) = map.get("children").and_then(|v| v.as_array()) {
-        total = total.saturating_add(children.iter().map(|item| rich_text(counter, item)).sum::<u64>());
-      }
-      if let Some(node) = map.get("node") {
-        total = total.saturating_add(rich_text(counter, node));
-      }
-      total
-    }
-    _ => 0,
-  }
-}
-
 fn response_item_chars(item: &Value) -> u64 {
-  response_item(&Chars, item)
+  response_item(item, |value| extract_text_like::<CountChars>(value))
 }
 
 fn response_item_bytes(item: &Value) -> u64 {
-  response_item(&Bytes, item)
+  response_item(item, |value| extract_text_like::<CountBytes>(value))
 }
 
-fn response_item<C: Counter>(counter: &C, item: &Value) -> u64 {
+fn response_item(item: &Value, count_text_like: fn(Option<&Value>) -> u64) -> u64 {
   // Plain `{value: "..."}` text segments and `{kind: "text", value: "..."}`
   // are LLM-generated text. For tool invocations, only count user-visible
   // invocation/past-tense text; skip tool payloads (tool output/input blobs).
   let kind = item.get("kind").and_then(|v| v.as_str());
   if kind == Some("toolInvocationSerialized") {
     let mut total: u64 = 0;
-    total = total.saturating_add(sum_text(counter, item.pointer("/invocationMessage")));
-    total = total.saturating_add(sum_text(counter, item.pointer("/pastTenseMessage")));
+    total = total.saturating_add(count_text_like(item.pointer("/invocationMessage")));
+    total = total.saturating_add(count_text_like(item.pointer("/pastTenseMessage")));
     return total;
   }
   if kind == Some("progressTaskSerialized") {
     // content can be {value: "..."} or {value: "...", uris: {...}}; recurse.
-    return sum_text(counter, item.get("content"));
+    return count_text_like(item.get("content"));
   }
   if matches!(
     kind,
@@ -1094,11 +995,7 @@ fn response_item<C: Counter>(counter: &C, item: &Value) -> u64 {
     // Thinking is reasoning content, accounted for via toolCallRounds.thinking.tokens.
     return 0;
   }
-  if let Some(s) = item.get("value").and_then(|v| v.as_str()) {
-    counter.count(s)
-  } else {
-    0
-  }
+  count_text_like(item.get("value"))
 }
 
 fn summarize(records: &[UsageRecord]) -> String {
