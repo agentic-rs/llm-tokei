@@ -533,11 +533,12 @@ fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
   match cmd {
     Cmd::Dump {
       copilot,
+      copilot_cli,
       codex,
       files,
       out,
       ..
-    } => run_dump(*copilot, *codex, files, out.as_deref(), args),
+    } => run_dump(*copilot, *copilot_cli, *codex, files, out.as_deref(), args),
     Cmd::Update { .. } => run_update(),
     Cmd::Config { cmd } => run_config(cmd, args),
   }
@@ -579,14 +580,24 @@ fn run_config(cmd: &ConfigCmd, args: &Args) -> Result<()> {
 enum DumpSource {
   Codex,
   Copilot,
+  CopilotCli,
 }
 
-fn run_dump(copilot: bool, codex: bool, files: &[PathBuf], out: Option<&Path>, args: &Args) -> Result<()> {
-  let source = match (copilot, codex) {
-    (true, false) => DumpSource::Copilot,
-    (false, true) => DumpSource::Codex,
-    (false, false) => anyhow::bail!("dump: select a source with `--copilot` or `--codex`"),
-    (true, true) => anyhow::bail!("dump: select only one source: `--copilot` or `--codex`"),
+fn run_dump(
+  copilot: bool,
+  copilot_cli: bool,
+  codex: bool,
+  files: &[PathBuf],
+  out: Option<&Path>,
+  args: &Args,
+) -> Result<()> {
+  let selected = [copilot, copilot_cli, codex].into_iter().filter(|v| *v).count();
+  let source = match selected {
+    0 => anyhow::bail!("dump: select a source with `--copilot`, `--copilot-cli`, or `--codex`"),
+    1 if copilot => DumpSource::Copilot,
+    1 if copilot_cli => DumpSource::CopilotCli,
+    1 => DumpSource::Codex,
+    _ => anyhow::bail!("dump: select only one source: `--copilot`, `--copilot-cli`, or `--codex`"),
   };
 
   if let Some(out) = out {
@@ -669,6 +680,13 @@ fn discover_dump_files(source: DumpSource, args: &Args) -> Vec<PathBuf> {
       let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
       CopilotSource::new(roots).discover_files()
     }
+    DumpSource::CopilotCli => {
+      let roots = args
+        .copilot_cli_dir
+        .clone()
+        .unwrap_or_else(CopilotCliSource::default_paths);
+      CopilotCliSource::new(roots).discover_files()
+    }
   }
 }
 
@@ -676,6 +694,7 @@ fn dump_session_messages(source: DumpSource, path: &Path) -> Result<Option<crate
   match source {
     DumpSource::Codex => CodexSource::dump_session_messages(path),
     DumpSource::Copilot => CopilotSource::dump_session_messages(path),
+    DumpSource::CopilotCli => CopilotCliSource::dump_session_messages(path),
   }
 }
 

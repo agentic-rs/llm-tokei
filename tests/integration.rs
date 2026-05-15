@@ -1192,6 +1192,71 @@ fn copilot_dump_subcommand_writes_positional_file_to_stdout() {
 }
 
 #[test]
+fn copilot_cli_dump_subcommand_writes_positional_file_to_stdout() {
+  let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    .join("tests/fixtures/copilot_cli_dump/session-state/session1/events.jsonl");
+  let out = Command::new(bin())
+    .args(["dump", "--copilot-cli", fixture.to_str().unwrap()])
+    .output()
+    .expect("run llm-tokei dump");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+
+  let body = String::from_utf8_lossy(&out.stdout);
+  let lines: Vec<&str> = body.lines().collect();
+  assert_eq!(lines.len(), 6);
+  assert_eq!(lines[0], format!("# {}", fixture.display()));
+  let parsed: Vec<serde_json::Value> = lines[1..]
+    .iter()
+    .map(|line| serde_json::from_str(line).expect("valid jsonl"))
+    .collect();
+  assert_eq!(
+    parsed
+      .iter()
+      .map(|rec| rec["role"].as_str().unwrap())
+      .collect::<Vec<_>>(),
+    vec!["system", "user", "assistant", "tool_call", "tool_call_result"]
+  );
+  assert_eq!(parsed[0]["text"], "system prompt");
+  assert_eq!(parsed[1]["text"], "hello cli");
+  assert_eq!(parsed[2]["text"], "I'll read it");
+  assert_eq!(parsed[3]["text"], "read_file: {\"path\":\"Cargo.toml\"}");
+  assert_eq!(parsed[3]["call_id"], "tc1");
+  assert_eq!(parsed[4]["text"], "full result");
+  assert_eq!(parsed[4]["call_id"], "tc1");
+}
+
+#[test]
+fn copilot_cli_dump_subcommand_discovers_sessions_and_writes_out_dir() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_cli_dump/session-state");
+  let nanos = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap()
+    .as_nanos();
+  let out_dir = std::env::temp_dir().join(format!("llm-tokei-copilot-cli-dump-{nanos}"));
+  let _ = std::fs::remove_dir_all(&out_dir);
+
+  let status = Command::new(bin())
+    .args([
+      "--copilot-cli-dir",
+      fixtures.to_str().unwrap(),
+      "dump",
+      "--copilot-cli",
+      "--out",
+      out_dir.to_str().unwrap(),
+    ])
+    .status()
+    .expect("run llm-tokei dump");
+  assert!(status.success());
+
+  let dest = out_dir.join("cli-dump-session.jsonl");
+  let body = std::fs::read_to_string(&dest).expect("dump file written");
+  assert_eq!(body.lines().count(), 5);
+  assert!(body.contains("hello cli"));
+
+  let _ = std::fs::remove_dir_all(&out_dir);
+}
+
+#[test]
 fn copilot_dump_subcommand_requires_copilot_flag() {
   let nanos = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)

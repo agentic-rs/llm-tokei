@@ -1,0 +1,7 @@
+{"type":"session.start","timestamp":"2024-03-09T16:00:00Z","data":{"sessionId":"cli-dump-session"}}
+{"type":"system.message","timestamp":"2024-03-09T16:00:01Z","data":{"content":"system prompt","role":"system"}}
+{"type":"user.message","timestamp":"2024-03-09T16:00:02Z","data":{"content":"hello cli","transformedContent":"hello cli","interactionId":"i1","parentAgentTaskId":"p1","attachments":[],"supportedNativeDocumentMimeTypes":[]}}
+{"type":"assistant.message","timestamp":"2024-03-09T16:00:03Z","data":{"content":"I'll read it","interactionId":"i1","messageId":"m1","model":"gpt-5-mini","outputTokens":3,"toolRequests":[{"type":"function","name":"read_file","toolCallId":"tc1","arguments":{"path":"Cargo.toml"}}],"turnId":"t1"}}
+{"type":"tool.execution_start","timestamp":"2024-03-09T16:00:04Z","data":{"turnId":"t1","toolName":"read_file","toolCallId":"tc1","arguments":{"path":"Cargo.toml"}}}
+{"type":"tool.execution_complete","timestamp":"2024-03-09T16:00:05Z","data":{"turnId":"t1","interactionId":"i1","model":"gpt-5-mini","toolCallId":"tc1","success":true,"result":{"content":"short result","detailedContent":"full result"},"toolTelemetry":{}}}
+{"type":"assistant.turn_end","timestamp":"2024-03-09T16:00:06Z","data":{"turnId":"t1"}}

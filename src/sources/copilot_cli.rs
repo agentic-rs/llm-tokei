@@ -2,10 +2,12 @@ use crate::model::{Source, UsageRecord};
 use crate::sources::copilot_shutdown::{
   normalize_copilot_model, records_from_shutdown_model_metrics, timestamp_from_event, ShutdownRecordArgs,
 };
+use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
 use crate::text_count::{count_value, Bytes, Chars};
 use anyhow::Result;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -58,6 +60,10 @@ impl CopilotCliSource {
 
   pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     parse_session(path)
+  }
+
+  pub fn dump_session_messages(path: &Path) -> Result<Option<DumpedSession>> {
+    dump_session(path)
   }
 }
 
@@ -143,6 +149,146 @@ fn read_jsonl_events(path: &Path) -> Result<Vec<Value>> {
     }
   }
   Ok(events)
+}
+
+fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
+  let events = read_jsonl_events(path)?;
+  if events.is_empty() {
+    return Ok(None);
+  }
+
+  let session_id = events
+    .iter()
+    .find_map(|event| {
+      if event.get("type").and_then(|v| v.as_str()) == Some("session.start") {
+        event.pointer("/data/sessionId").and_then(|v| v.as_str())
+      } else {
+        None
+      }
+    })
+    .map(str::to_string)
+    .unwrap_or_else(|| fallback_session_id(path));
+
+  let mut records = Vec::new();
+  let mut emitted_tool_call_ids: HashSet<String> = HashSet::new();
+  for event in &events {
+    match event.get("type").and_then(|v| v.as_str()) {
+      Some("system.message") => push_message_record(&mut records, "system", event.pointer("/data/content"), None),
+      Some("user.message") => push_message_record(&mut records, "user", event.pointer("/data/content"), None),
+      Some("assistant.message") => {
+        push_message_record(&mut records, "assistant", event.pointer("/data/content"), None);
+        if let Some(tool_requests) = event.pointer("/data/toolRequests").and_then(|v| v.as_array()) {
+          for request in tool_requests {
+            if let Some(id) = push_tool_request_record(&mut records, request) {
+              emitted_tool_call_ids.insert(id);
+            }
+          }
+        }
+      }
+      Some("tool.execution_start") => {
+        let data = event.get("data").unwrap_or(&Value::Null);
+        let tool_call_id = data.get("toolCallId").and_then(|v| v.as_str());
+        if tool_call_id.is_some_and(|id| emitted_tool_call_ids.contains(id)) {
+          continue;
+        }
+        push_tool_call_record(
+          &mut records,
+          data.get("toolName").and_then(|v| v.as_str()).unwrap_or("tool"),
+          data.get("arguments").unwrap_or(&Value::Null),
+          tool_call_id,
+        );
+      }
+      Some("tool.execution_complete") => {
+        push_tool_result_record(&mut records, event.get("data").unwrap_or(&Value::Null))
+      }
+      _ => {}
+    }
+  }
+
+  if records.is_empty() {
+    Ok(None)
+  } else {
+    Ok(Some(DumpedSession { session_id, records }))
+  }
+}
+
+fn push_message_record(
+  records: &mut Vec<DumpRecord>,
+  role: &'static str,
+  text: Option<&Value>,
+  call_id: Option<String>,
+) {
+  let Some(text) = text.and_then(|v| v.as_str()).filter(|s| !s.is_empty()) else {
+    return;
+  };
+  records.push(DumpRecord {
+    role,
+    text: text.to_string(),
+    encrypted_text: None,
+    display: None,
+    call_id,
+  });
+}
+
+fn push_tool_request_record(records: &mut Vec<DumpRecord>, request: &Value) -> Option<String> {
+  push_tool_call_record(
+    records,
+    request.get("name").and_then(|v| v.as_str()).unwrap_or("tool"),
+    request.get("arguments").unwrap_or(&Value::Null),
+    request.get("toolCallId").and_then(|v| v.as_str()),
+  )
+}
+
+fn push_tool_call_record(
+  records: &mut Vec<DumpRecord>,
+  name: &str,
+  args: &Value,
+  call_id: Option<&str>,
+) -> Option<String> {
+  let args = dump_json_value(args);
+  let text = if args.is_empty() {
+    name.to_string()
+  } else {
+    format!("{name}: {args}")
+  };
+  if text.is_empty() {
+    return None;
+  }
+  records.push(DumpRecord {
+    role: "tool_call",
+    text,
+    encrypted_text: None,
+    display: None,
+    call_id: call_id.map(str::to_string),
+  });
+  call_id.map(str::to_string)
+}
+
+fn push_tool_result_record(records: &mut Vec<DumpRecord>, data: &Value) {
+  let text = data
+    .pointer("/result/detailedContent")
+    .and_then(|v| v.as_str())
+    .or_else(|| data.pointer("/result/content").and_then(|v| v.as_str()))
+    .or_else(|| data.pointer("/error/message").and_then(|v| v.as_str()))
+    .unwrap_or("");
+  if text.is_empty() {
+    return;
+  }
+  records.push(DumpRecord {
+    role: "tool_call_result",
+    text: text.to_string(),
+    encrypted_text: None,
+    display: None,
+    call_id: data.get("toolCallId").and_then(|v| v.as_str()).map(str::to_string),
+  });
+}
+
+fn dump_json_value(value: &Value) -> String {
+  match value {
+    Value::Null => String::new(),
+    Value::String(s) => s.clone(),
+    _ => serde_json::to_string(value).unwrap_or_default(),
+  }
 }
 
 fn estimate_records_from_events(path: &Path, session_id: Option<String>, events: &[Value]) -> Vec<UsageRecord> {

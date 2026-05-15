@@ -260,8 +260,11 @@ pub enum Cmd {
     /// Dump GitHub Copilot Chat sessions.
     #[arg(long, help_heading = "Source Selection", display_order = 10)]
     copilot: bool,
+    /// Dump GitHub Copilot CLI sessions.
+    #[arg(long = "copilot-cli", help_heading = "Source Selection", display_order = 11)]
+    copilot_cli: bool,
     /// Dump OpenAI Codex CLI sessions.
-    #[arg(long, help_heading = "Source Selection", display_order = 11)]
+    #[arg(long, help_heading = "Source Selection", display_order = 12)]
     codex: bool,
     /// Input session JSONL files. If omitted, sessions are discovered from
     /// the selected source's configured/default session roots.
