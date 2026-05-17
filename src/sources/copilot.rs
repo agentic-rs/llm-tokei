@@ -597,7 +597,7 @@ impl SessionVisitor for RecordBuilder<'_> {
       agent: req.pointer("/agent/id").and_then(|v| v.as_str()).map(str::to_string),
       is_compaction,
       rounds: 1,
-      turns: 1 + extra_turns,
+      calls: 1 + extra_turns,
       cost_embedded: None,
     });
   }

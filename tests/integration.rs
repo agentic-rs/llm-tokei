@@ -79,7 +79,7 @@ fn codex_fixture_parses_last_total() {
   assert_eq!(row["cache_read"], 200);
   // total = input + output + reasoning.
   assert_eq!(row["total"], 770);
-  assert_eq!(row["turns"], 4);
+  assert_eq!(row["calls"], 4);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["model"], "gpt-5");
@@ -121,7 +121,7 @@ fn codex_fixture_reports_response_item_bytes() {
   assert_eq!(row["output"], 34);
   assert_eq!(row["reasoning"], 50);
   assert_eq!(row["total"], 770);
-  assert_eq!(row["turns"], 4);
+  assert_eq!(row["calls"], 4);
   assert_eq!(row["rounds"], 2);
 }
 
@@ -172,7 +172,7 @@ fn codex_bytes_mode_rebuilds_stale_zero_byte_cache() {
             agent         TEXT,
             is_compaction INTEGER NOT NULL,
             rounds        INTEGER NOT NULL,
-            turns         INTEGER NOT NULL,
+            calls         INTEGER NOT NULL,
             cost_embedded REAL
         );
         "#,
@@ -225,7 +225,7 @@ fn claude_fixture_parses_usage() {
   let arr = v.as_array().unwrap();
   assert_eq!(arr.len(), 1);
   let row = &arr[0];
-  // Two assistant turns:
+  // Two assistant calls:
   //   #1: input=50, output=40, cache_read=100, cache_write=30
   //   #2: input=10, output=20, cache_read=150, cache_write=5+2=7
   // displayed input = (50+100+30) + (10+150+7) = 347
@@ -239,7 +239,7 @@ fn claude_fixture_parses_usage() {
   assert_eq!(row["cache_read"], 250);
   assert_eq!(row["cache_write"], 37);
   assert_eq!(row["total"], 407);
-  assert_eq!(row["turns"], 2);
+  assert_eq!(row["calls"], 2);
   assert_eq!(row["rounds"], 1);
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["model"], "claude-sonnet-4.5");
@@ -281,7 +281,7 @@ fn copilot_fixture_estimates_and_thinking() {
   assert_eq!(row["reasoning"], 17);
   assert_eq!(row["cache_read"], 0);
   assert_eq!(row["cache_write"], 0);
-  assert_eq!(row["turns"], 3);
+  assert_eq!(row["calls"], 3);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["source"], "copilot");
@@ -318,7 +318,7 @@ fn copilot_transcript_shutdown_dedupes_chat_session() {
   assert_eq!(row["cache_read"], 3);
   assert_eq!(row["cache_write"], 4);
   assert_eq!(row["total"], 37);
-  assert_eq!(row["turns"], 2);
+  assert_eq!(row["calls"], 2);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["source"], "copilot");
@@ -353,7 +353,7 @@ fn copilot_cli_fixture_parses_fallback_and_compaction() {
   assert_eq!(row["cache_read"], 5);
   assert_eq!(row["cache_write"], 2);
   assert_eq!(row["total"], 43);
-  assert_eq!(row["turns"], 2);
+  assert_eq!(row["calls"], 2);
   assert_eq!(row["rounds"], 1);
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["source"], "copilot-cli");
@@ -388,7 +388,7 @@ fn copilot_cli_shutdown_merges_estimated_bytes() {
   assert_eq!(row["cache_read"], 10);
   assert_eq!(row["cache_write"], 3);
   assert_eq!(row["total"], 98);
-  assert_eq!(row["turns"], 2);
+  assert_eq!(row["calls"], 2);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["source"], "copilot-cli");

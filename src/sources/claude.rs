@@ -223,8 +223,8 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   });
   let cwd = cwd.or_else(|| decode_dir_name(path));
 
-  // Distribute `rounds` across turns: assign rounds=1 to the *first* turn of
-  // each round, 0 to subsequent turns in the same round, so the sum equals
+  // Distribute `rounds` across calls: assign rounds=1 to the *first* call of
+  // each round, 0 to subsequent calls in the same round, so the sum equals
   // total user rounds.
   let mut last_round_seen: u64 = 0;
   for turn in pending.into_iter() {
@@ -262,7 +262,7 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       agent: None,
       is_compaction: false,
       rounds: rounds_this,
-      turns: 1,
+      calls: 1,
       cost_embedded: None,
     });
   }

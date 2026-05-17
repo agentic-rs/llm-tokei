@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-const CACHE_SCHEMA_VERSION: i64 = 4;
+const CACHE_SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = "\
 CREATE TABLE IF NOT EXISTS sessions (
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS records (
     agent         TEXT,
     is_compaction INTEGER NOT NULL,
     rounds        INTEGER NOT NULL,
-    turns         INTEGER NOT NULL,
+    calls         INTEGER NOT NULL,
     cost_embedded REAL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_source_file ON sessions(source, file_path);
@@ -85,7 +85,7 @@ const EXPECTED_RECORDS_COLUMNS: &[&str] = &[
   "agent",
   "is_compaction",
   "rounds",
-  "turns",
+  "calls",
   "cost_embedded",
 ];
 
@@ -180,7 +180,7 @@ impl CacheDb {
                r.provider, r.model, r.ts, r.input, r.output, r.input_bytes, r.output_bytes, \
                r.input_estimated, r.output_estimated, r.input_bytes_estimated, r.output_bytes_estimated, \
                r.reasoning, r.cache_read, r.cache_write, r.mode, r.agent, r.is_compaction, r.rounds, \
-               r.turns, r.cost_embedded \
+               r.calls, r.cost_embedded \
        FROM records r \
        INNER JOIN sessions s ON s.id = r.session_rowid \
        WHERE s.pruned = 0 AND s.source = ?1 AND s.file_path = ?2",
@@ -238,7 +238,7 @@ impl CacheDb {
       let mut insert_record = self.conn.prepare(
         "INSERT INTO records (session_rowid, provider, model, ts, input, output, input_bytes, output_bytes, \
                              input_estimated, output_estimated, input_bytes_estimated, output_bytes_estimated, \
-                             reasoning, cache_read, cache_write, mode, agent, is_compaction, rounds, turns, \
+                             reasoning, cache_read, cache_write, mode, agent, is_compaction, rounds, calls, \
                              cost_embedded) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
       )?;
@@ -263,7 +263,7 @@ impl CacheDb {
           record.agent,
           if record.is_compaction { 1 } else { 0 },
           to_sql_i64(record.rounds),
-          to_sql_i64(record.turns),
+          to_sql_i64(record.calls),
           record.cost_embedded,
         ])?;
       }
@@ -383,7 +383,7 @@ fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> Usa
     agent: row.get(20).unwrap_or(None),
     is_compaction: row.get::<_, i64>(21).unwrap_or(0) != 0,
     rounds: row.get::<_, i64>(22).ok().map(from_sql_i64).unwrap_or(0),
-    turns: row.get::<_, i64>(23).ok().map(from_sql_i64).unwrap_or(0),
+    calls: row.get::<_, i64>(23).ok().map(from_sql_i64).unwrap_or(0),
     cost_embedded: row.get(24).unwrap_or(None),
   }
 }

@@ -192,7 +192,7 @@ impl UsageSource for OpenCodeSource {
         agent: None,
         is_compaction: false,
         rounds,
-        turns: 1,
+        calls: 1,
         cost_embedded: parsed.cost.filter(|c| *c > 0.0),
       });
     }

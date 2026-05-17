@@ -495,19 +495,19 @@ fn file_summary(records: &[UsageRecord]) -> String {
   let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
   let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
   let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();
-  let turns: u64 = records.iter().map(|r| r.turns).sum();
+  let calls: u64 = records.iter().map(|r| r.calls).sum();
   let rounds: u64 = records.iter().map(|r| r.rounds).sum();
   let input_est = records.iter().any(|r| r.input_estimated);
   let output_est = records.iter().any(|r| r.output_estimated);
   format!(
-    "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}, turns={}, rounds={}",
+    "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}, calls={}, rounds={}",
     records.len(),
     fmt_est(input, input_est),
     fmt_est(output, output_est),
     reasoning,
     cache_read,
     cache_write,
-    turns,
+    calls,
     rounds
   )
 }

@@ -55,7 +55,7 @@ pub struct Aggregate {
   pub cache_read: u64,
   pub cache_write: u64,
   pub total: u64,
-  pub turns: u64,
+  pub calls: u64,
   pub rounds: u64,
   pub sessions: u64,
   pub cost_embedded: f64,
@@ -166,7 +166,7 @@ pub fn aggregate(
       cache_read: 0,
       cache_write: 0,
       total: 0,
-      turns: 0,
+      calls: 0,
       rounds: 0,
       sessions: 0,
       cost_embedded: 0.0,
@@ -190,7 +190,7 @@ pub fn aggregate(
     agg.cache_read += r.cache_read;
     agg.cache_write += r.cache_write;
     agg.total += r.total();
-    agg.turns += r.turns;
+    agg.calls += r.calls;
     agg.rounds += r.rounds;
     if let Some(c) = r.cost_embedded {
       agg.cost_embedded += c;
@@ -230,7 +230,7 @@ pub enum SortKey {
   Cost,
   CostBase,
   Date,
-  Turns,
+  Calls,
 }
 
 impl SortKey {
@@ -242,7 +242,7 @@ impl SortKey {
       "cost" => SortKey::Cost,
       "cost-base" | "cost_base" | "base" => SortKey::CostBase,
       "date" | "time" => SortKey::Date,
-      "turns" => SortKey::Turns,
+      "calls" => SortKey::Calls,
       _ => return None,
     })
   }
@@ -268,7 +268,7 @@ pub fn sort_aggs(aggs: &mut [Aggregate], key: SortKey, descending: bool, use_byt
       }
       SortKey::Cost | SortKey::CostBase => a.cost.partial_cmp(&b.cost).unwrap_or(std::cmp::Ordering::Equal),
       SortKey::Date => a.last_ts.cmp(&b.last_ts),
-      SortKey::Turns => a.turns.cmp(&b.turns),
+      SortKey::Calls => a.calls.cmp(&b.calls),
     };
     if descending {
       ord.reverse()

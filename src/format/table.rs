@@ -45,7 +45,7 @@ fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) ->
     .map(|d| ColumnLayout::required_dim(d.label().to_string()))
     .collect();
   let avg_suffix = match opts.avg {
-    Some(AvgBy::Turn) => "/t",
+    Some(AvgBy::Call) => "/c",
     Some(AvgBy::Round) => "/r",
     Some(AvgBy::Session) => "/s",
     None => "",
@@ -187,7 +187,7 @@ enum StatColumnId {
   CacheRead,
   CacheWrite,
   Total,
-  Turns,
+  Calls,
   Rounds,
   Sessions,
   CostBase,
@@ -208,7 +208,7 @@ const STAT_COLUMNS: &[StatColumnSpec] = &[
   stat(StatColumnId::CacheRead, "cache_r", 60, false, false),
   stat(StatColumnId::CacheWrite, "cache_w", 60, false, false),
   stat(StatColumnId::Total, "total", u8::MAX, true, false),
-  stat(StatColumnId::Turns, "turns", 80, false, false),
+  stat(StatColumnId::Calls, "calls", 80, false, false),
   stat(StatColumnId::Rounds, "rounds", 50, false, false),
   stat(StatColumnId::Sessions, "sessions", 50, false, false),
   stat(StatColumnId::CostBase, "cost($)", 70, false, true),
@@ -237,7 +237,7 @@ impl StatColumnSpec {
       StatColumnId::Reasoning | StatColumnId::CacheRead | StatColumnId::CacheWrite | StatColumnId::Total => {
         format!("{}{avg_suffix}", self.label)
       }
-      StatColumnId::Turns | StatColumnId::Rounds | StatColumnId::Sessions | StatColumnId::CostBase => {
+      StatColumnId::Calls | StatColumnId::Rounds | StatColumnId::Sessions | StatColumnId::CostBase => {
         self.label.to_string()
       }
     }
@@ -261,7 +261,7 @@ impl StatColumnSpec {
       StatColumnId::CacheRead => fmt_usage_avg(a.cache_read, den, opts.human),
       StatColumnId::CacheWrite => fmt_usage_avg(a.cache_write, den, opts.human),
       StatColumnId::Total => fmt_usage_avg(a.total, den, opts.human),
-      StatColumnId::Turns => fmt_int(a.turns),
+      StatColumnId::Calls => fmt_int(a.calls),
       StatColumnId::Rounds => fmt_int(a.rounds),
       StatColumnId::Sessions => fmt_int(a.sessions),
       StatColumnId::CostBase => fmt_cost_avg(a.cost, den),
@@ -292,7 +292,7 @@ impl StatColumnSpec {
       StatColumnId::CacheRead => fmt_usage_avg(totals.cache_read, den, opts.human),
       StatColumnId::CacheWrite => fmt_usage_avg(totals.cache_write, den, opts.human),
       StatColumnId::Total => fmt_usage_avg(totals.total, den, opts.human),
-      StatColumnId::Turns => fmt_int(totals.turns),
+      StatColumnId::Calls => fmt_int(totals.calls),
       StatColumnId::Rounds => fmt_int(totals.rounds),
       StatColumnId::Sessions => fmt_int(totals.sessions),
       StatColumnId::CostBase => fmt_cost_avg(totals.cost, den),
@@ -346,7 +346,7 @@ impl StatColumnId {
       StatColumnId::CacheRead => 3,
       StatColumnId::CacheWrite => 4,
       StatColumnId::Total => 5,
-      StatColumnId::Turns => 6,
+      StatColumnId::Calls => 6,
       StatColumnId::Rounds => 7,
       StatColumnId::Sessions => 8,
       StatColumnId::CostBase => 9,
@@ -392,7 +392,7 @@ struct TableTotals {
   cache_read: u64,
   cache_write: u64,
   total: u64,
-  turns: u64,
+  calls: u64,
   rounds: u64,
   sessions: u64,
   cost: f64,
@@ -408,7 +408,7 @@ impl TableTotals {
     self.cache_read += a.cache_read;
     self.cache_write += a.cache_write;
     self.total += a.total;
-    self.turns += a.turns;
+    self.calls += a.calls;
     self.rounds += a.rounds;
     self.sessions += a.sessions;
     self.cost += a.cost;
@@ -437,7 +437,7 @@ impl TableTotals {
 
   fn avg_den(&self, avg: Option<AvgBy>) -> u64 {
     match avg {
-      Some(AvgBy::Turn) => self.turns,
+      Some(AvgBy::Call) => self.calls,
       Some(AvgBy::Round) => self.rounds,
       Some(AvgBy::Session) => self.sessions,
       None => 1,
@@ -740,7 +740,7 @@ fn short_cost_per_header(key: &str) -> String {
 
 fn avg_den(a: &Aggregate, avg: Option<AvgBy>) -> u64 {
   match avg {
-    Some(AvgBy::Turn) => a.turns,
+    Some(AvgBy::Call) => a.calls,
     Some(AvgBy::Round) => a.rounds,
     Some(AvgBy::Session) => a.sessions,
     None => 1,
@@ -826,7 +826,7 @@ mod tests {
       cache_read: 1_500,
       cache_write: 1_000_000,
       total: 3_501_233,
-      turns: 1_234,
+      calls: 1_234,
       rounds: 2_345,
       sessions: 3_456,
       cost_embedded: 0.0,
@@ -900,12 +900,12 @@ mod tests {
     agg.cache_read = 12_000;
     agg.cache_write = 1_234_567;
     agg.total = 2_500_000;
-    agg.turns = 10;
+    agg.calls = 10;
 
     let table = render_table(
       &[agg],
       &[GroupDim::Source],
-      &opts(false, Some(AvgBy::Turn), false, true, None),
+      &opts(false, Some(AvgBy::Call), false, true, None),
     );
 
     assert!(table.contains("~1.2K"), "table output: {table}");
@@ -956,7 +956,7 @@ mod tests {
       "cache_r",
       "cache_w",
       "total",
-      "turns",
+      "calls",
       "rounds",
       "sessions",
       "cost($)",

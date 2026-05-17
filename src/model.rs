@@ -54,8 +54,8 @@ pub struct UsageRecord {
   pub is_compaction: bool,
   /// Number of user-initiated rounds (prompts) in this record.
   pub rounds: u64,
-  /// Number of total API turns (including tool-call continuations) in this record.
-  pub turns: u64,
+  /// Number of total API calls (including tool-call continuations) in this record.
+  pub calls: u64,
   /// Cost reported by the source (e.g. OpenCode); USD.
   pub cost_embedded: Option<f64>,
 }

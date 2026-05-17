@@ -70,7 +70,7 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
         agent: None,
         is_compaction: false,
         rounds: metric.pointer("/requests/count").and_then(|v| v.as_u64()).unwrap_or(1),
-        turns: metric.pointer("/requests/count").and_then(|v| v.as_u64()).unwrap_or(1),
+        calls: metric.pointer("/requests/count").and_then(|v| v.as_u64()).unwrap_or(1),
         cost_embedded: None,
       }
     })

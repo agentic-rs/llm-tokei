@@ -66,7 +66,7 @@ impl CopilotCliSource {
     }
     let session_id = find_session_id(&events);
 
-    // Always walk events to estimate bytes and count rounds/turns
+    // Always walk events to estimate bytes and count rounds/calls
     // (even when shutdown metrics exist).
     let mut bytes_collector = BytesCollector::default();
     walk_events(&events, &mut bytes_collector);
@@ -97,7 +97,7 @@ impl CopilotCliSource {
           record.output_bytes = (total_output_bytes as f64 * share).round() as u64;
         }
         record.rounds = bytes_collector.rounds;
-        record.turns = bytes_collector.turns;
+        record.calls = bytes_collector.calls;
       }
       return Ok(Some(shutdown));
     }
@@ -249,7 +249,7 @@ struct BytesCollector {
   output_bytes: u64,
   pending_input_bytes: u64,
   rounds: u64,
-  turns: u64,
+  calls: u64,
 }
 
 impl EventsVisitor for BytesCollector {
@@ -272,11 +272,11 @@ impl EventsVisitor for BytesCollector {
     self.input_bytes += self.pending_input_bytes;
     self.output_bytes += rough_bytes(content) + rough_bytes(tool_requests);
     self.pending_input_bytes = rough_bytes(content) + rough_bytes(tool_requests);
-    self.turns += 1;
+    self.calls += 1;
   }
 
   fn compaction_complete(&mut self, _event: &Value) {
-    self.turns += 1;
+    self.calls += 1;
   }
 }
 
@@ -376,7 +376,7 @@ impl EventsVisitor for RecordBuilder<'_> {
       agent: None,
       is_compaction: false,
       rounds: if self.pending_user > 0 { 1 } else { 0 },
-      turns: 1,
+      calls: 1,
       cost_embedded: None,
     });
     self.pending_input = rough_tokens(content) + rough_tokens(tool_requests);
@@ -419,7 +419,7 @@ impl EventsVisitor for RecordBuilder<'_> {
       agent: Some("compaction".to_string()),
       is_compaction: true,
       rounds: 0,
-      turns: 1,
+      calls: 1,
       cost_embedded: None,
     });
   }

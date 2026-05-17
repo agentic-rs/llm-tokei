@@ -49,7 +49,7 @@ impl DateBucket {
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum AvgBy {
-  Turn,
+  Call,
   Round,
   Session,
 }
@@ -62,7 +62,7 @@ pub struct Args {
   #[arg(long, value_enum, default_value_t = default_format(), help_heading = "Output")]
   pub format: Format,
 
-  /// Sort key: total|input|output|cost|date|turns.
+  /// Sort key: total|input|output|cost|date|calls.
   #[arg(long, default_value_t = default_sort(), help_heading = "Output")]
   pub sort: String,
 

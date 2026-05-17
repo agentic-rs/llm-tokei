@@ -240,7 +240,7 @@ struct RecordBuilder<'a> {
   prev_total: Option<TokenUsageStats>,
   pending_bytes: BytesSink,
   pending_rounds: u64,
-  turns: Vec<Turn>,
+  calls: Vec<Turn>,
 }
 
 struct Turn {
@@ -262,23 +262,23 @@ impl<'a> RecordBuilder<'a> {
       prev_total: None,
       pending_bytes: BytesSink::default(),
       pending_rounds: 0,
-      turns: Vec::new(),
+      calls: Vec::new(),
     }
   }
 
   fn into_records(mut self) -> Option<Vec<UsageRecord>> {
-    if self.turns.is_empty() {
+    if self.calls.is_empty() {
       return None;
     }
     // If no turn_context events were observed, attribute one round to the
     // first turn so totals match historical behavior.
-    if self.turns.iter().all(|t| t.rounds == 0) {
-      self.turns[0].rounds = 1;
+    if self.calls.iter().all(|t| t.rounds == 0) {
+      self.calls[0].rounds = 1;
     }
     let sid = self.meta.resolved_session_id(self.path);
     Some(
       self
-        .turns
+        .calls
         .into_iter()
         .map(|t| UsageRecord {
           source: Source::Codex,
@@ -304,7 +304,7 @@ impl<'a> RecordBuilder<'a> {
           agent: None,
           is_compaction: false,
           rounds: t.rounds,
-          turns: 1,
+          calls: 1,
           cost_embedded: None,
         })
         .collect(),
@@ -327,7 +327,7 @@ impl RolloutVisitor for RecordBuilder<'_> {
       return;
     };
     let ts = self.last_ts.or(self.session_ts).unwrap_or(ts);
-    self.turns.push(Turn {
+    self.calls.push(Turn {
       ts,
       model: self.meta.model.clone(),
       provider: self.meta.provider.clone(),
