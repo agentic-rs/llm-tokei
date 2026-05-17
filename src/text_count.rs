@@ -1,4 +1,7 @@
 use serde_json::Value;
+use std::borrow::Cow;
+
+use crate::sources::dump::DumpRecord;
 
 pub trait Counter {
   fn count(&self, s: &str) -> u64;
@@ -30,6 +33,163 @@ impl TextStats {
   pub fn add(&mut self, other: Self) {
     self.chars = self.chars.saturating_add(other.chars);
     self.bytes = self.bytes.saturating_add(other.bytes);
+  }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TokenSpan {
+  pub input: Option<u64>,
+  pub output: Option<u64>,
+  pub reasoning: Option<u64>,
+  pub cache_read: Option<u64>,
+  pub cache_write: Option<u64>,
+  pub role: Option<&'static str>,
+}
+
+impl TokenSpan {
+  pub fn usage(input: u64, output: u64, reasoning: u64, cache_read: u64, cache_write: u64) -> Self {
+    Self {
+      input: Some(input),
+      output: Some(output),
+      reasoning: Some(reasoning),
+      cache_read: Some(cache_read),
+      cache_write: Some(cache_write),
+      role: None,
+    }
+  }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TokenUsageStats {
+  pub input: u64,
+  pub output: u64,
+  pub reasoning: u64,
+  pub cache_read: u64,
+  pub cache_write: u64,
+}
+
+impl TokenUsageStats {
+  pub fn add_span(&mut self, span: TokenSpan) {
+    let _ = span.role;
+    self.input = self.input.saturating_add(span.input.unwrap_or(0));
+    self.output = self.output.saturating_add(span.output.unwrap_or(0));
+    self.reasoning = self.reasoning.saturating_add(span.reasoning.unwrap_or(0));
+    self.cache_read = self.cache_read.saturating_add(span.cache_read.unwrap_or(0));
+    self.cache_write = self.cache_write.saturating_add(span.cache_write.unwrap_or(0));
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct TextSpan<'a> {
+  pub role: &'static str,
+  pub text: Cow<'a, str>,
+  pub stats: Option<TextStats>,
+  pub encrypted_text: Option<Cow<'a, str>>,
+  pub display: Option<Cow<'a, str>>,
+  pub call_id: Option<Cow<'a, str>>,
+}
+
+impl<'a> TextSpan<'a> {
+  pub fn new(role: &'static str, text: impl Into<Cow<'a, str>>) -> Self {
+    Self {
+      role,
+      text: text.into(),
+      stats: None,
+      encrypted_text: None,
+      display: None,
+      call_id: None,
+    }
+  }
+
+  pub fn with_stats(mut self, stats: TextStats) -> Self {
+    self.stats = Some(stats);
+    self
+  }
+
+  pub fn with_call_id(mut self, call_id: Option<impl Into<Cow<'a, str>>>) -> Self {
+    self.call_id = call_id.map(Into::into);
+    self
+  }
+
+  #[allow(dead_code)]
+  pub fn with_display(mut self, display: Option<impl Into<Cow<'a, str>>>) -> Self {
+    self.display = display.map(Into::into);
+    self
+  }
+
+  pub fn encrypted(role: &'static str, encrypted_text: impl Into<Cow<'a, str>>, stats: TextStats) -> Self {
+    Self {
+      role,
+      text: Cow::Borrowed(""),
+      stats: Some(stats),
+      encrypted_text: Some(encrypted_text.into()),
+      display: None,
+      call_id: None,
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum Span<'a> {
+  Text(TextSpan<'a>),
+  Token(TokenSpan),
+}
+
+pub trait SpanSink {
+  fn text(&mut self, span: TextSpan<'_>);
+
+  fn token(&mut self, _span: TokenSpan) {}
+}
+
+#[derive(Default)]
+pub struct TokenStatsSink {
+  pub usage: TokenUsageStats,
+}
+
+impl SpanSink for TokenStatsSink {
+  fn text(&mut self, _span: TextSpan<'_>) {}
+
+  fn token(&mut self, span: TokenSpan) {
+    self.usage.add_span(span);
+  }
+}
+
+#[derive(Default)]
+pub struct SpanStatsSink {
+  pub stats: TextStats,
+}
+
+impl SpanSink for SpanStatsSink {
+  fn text(&mut self, span: TextSpan<'_>) {
+    self.stats.add(span.stats.unwrap_or_else(|| stats_for_str(&span.text)));
+  }
+}
+
+#[derive(Default)]
+pub struct DumpSink {
+  pub records: Vec<DumpRecord>,
+}
+
+impl SpanSink for DumpSink {
+  fn text(&mut self, span: TextSpan<'_>) {
+    if span.text.is_empty() && span.encrypted_text.as_deref().unwrap_or_default().is_empty() {
+      return;
+    }
+    self.records.push(DumpRecord {
+      role: span.role,
+      text: span.text.into_owned(),
+      encrypted_text: span.encrypted_text.map(Cow::into_owned),
+      display: span.display.map(Cow::into_owned),
+      call_id: span.call_id.map(Cow::into_owned),
+    });
+  }
+}
+
+pub fn stats_for_str(s: &str) -> TextStats {
+  TextStats {
+    chars: Chars.count(s),
+    bytes: Bytes.count(s),
   }
 }
 

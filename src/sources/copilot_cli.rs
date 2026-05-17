@@ -4,7 +4,7 @@ use crate::sources::copilot_shutdown::{
 };
 use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
-use crate::text_count::{all_strings, StatsSink};
+use crate::text_count::{all_strings, DumpSink, SpanSink, StatsSink, TextSpan, TokenSpan, TokenStatsSink};
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -221,13 +221,7 @@ fn push_message_record(
   let Some(text) = text.and_then(|v| v.as_str()).filter(|s| !s.is_empty()) else {
     return;
   };
-  records.push(DumpRecord {
-    role,
-    text: text.to_string(),
-    encrypted_text: None,
-    display: None,
-    call_id,
-  });
+  emit_dump_span(records, TextSpan::new(role, text.to_string()).with_call_id(call_id));
 }
 
 fn push_tool_request_record(records: &mut Vec<DumpRecord>, request: &Value) -> Option<String> {
@@ -254,13 +248,10 @@ fn push_tool_call_record(
   if text.is_empty() {
     return None;
   }
-  records.push(DumpRecord {
-    role: "tool_call",
-    text,
-    encrypted_text: None,
-    display: None,
-    call_id: call_id.map(str::to_string),
-  });
+  emit_dump_span(
+    records,
+    TextSpan::new("tool_call", text).with_call_id(call_id.map(str::to_string)),
+  );
   call_id.map(str::to_string)
 }
 
@@ -274,13 +265,17 @@ fn push_tool_result_record(records: &mut Vec<DumpRecord>, data: &Value) {
   if text.is_empty() {
     return;
   }
-  records.push(DumpRecord {
-    role: "tool_call_result",
-    text: text.to_string(),
-    encrypted_text: None,
-    display: None,
-    call_id: data.get("toolCallId").and_then(|v| v.as_str()).map(str::to_string),
-  });
+  emit_dump_span(
+    records,
+    TextSpan::new("tool_call_result", text.to_string())
+      .with_call_id(data.get("toolCallId").and_then(|v| v.as_str()).map(str::to_string)),
+  );
+}
+
+fn emit_dump_span(records: &mut Vec<DumpRecord>, span: TextSpan<'_>) {
+  let mut sink = DumpSink::default();
+  sink.text(span);
+  records.extend(sink.records);
 }
 
 fn dump_json_value(value: &Value) -> String {
@@ -360,6 +355,7 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
           .map(str::to_string)
           .unwrap_or_else(|| current_model.clone());
         let (provider, model) = normalize_copilot_model(model_raw);
+        let tokens = token_stats_from_compaction_usage(usage);
         records.push(UsageRecord {
           source: Source::CopilotCli,
           session_id: session_id.clone().unwrap_or_else(|| fallback_session_id(path)),
@@ -369,8 +365,8 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
           provider: Some(provider),
           model: Some(model),
           ts: timestamp_from_event(event),
-          input: token_alias(usage, "inputTokens", "input"),
-          output: token_alias(usage, "outputTokens", "output"),
+          input: tokens.input,
+          output: tokens.output,
           input_bytes: 0,
           output_bytes: 0,
           input_estimated: false,
@@ -378,8 +374,8 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
           input_bytes_estimated: true,
           output_bytes_estimated: true,
           reasoning: 0,
-          cache_read: token_alias(usage, "cacheReadTokens", "cachedInput"),
-          cache_write: usage.get("cacheWriteTokens").and_then(|v| v.as_u64()).unwrap_or(0),
+          cache_read: tokens.cache_read,
+          cache_write: tokens.cache_write,
           mode: Some("compaction".to_string()),
           agent: Some("compaction".to_string()),
           is_compaction: true,
@@ -392,6 +388,18 @@ fn estimate_records_from_events(path: &Path, session_id: Option<String>, events:
   }
 
   records
+}
+
+fn token_stats_from_compaction_usage(usage: &Value) -> crate::text_count::TokenUsageStats {
+  let mut sink = TokenStatsSink::default();
+  sink.token(TokenSpan::usage(
+    token_alias(usage, "inputTokens", "input"),
+    token_alias(usage, "outputTokens", "output"),
+    0,
+    token_alias(usage, "cacheReadTokens", "cachedInput"),
+    usage.get("cacheWriteTokens").and_then(|v| v.as_u64()).unwrap_or(0),
+  ));
+  sink.usage
 }
 
 fn rough_tokens(value: &Value) -> u64 {

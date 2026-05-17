@@ -1,4 +1,5 @@
 use crate::model::{Source, UsageRecord};
+use crate::text_count::{SpanSink, TokenSpan, TokenStatsSink};
 use chrono::{TimeZone, Utc};
 use serde_json::Value;
 use std::path::Path;
@@ -43,6 +44,7 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
     .iter()
     .map(|(model, metric)| {
       let usage = metric.get("usage").unwrap_or(&Value::Null);
+      let tokens = token_stats_from_shutdown_usage(usage);
       let (provider, normalized_model) = normalize_copilot_model(model.clone());
       UsageRecord {
         source: args.source,
@@ -53,17 +55,17 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
         provider: Some(provider),
         model: Some(normalized_model),
         ts,
-        input: token(usage, "inputTokens"),
-        output: token(usage, "outputTokens"),
+        input: tokens.input,
+        output: tokens.output,
         input_bytes: 0,
         output_bytes: 0,
         input_estimated: false,
         output_estimated: false,
         input_bytes_estimated: true,
         output_bytes_estimated: true,
-        reasoning: 0,
-        cache_read: token(usage, "cacheReadTokens"),
-        cache_write: token(usage, "cacheWriteTokens"),
+        reasoning: tokens.reasoning,
+        cache_read: tokens.cache_read,
+        cache_write: tokens.cache_write,
         mode: Some("session.shutdown".to_string()),
         agent: None,
         is_compaction: false,
@@ -73,6 +75,18 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
       }
     })
     .collect()
+}
+
+fn token_stats_from_shutdown_usage(usage: &Value) -> crate::text_count::TokenUsageStats {
+  let mut sink = TokenStatsSink::default();
+  sink.token(TokenSpan::usage(
+    token(usage, "inputTokens"),
+    token(usage, "outputTokens"),
+    token(usage, "reasoningTokens"),
+    token(usage, "cacheReadTokens"),
+    token(usage, "cacheWriteTokens"),
+  ));
+  sink.usage
 }
 
 pub fn normalize_copilot_model(model: String) -> (String, String) {

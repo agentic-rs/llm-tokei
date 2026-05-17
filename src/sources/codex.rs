@@ -2,7 +2,8 @@ use crate::model::{Source, UsageRecord};
 use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
 use crate::text_count::{
-  all_strings, json_serialized_or_string, message_content, nested_fields, Bytes, Counter, StatsSink, StringSink,
+  all_strings, json_serialized_or_string, message_content, nested_fields, stats_for_str, DumpSink, SpanSink, StatsSink,
+  StringSink, TextSpan, TextStats, TokenSpan, TokenStatsSink,
 };
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
@@ -324,36 +325,51 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
 
   let records = turns
     .into_iter()
-    .map(|t| UsageRecord {
-      source: Source::Codex,
-      session_id: sid.clone(),
-      session_title: None,
-      project_cwd: cwd.clone(),
-      project_name: None,
-      provider: t.provider,
-      model: t.model,
-      ts: t.ts,
-      input: t.usage.input_tokens.saturating_sub(t.usage.cached_input_tokens),
-      output: t.usage.output_tokens,
-      input_bytes: t.bytes.input_bytes,
-      output_bytes: t.bytes.output_bytes,
-      input_estimated: false,
-      output_estimated: false,
-      input_bytes_estimated: true,
-      output_bytes_estimated: true,
-      reasoning: t.usage.reasoning_output_tokens,
-      cache_read: t.usage.cached_input_tokens,
-      cache_write: 0,
-      mode: None,
-      agent: None,
-      is_compaction: false,
-      rounds: t.rounds,
-      turns: 1,
-      cost_embedded: None,
+    .map(|t| {
+      let tokens = token_stats_from_usage(&t.usage);
+      UsageRecord {
+        source: Source::Codex,
+        session_id: sid.clone(),
+        session_title: None,
+        project_cwd: cwd.clone(),
+        project_name: None,
+        provider: t.provider,
+        model: t.model,
+        ts: t.ts,
+        input: tokens.input,
+        output: tokens.output,
+        input_bytes: t.bytes.input_bytes,
+        output_bytes: t.bytes.output_bytes,
+        input_estimated: false,
+        output_estimated: false,
+        input_bytes_estimated: true,
+        output_bytes_estimated: true,
+        reasoning: tokens.reasoning,
+        cache_read: tokens.cache_read,
+        cache_write: tokens.cache_write,
+        mode: None,
+        agent: None,
+        is_compaction: false,
+        rounds: t.rounds,
+        turns: 1,
+        cost_embedded: None,
+      }
     })
     .collect();
 
   Ok(Some(records))
+}
+
+fn token_stats_from_usage(usage: &TokenUsage) -> crate::text_count::TokenUsageStats {
+  let mut sink = TokenStatsSink::default();
+  sink.token(TokenSpan::usage(
+    usage.input_tokens.saturating_sub(usage.cached_input_tokens),
+    usage.output_tokens,
+    usage.reasoning_output_tokens,
+    usage.cached_input_tokens,
+    0,
+  ));
+  sink.usage
 }
 
 fn read_rollout_lines(path: &Path, mut visit: impl FnMut(RolloutLine)) -> Result<()> {
@@ -396,16 +412,9 @@ struct ResponseItemAnalysis {
 }
 
 fn analyze_response_item(payload: &serde_json::Value) -> ResponseItemAnalysis {
-  let mut usage = BytesUsage::default();
   let call_id = payload.get("call_id").and_then(|v| v.as_str()).map(str::to_string);
-  let dump = match payload.get("type").and_then(|v| v.as_str()) {
+  let spans = match payload.get("type").and_then(|v| v.as_str()) {
     Some("message") => {
-      let bytes = message_content::<StatsSink>(payload.get("content")).bytes;
-      match payload.get("role").and_then(|v| v.as_str()) {
-        Some("user" | "system" | "developer") => usage.add_input(bytes),
-        Some("assistant") => usage.add_output(bytes),
-        _ => {}
-      };
       let role = match payload.get("role").and_then(|v| v.as_str()) {
         Some("user") => "user",
         Some("assistant") => "assistant",
@@ -413,68 +422,88 @@ fn analyze_response_item(payload: &serde_json::Value) -> ResponseItemAnalysis {
         Some("system") => "system",
         _ => {
           return ResponseItemAnalysis {
-            bytes: usage,
+            bytes: BytesUsage::default(),
             dump: None,
           }
         }
       };
-      non_empty_dump_record(
-        role,
-        message_content::<StringSink>(payload.get("content")),
-        None,
-        call_id,
-      )
+      let text = message_content::<StringSink>(payload.get("content"));
+      let stats = message_content::<StatsSink>(payload.get("content"));
+      vec![TextSpan::new(role, text).with_stats(stats).with_call_id(call_id)]
     }
     Some("function_call") => {
-      let mut output_bytes: u64 = 0;
-      output_bytes = output_bytes.saturating_add(string_field_bytes(payload, "name"));
-      output_bytes = output_bytes.saturating_add(string_field_bytes(payload, "arguments"));
-      usage.add_output(output_bytes);
+      let mut stats = string_field_stats(payload, "name");
+      stats.add(string_field_stats(payload, "arguments"));
       let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("arguments"));
-      non_empty_dump_record("tool_call", text, None, call_id)
+      vec![TextSpan::new("tool_call", text).with_stats(stats).with_call_id(call_id)]
     }
     Some("function_call_output") => {
-      usage.add_input(all_strings::<StatsSink>(payload.get("output")).bytes);
+      let stats = all_strings::<StatsSink>(payload.get("output"));
       let text = nested_fields::<StringSink>(payload.get("output"));
-      non_empty_dump_record("tool_call_result", text, None, call_id)
+      vec![TextSpan::new("tool_call_result", text)
+        .with_stats(stats)
+        .with_call_id(call_id)]
     }
     Some("custom_tool_call") => {
-      let mut output_bytes: u64 = 0;
-      output_bytes = output_bytes.saturating_add(string_field_bytes(payload, "name"));
-      output_bytes = output_bytes.saturating_add(all_strings::<StatsSink>(payload.get("input")).bytes);
-      usage.add_output(output_bytes);
+      let mut stats = string_field_stats(payload, "name");
+      stats.add(all_strings::<StatsSink>(payload.get("input")));
       let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("input"));
-      non_empty_dump_record("tool_call", text, None, call_id)
+      vec![TextSpan::new("tool_call", text).with_stats(stats).with_call_id(call_id)]
     }
     Some("custom_tool_call_output") => {
-      usage.add_input(all_strings::<StatsSink>(payload.get("output")).bytes);
+      let stats = all_strings::<StatsSink>(payload.get("output"));
       let text = nested_fields::<StringSink>(payload.get("output"));
-      non_empty_dump_record("tool_call_result", text, None, call_id)
+      vec![TextSpan::new("tool_call_result", text)
+        .with_stats(stats)
+        .with_call_id(call_id)]
     }
     Some("reasoning") => {
-      usage.add_reasoning_output(reasoning_bytes(payload));
-      let encrypted_text = payload.get("encrypted_content").and_then(|v| v.as_str());
-      encrypted_text
-        .filter(|s| !s.is_empty())
-        .map(|encrypted_text| DumpRecord {
-          role: "reasoning",
-          text: String::new(),
-          encrypted_text: Some(encrypted_text.to_string()),
-          display: None,
-          call_id: None,
-        })
+      let Some(encrypted_text) = payload.get("encrypted_content").and_then(|v| v.as_str()) else {
+        return ResponseItemAnalysis {
+          bytes: BytesUsage::default(),
+          dump: None,
+        };
+      };
+      vec![TextSpan::encrypted(
+        "reasoning",
+        encrypted_text.to_string(),
+        stats_for_str(encrypted_text),
+      )]
     }
-    _ => None,
+    _ => Vec::new(),
   };
-  ResponseItemAnalysis { bytes: usage, dump }
+
+  let bytes = response_item_bytes_from_spans(&spans);
+  let mut dump_sink = DumpSink::default();
+  for span in spans {
+    dump_sink.text(span);
+  }
+  ResponseItemAnalysis {
+    bytes,
+    dump: dump_sink.records.into_iter().next(),
+  }
 }
 
-fn string_field_bytes(value: &serde_json::Value, field: &str) -> u64 {
+fn response_item_bytes_from_spans(spans: &[TextSpan<'_>]) -> BytesUsage {
+  let mut usage = BytesUsage::default();
+  for span in spans {
+    let stats = span.stats.unwrap_or_else(|| stats_for_str(&span.text));
+    match span.role {
+      "user" | "system" | "developer" | "tool_call_result" => usage.add_input(stats.bytes),
+      "assistant" | "tool_call" => usage.add_output(stats.bytes),
+      "reasoning" => usage.add_reasoning_output(stats.bytes),
+      _ => {}
+    }
+  }
+  usage
+}
+
+fn string_field_stats(value: &serde_json::Value, field: &str) -> TextStats {
   value
     .get(field)
     .and_then(|v| v.as_str())
-    .map(|s| Bytes.count(s))
-    .unwrap_or(0)
+    .map(stats_for_str)
+    .unwrap_or_default()
 }
 
 fn dump_rollout(path: &Path) -> Result<Option<DumpedSession>> {
@@ -521,25 +550,6 @@ fn dump_record_from_response_item(payload: &serde_json::Value) -> Option<DumpRec
   analyze_response_item(payload).dump
 }
 
-fn non_empty_dump_record(
-  role: &'static str,
-  text: String,
-  display: Option<String>,
-  call_id: Option<String>,
-) -> Option<DumpRecord> {
-  if text.is_empty() {
-    None
-  } else {
-    Some(DumpRecord {
-      role,
-      text,
-      encrypted_text: None,
-      display,
-      call_id,
-    })
-  }
-}
-
 fn dump_tool_call_text(name: Option<&str>, body: Option<&serde_json::Value>) -> String {
   let name = name.unwrap_or("tool");
   let args = dump_tool_body(body);
@@ -552,10 +562,6 @@ fn dump_tool_call_text(name: Option<&str>, body: Option<&serde_json::Value>) -> 
 
 fn dump_tool_body(value: Option<&serde_json::Value>) -> String {
   json_serialized_or_string::<StringSink>(value)
-}
-
-fn reasoning_bytes(payload: &serde_json::Value) -> u64 {
-  string_field_bytes(payload, "encrypted_content")
 }
 
 #[allow(dead_code)]

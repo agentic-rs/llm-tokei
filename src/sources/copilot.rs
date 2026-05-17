@@ -4,7 +4,9 @@ use crate::sources::copilot_shutdown::{
 };
 use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
-use crate::text_count::{rich_text, text_value, Bytes, Chars, Counter, StatsSink, StringSink, TextStats};
+use crate::text_count::{
+  rich_text, text_value, Bytes, Chars, Counter, SpanSink, SpanStatsSink, StatsSink, StringSink, TextSpan, TextStats,
+};
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
@@ -773,34 +775,8 @@ fn tool_invocation_display(item: &Value) -> String {
 }
 
 fn collect_response_item_text(item: &Value) -> String {
-  let kind = item.get("kind").and_then(|v| v.as_str());
-  if kind == Some("toolInvocationSerialized") {
-    return join_non_empty([
-      collect_text_like(item.get("invocationMessage")),
-      collect_text_like(item.get("pastTenseMessage")),
-    ]);
-  }
-  if kind == Some("progressTaskSerialized") {
-    return text_value::<StringSink>(item.get("content"));
-  }
-  if matches!(
-    kind,
-    Some("codeblockUri")
-      | Some("textEditGroup")
-      | Some("undoStop")
-      | Some("inlineReference")
-      | Some("reference")
-      | Some("mcpServersStarting")
-      | Some("promptFile")
-      | Some("agent")
-      | Some("thinking")
-  ) {
-    return String::new();
-  }
-  item
-    .get("value")
-    .and_then(|v| v.as_str())
-    .map(str::to_string)
+  response_item_span(item)
+    .map(|span| span.text.into_owned())
     .unwrap_or_default()
 }
 
@@ -819,19 +795,7 @@ fn join_non_empty(parts: impl IntoIterator<Item = String>) -> String {
 }
 
 fn collect_tool_result_text(result: &Value) -> String {
-  let mut buf = String::new();
-  if let Some(items) = result.get("content").and_then(|v| v.as_array()) {
-    for item in items {
-      let s = rich_text::<StringSink>(item.get("value").or(Some(item)));
-      if !s.is_empty() {
-        if !buf.is_empty() {
-          buf.push('\n');
-        }
-        buf.push_str(&s);
-      }
-    }
-  }
-  buf
+  join_non_empty(tool_result_spans(result).into_iter().map(|span| span.text.into_owned()))
 }
 
 #[derive(Debug, Clone)]
@@ -923,32 +887,41 @@ fn text_like_usage(node: Option<&Value>) -> TextStats {
 }
 
 fn tool_result_usage(result: &Value) -> TextStats {
-  let mut usage = TextStats::default();
-  if let Some(items) = result.get("content").and_then(|v| v.as_array()) {
-    for item in items {
-      usage.add(if let Some(value) = item.get("value") {
-        rich_text::<StatsSink>(Some(value))
-      } else {
-        rich_text::<StatsSink>(Some(item))
-      });
-    }
+  let mut sink = SpanStatsSink::default();
+  for span in tool_result_spans(result) {
+    sink.text(span);
   }
-  usage
+  sink.stats
 }
 
 fn response_item_usage(item: &Value) -> TextStats {
+  let Some(span) = response_item_span(item) else {
+    return TextStats::default();
+  };
+  let mut sink = SpanStatsSink::default();
+  sink.text(span);
+  sink.stats
+}
+
+fn response_item_span(item: &Value) -> Option<TextSpan<'static>> {
   // Plain `{value: "..."}` text segments and `{kind: "text", value: "..."}`
   // are LLM-generated text. For tool invocations, only count user-visible
   // invocation/past-tense text; skip tool payloads (tool output/input blobs).
   let kind = item.get("kind").and_then(|v| v.as_str());
   if kind == Some("toolInvocationSerialized") {
-    let mut usage = text_like_usage(item.pointer("/invocationMessage"));
-    usage.add(text_like_usage(item.pointer("/pastTenseMessage")));
-    return usage;
+    let text = join_non_empty([
+      collect_text_like(item.get("invocationMessage")),
+      collect_text_like(item.get("pastTenseMessage")),
+    ]);
+    let mut stats = text_like_usage(item.pointer("/invocationMessage"));
+    stats.add(text_like_usage(item.pointer("/pastTenseMessage")));
+    return Some(TextSpan::new("assistant", text).with_stats(stats));
   }
   if kind == Some("progressTaskSerialized") {
     // content can be {value: "..."} or {value: "...", uris: {...}}; recurse.
-    return text_like_usage(item.get("content"));
+    let text = text_value::<StringSink>(item.get("content"));
+    let stats = text_like_usage(item.get("content"));
+    return Some(TextSpan::new("assistant", text).with_stats(stats));
   }
   if matches!(
     kind,
@@ -963,9 +936,26 @@ fn response_item_usage(item: &Value) -> TextStats {
       | Some("thinking")
   ) {
     // Thinking is reasoning content, accounted for via toolCallRounds.thinking.tokens.
-    return TextStats::default();
+    return None;
   }
-  text_like_usage(item.get("value"))
+  item
+    .get("value")
+    .and_then(|v| v.as_str())
+    .map(|text| TextSpan::new("assistant", text.to_string()).with_stats(text_like_usage(item.get("value"))))
+}
+
+fn tool_result_spans(result: &Value) -> Vec<TextSpan<'static>> {
+  let mut spans = Vec::new();
+  if let Some(items) = result.get("content").and_then(|v| v.as_array()) {
+    for item in items {
+      let value = item.get("value").unwrap_or(item);
+      let text = rich_text::<StringSink>(Some(value));
+      if !text.is_empty() {
+        spans.push(TextSpan::new("tool_call_result", text).with_stats(rich_text::<StatsSink>(Some(value))));
+      }
+    }
+  }
+  spans
 }
 
 fn summarize(records: &[UsageRecord]) -> String {
