@@ -1,7 +1,8 @@
 # llm-tokei
 
 [![CI](https://github.com/clouds56-hello/llm-tokei/actions/workflows/ci.yml/badge.svg)](https://github.com/clouds56-hello/llm-tokei/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.1.3-blue)](https://github.com/clouds56-hello/llm-tokei/releases)
+[![crates.io](https://img.shields.io/crates/v/llm-tokei.svg)](https://crates.io/crates/llm-tokei)
+[![docs.rs](https://img.shields.io/docsrs/llm-tokei)](https://docs.rs/llm-tokei)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](Cargo.toml)
 [![Usage](https://img.shields.io/badge/docs-usage.md-informational)](docs/usage.md)
