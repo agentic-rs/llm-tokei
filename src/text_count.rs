@@ -62,6 +62,7 @@ pub struct TokenUsageStats {
   pub reasoning: u64,
   pub cache_read: u64,
   pub cache_write: u64,
+  pub total: Option<u64>,
 }
 
 impl TokenUsageStats {
@@ -71,6 +72,32 @@ impl TokenUsageStats {
     self.reasoning = self.reasoning.saturating_add(span.reasoning.unwrap_or(0));
     self.cache_read = self.cache_read.saturating_add(span.cache_read.unwrap_or(0));
     self.cache_write = self.cache_write.saturating_add(span.cache_write.unwrap_or(0));
+  }
+
+  pub fn add(&mut self, other: Self) {
+    self.prompt = self.prompt.saturating_add(other.prompt);
+    self.completion = self.completion.saturating_add(other.completion);
+    self.reasoning = self.reasoning.saturating_add(other.reasoning);
+    self.cache_read = self.cache_read.saturating_add(other.cache_read);
+    self.cache_write = self.cache_write.saturating_add(other.cache_write);
+    self.total = match (self.total, other.total) {
+      (Some(a), Some(b)) => Some(a.saturating_add(b)),
+      _ => None,
+    };
+  }
+
+  pub fn sub(&self, other: Self) -> Self {
+    Self {
+      prompt: self.prompt.saturating_sub(other.prompt),
+      completion: self.completion.saturating_sub(other.completion),
+      reasoning: self.reasoning.saturating_sub(other.reasoning),
+      cache_read: self.cache_read.saturating_sub(other.cache_read),
+      cache_write: self.cache_write.saturating_sub(other.cache_write),
+      total: match (self.total, other.total) {
+        (Some(a), Some(b)) => Some(a.saturating_sub(b)),
+        _ => None,
+      },
+    }
   }
 }
 
@@ -365,5 +392,130 @@ fn walk_json_serialized_or_string<S: TextSink>(value: Option<&Value>, sink: &mut
       }
     }
     None => {}
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn token_usage_stats_add_both_some() {
+    let mut a = TokenUsageStats {
+      prompt: 10,
+      completion: 20,
+      reasoning: 5,
+      cache_read: 3,
+      cache_write: 2,
+      total: Some(40),
+    };
+    let b = TokenUsageStats {
+      prompt: 5,
+      completion: 10,
+      reasoning: 3,
+      cache_read: 1,
+      cache_write: 1,
+      total: Some(20),
+    };
+    a.add(b);
+    assert_eq!(a.prompt, 15);
+    assert_eq!(a.completion, 30);
+    assert_eq!(a.reasoning, 8);
+    assert_eq!(a.cache_read, 4);
+    assert_eq!(a.cache_write, 3);
+    assert_eq!(a.total, Some(60));
+  }
+
+  #[test]
+  fn token_usage_stats_add_one_none() {
+    let mut a = TokenUsageStats {
+      prompt: 10,
+      completion: 20,
+      reasoning: 5,
+      cache_read: 3,
+      cache_write: 2,
+      total: Some(40),
+    };
+    a.add(TokenUsageStats::default());
+    assert_eq!(a.total, None);
+
+    let mut a = TokenUsageStats {
+      prompt: 10,
+      completion: 20,
+      reasoning: 5,
+      cache_read: 3,
+      cache_write: 2,
+      total: None,
+    };
+    a.add(TokenUsageStats {
+      prompt: 0,
+      completion: 0,
+      reasoning: 0,
+      cache_read: 0,
+      cache_write: 0,
+      total: Some(10),
+    });
+    assert_eq!(a.total, None);
+  }
+
+  #[test]
+  fn token_usage_stats_sub_both_some() {
+    let a = TokenUsageStats {
+      prompt: 15,
+      completion: 30,
+      reasoning: 8,
+      cache_read: 4,
+      cache_write: 3,
+      total: Some(60),
+    };
+    let b = TokenUsageStats {
+      prompt: 5,
+      completion: 10,
+      reasoning: 3,
+      cache_read: 1,
+      cache_write: 1,
+      total: Some(20),
+    };
+    let delta = a.sub(b);
+    assert_eq!(delta.prompt, 10);
+    assert_eq!(delta.completion, 20);
+    assert_eq!(delta.reasoning, 5);
+    assert_eq!(delta.cache_read, 3);
+    assert_eq!(delta.cache_write, 2);
+    assert_eq!(delta.total, Some(40));
+  }
+
+  #[test]
+  fn token_usage_stats_sub_one_none() {
+    let a = TokenUsageStats {
+      prompt: 15,
+      completion: 30,
+      reasoning: 8,
+      cache_read: 4,
+      cache_write: 3,
+      total: Some(60),
+    };
+    let b = TokenUsageStats::default();
+    let delta = a.sub(b);
+    assert_eq!(delta.total, None);
+
+    let a = TokenUsageStats {
+      prompt: 15,
+      completion: 30,
+      reasoning: 8,
+      cache_read: 4,
+      cache_write: 3,
+      total: None,
+    };
+    let b = TokenUsageStats {
+      prompt: 5,
+      completion: 10,
+      reasoning: 3,
+      cache_read: 1,
+      cache_write: 1,
+      total: Some(20),
+    };
+    let delta = a.sub(b);
+    assert_eq!(delta.total, None);
   }
 }

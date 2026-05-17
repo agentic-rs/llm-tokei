@@ -248,7 +248,6 @@ struct Turn {
   model: Option<String>,
   provider: Option<String>,
   tokens: TokenUsageStats,
-  total_direct: Option<u64>,
   bytes: BytesSink,
   rounds: u64,
 }
@@ -301,7 +300,7 @@ impl<'a> RecordBuilder<'a> {
           reasoning: t.tokens.reasoning,
           cache_read: t.tokens.cache_read,
           cache_write: t.tokens.cache_write,
-          total_direct: t.total_direct,
+          total_direct: t.tokens.total,
           mode: None,
           agent: None,
           is_compaction: false,
@@ -325,7 +324,7 @@ impl RolloutVisitor for RecordBuilder<'_> {
   }
 
   fn turn_end(&mut self, ts: DateTime<Utc>, payload: &Value) {
-    let Some((tokens, total_direct)) = extract_turn_usage(payload, &mut self.prev_total) else {
+    let Some(tokens) = extract_turn_usage(payload, &mut self.prev_total) else {
       return;
     };
     let ts = self.last_ts.or(self.session_ts).unwrap_or(ts);
@@ -334,7 +333,6 @@ impl RolloutVisitor for RecordBuilder<'_> {
       model: self.meta.model.clone(),
       provider: self.meta.provider.clone(),
       tokens,
-      total_direct,
       bytes: self.pending_bytes.take(),
       rounds: std::mem::take(&mut self.pending_rounds),
     });
@@ -557,6 +555,8 @@ struct RawTokenUsage {
   output_tokens: u64,
   #[serde(default)]
   reasoning_output_tokens: u64,
+  #[serde(default)]
+  total_tokens: Option<u64>,
 }
 
 impl RawTokenUsage {
@@ -569,32 +569,23 @@ impl RawTokenUsage {
       self.cached_input_tokens,
       0,
     ));
+    sink.usage.total = self.total_tokens;
     sink.usage
   }
 }
 
 fn sub_stats(a: TokenUsageStats, b: TokenUsageStats) -> TokenUsageStats {
-  TokenUsageStats {
-    prompt: a.prompt.saturating_sub(b.prompt),
-    completion: a.completion.saturating_sub(b.completion),
-    reasoning: a.reasoning.saturating_sub(b.reasoning),
-    cache_read: a.cache_read.saturating_sub(b.cache_read),
-    cache_write: a.cache_write.saturating_sub(b.cache_write),
-  }
+  a.sub(b)
 }
 
-/// Returns the per-turn delta plus the source-reported direct total token
-/// count, updating the cumulative snapshot when only `total_token_usage` is
-/// present.
-fn extract_turn_usage(
-  payload: &Value,
-  prev_total: &mut Option<TokenUsageStats>,
-) -> Option<(TokenUsageStats, Option<u64>)> {
+/// Returns the per-turn delta as `TokenUsageStats`, updating the cumulative
+/// snapshot when only `total_token_usage` is present. The `.total` field
+/// carries the source-reported direct total when available.
+fn extract_turn_usage(payload: &Value, prev_total: &mut Option<TokenUsageStats>) -> Option<TokenUsageStats> {
   let info = payload.get("info").unwrap_or(payload);
   let last = info
     .get("last_token_usage")
     .and_then(|v| serde_json::from_value::<RawTokenUsage>(v.clone()).ok());
-  let total_direct = info.pointer("/total_token_usage/total_tokens").and_then(|v| v.as_u64());
   let total = info
     .get("total_token_usage")
     .and_then(|v| serde_json::from_value::<RawTokenUsage>(v.clone()).ok())
@@ -605,7 +596,7 @@ fn extract_turn_usage(
       if let Some(t) = total {
         *prev_total = Some(t);
       }
-      Some((usage.into_stats(), total_direct))
+      Some(usage.into_stats())
     }
     (None, Some(total)) => {
       let delta = match prev_total {
@@ -613,7 +604,7 @@ fn extract_turn_usage(
         None => total,
       };
       *prev_total = Some(total);
-      Some((delta, total_direct))
+      Some(delta)
     }
     (None, None) => None,
   }
