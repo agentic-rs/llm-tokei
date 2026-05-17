@@ -4,9 +4,7 @@ use crate::sources::copilot_shutdown::{
 };
 use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
-use crate::text_count::{
-  extract_rich_text, extract_text_like, Bytes, Chars, CountBytes, CountChars, Counter, JoinString,
-};
+use crate::text_count::{rich_text, text_value, Bytes, Chars, Counter, StatsSink, StringSink, TextStats};
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
@@ -373,15 +371,15 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
     // --- Input estimate ---
     let mut input_chars: u64 = 0;
     let mut input_bytes: u64 = 0;
-    let rendered_user_chars = sum_text_chars(req.pointer("/result/metadata/renderedUserMessage"));
-    let rendered_user_bytes = sum_text_bytes(req.pointer("/result/metadata/renderedUserMessage"));
-    input_chars = input_chars.saturating_add(rendered_user_chars);
-    input_bytes = input_bytes.saturating_add(rendered_user_bytes);
-    input_chars = input_chars.saturating_add(sum_text_chars(req.pointer("/result/metadata/renderedGlobalContext")));
-    input_bytes = input_bytes.saturating_add(sum_text_bytes(req.pointer("/result/metadata/renderedGlobalContext")));
+    let rendered_user = text_like_usage(req.pointer("/result/metadata/renderedUserMessage"));
+    input_chars = input_chars.saturating_add(rendered_user.chars);
+    input_bytes = input_bytes.saturating_add(rendered_user.bytes);
+    let rendered_global_context = text_like_usage(req.pointer("/result/metadata/renderedGlobalContext"));
+    input_chars = input_chars.saturating_add(rendered_global_context.chars);
+    input_bytes = input_bytes.saturating_add(rendered_global_context.bytes);
     // Fallback to request.message.text when no rendered user message is present
     // (older session shapes / queued-but-unsent prompts).
-    if rendered_user_chars == 0 {
+    if rendered_user.chars == 0 {
       input_chars = input_chars.saturating_add(message_text(&Chars, req));
       input_bytes = input_bytes.saturating_add(message_text(&Bytes, req));
     }
@@ -391,8 +389,9 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
     let mut output_bytes: u64 = 0;
     if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
       for it in resp {
-        output_chars = output_chars.saturating_add(response_item_chars(it));
-        output_bytes = output_bytes.saturating_add(response_item_bytes(it));
+        let usage = response_item_usage(it);
+        output_chars = output_chars.saturating_add(usage.chars);
+        output_bytes = output_bytes.saturating_add(usage.bytes);
       }
     }
 
@@ -418,8 +417,9 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
           for call in calls {
             if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
               if let Some(result) = tool_call_results.and_then(|results| results.get(id)) {
-                round_result_chars = round_result_chars.saturating_add(tool_result_chars(result));
-                input_bytes = input_bytes.saturating_add(tool_result_bytes(result));
+                let usage = tool_result_usage(result);
+                round_result_chars = round_result_chars.saturating_add(usage.chars);
+                input_bytes = input_bytes.saturating_add(usage.bytes);
               }
             }
             if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
@@ -781,7 +781,7 @@ fn collect_response_item_text(item: &Value) -> String {
     ]);
   }
   if kind == Some("progressTaskSerialized") {
-    return collect_text_like(item.get("content"));
+    return text_value::<StringSink>(item.get("content"));
   }
   if matches!(
     kind,
@@ -804,10 +804,6 @@ fn collect_response_item_text(item: &Value) -> String {
     .unwrap_or_default()
 }
 
-fn collect_text_like(value: Option<&Value>) -> String {
-  extract_text_like::<JoinString>(value)
-}
-
 fn join_non_empty(parts: impl IntoIterator<Item = String>) -> String {
   let mut buf = String::new();
   for part in parts {
@@ -826,7 +822,7 @@ fn collect_tool_result_text(result: &Value) -> String {
   let mut buf = String::new();
   if let Some(items) = result.get("content").and_then(|v| v.as_array()) {
     for item in items {
-      let s = collect_rich_text(item.get("value").unwrap_or(item));
+      let s = rich_text::<StringSink>(item.get("value").or(Some(item)));
       if !s.is_empty() {
         if !buf.is_empty() {
           buf.push('\n');
@@ -836,10 +832,6 @@ fn collect_tool_result_text(result: &Value) -> String {
     }
   }
   buf
-}
-
-fn collect_rich_text(value: &Value) -> String {
-  extract_rich_text::<JoinString>(Some(value))
 }
 
 #[derive(Debug, Clone)]
@@ -922,63 +914,41 @@ fn message_text<C: Counter>(counter: &C, req: &Value) -> u64 {
     .unwrap_or(0)
 }
 
-fn sum_text_chars(node: Option<&Value>) -> u64 {
-  extract_text_like::<CountChars>(node)
+fn collect_text_like(value: Option<&Value>) -> String {
+  text_value::<StringSink>(value)
 }
 
-fn sum_text_bytes(node: Option<&Value>) -> u64 {
-  extract_text_like::<CountBytes>(node)
+fn text_like_usage(node: Option<&Value>) -> TextStats {
+  text_value::<StatsSink>(node)
 }
 
-fn tool_result_chars(result: &Value) -> u64 {
-  tool_result(result, |value| extract_rich_text::<CountChars>(Some(value)))
+fn tool_result_usage(result: &Value) -> TextStats {
+  let mut usage = TextStats::default();
+  if let Some(items) = result.get("content").and_then(|v| v.as_array()) {
+    for item in items {
+      usage.add(if let Some(value) = item.get("value") {
+        rich_text::<StatsSink>(Some(value))
+      } else {
+        rich_text::<StatsSink>(Some(item))
+      });
+    }
+  }
+  usage
 }
 
-fn tool_result_bytes(result: &Value) -> u64 {
-  tool_result(result, |value| extract_rich_text::<CountBytes>(Some(value)))
-}
-
-fn tool_result(result: &Value, count_rich_text: fn(&Value) -> u64) -> u64 {
-  result
-    .get("content")
-    .and_then(|v| v.as_array())
-    .map(|items| {
-      items
-        .iter()
-        .map(|item| {
-          if let Some(value) = item.get("value") {
-            count_rich_text(value)
-          } else {
-            count_rich_text(item)
-          }
-        })
-        .sum()
-    })
-    .unwrap_or(0)
-}
-
-fn response_item_chars(item: &Value) -> u64 {
-  response_item(item, |value| extract_text_like::<CountChars>(value))
-}
-
-fn response_item_bytes(item: &Value) -> u64 {
-  response_item(item, |value| extract_text_like::<CountBytes>(value))
-}
-
-fn response_item(item: &Value, count_text_like: fn(Option<&Value>) -> u64) -> u64 {
+fn response_item_usage(item: &Value) -> TextStats {
   // Plain `{value: "..."}` text segments and `{kind: "text", value: "..."}`
   // are LLM-generated text. For tool invocations, only count user-visible
   // invocation/past-tense text; skip tool payloads (tool output/input blobs).
   let kind = item.get("kind").and_then(|v| v.as_str());
   if kind == Some("toolInvocationSerialized") {
-    let mut total: u64 = 0;
-    total = total.saturating_add(count_text_like(item.pointer("/invocationMessage")));
-    total = total.saturating_add(count_text_like(item.pointer("/pastTenseMessage")));
-    return total;
+    let mut usage = text_like_usage(item.pointer("/invocationMessage"));
+    usage.add(text_like_usage(item.pointer("/pastTenseMessage")));
+    return usage;
   }
   if kind == Some("progressTaskSerialized") {
     // content can be {value: "..."} or {value: "...", uris: {...}}; recurse.
-    return count_text_like(item.get("content"));
+    return text_like_usage(item.get("content"));
   }
   if matches!(
     kind,
@@ -993,9 +963,9 @@ fn response_item(item: &Value, count_text_like: fn(Option<&Value>) -> u64) -> u6
       | Some("thinking")
   ) {
     // Thinking is reasoning content, accounted for via toolCallRounds.thinking.tokens.
-    return 0;
+    return TextStats::default();
   }
-  count_text_like(item.get("value"))
+  text_like_usage(item.get("value"))
 }
 
 fn summarize(records: &[UsageRecord]) -> String {

@@ -4,7 +4,7 @@ use crate::sources::copilot_shutdown::{
 };
 use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
-use crate::text_count::{count_value, Bytes, Chars};
+use crate::text_count::{all_strings, StatsSink};
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -399,11 +399,11 @@ fn rough_tokens(value: &Value) -> u64 {
 }
 
 fn rough_bytes(value: &Value) -> u64 {
-  count_value(&Bytes, value)
+  all_strings::<StatsSink>(Some(value)).bytes
 }
 
 fn rough_chars(value: &Value) -> u64 {
-  count_value(&Chars, value)
+  all_strings::<StatsSink>(Some(value)).chars
 }
 
 fn token_alias(value: &Value, primary: &str, fallback: &str) -> u64 {

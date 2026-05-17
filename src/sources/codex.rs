@@ -1,7 +1,9 @@
 use crate::model::{Source, UsageRecord};
 use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::UsageSource;
-use crate::text_count::{count_value, extract_nested_text, Bytes, Counter, JoinString};
+use crate::text_count::{
+  all_strings, json_serialized_or_string, message_content, nested_fields, Bytes, Counter, StatsSink, StringSink,
+};
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
@@ -154,9 +156,6 @@ impl UsageSource for CodexSource {
 }
 
 fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
-  let f = File::open(path)?;
-  let reader = BufReader::new(f);
-
   let mut session_id: Option<String> = None;
   let mut cwd: Option<String> = None;
   let mut model: Option<String> = None;
@@ -181,19 +180,7 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   let mut pending_bytes = BytesUsage::default();
   let mut last_ts: Option<DateTime<Utc>> = None;
 
-  for line in reader.lines() {
-    let line = match line {
-      Ok(l) => l,
-      Err(_) => continue,
-    };
-    if line.trim().is_empty() {
-      continue;
-    }
-    let parsed: RolloutLine = match serde_json::from_str(&line) {
-      Ok(p) => p,
-      Err(_) => continue,
-    };
-
+  read_rollout_lines(path, |parsed| {
     if let Some(ts_str) = &parsed.timestamp {
       if let Ok(dt) = DateTime::parse_from_rfc3339(ts_str) {
         let utc = dt.with_timezone(&Utc);
@@ -315,7 +302,7 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       }
       _ => {}
     }
-  }
+  })?;
 
   if turns.is_empty() {
     return Ok(None);
@@ -369,6 +356,26 @@ fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   Ok(Some(records))
 }
 
+fn read_rollout_lines(path: &Path, mut visit: impl FnMut(RolloutLine)) -> Result<()> {
+  let f = File::open(path)?;
+  let reader = BufReader::new(f);
+
+  for line in reader.lines() {
+    let line = match line {
+      Ok(l) => l,
+      Err(_) => continue,
+    };
+    if line.trim().is_empty() {
+      continue;
+    }
+    if let Ok(parsed) = serde_json::from_str(&line) {
+      visit(parsed);
+    }
+  }
+
+  Ok(())
+}
+
 fn sub_usage(a: &TokenUsage, b: &TokenUsage) -> TokenUsage {
   TokenUsage {
     input_tokens: a.input_tokens.saturating_sub(b.input_tokens),
@@ -380,52 +387,86 @@ fn sub_usage(a: &TokenUsage, b: &TokenUsage) -> TokenUsage {
 }
 
 fn response_item_bytes(payload: &serde_json::Value) -> BytesUsage {
+  analyze_response_item(payload).bytes
+}
+
+struct ResponseItemAnalysis {
+  bytes: BytesUsage,
+  dump: Option<DumpRecord>,
+}
+
+fn analyze_response_item(payload: &serde_json::Value) -> ResponseItemAnalysis {
   let mut usage = BytesUsage::default();
-  match payload.get("type").and_then(|v| v.as_str()) {
+  let call_id = payload.get("call_id").and_then(|v| v.as_str()).map(str::to_string);
+  let dump = match payload.get("type").and_then(|v| v.as_str()) {
     Some("message") => {
-      let bytes = message_content_bytes(payload.get("content"));
+      let bytes = message_content::<StatsSink>(payload.get("content")).bytes;
       match payload.get("role").and_then(|v| v.as_str()) {
         Some("user" | "system" | "developer") => usage.add_input(bytes),
         Some("assistant") => usage.add_output(bytes),
         _ => {}
-      }
+      };
+      let role = match payload.get("role").and_then(|v| v.as_str()) {
+        Some("user") => "user",
+        Some("assistant") => "assistant",
+        Some("developer") => "developer",
+        Some("system") => "system",
+        _ => {
+          return ResponseItemAnalysis {
+            bytes: usage,
+            dump: None,
+          }
+        }
+      };
+      non_empty_dump_record(
+        role,
+        message_content::<StringSink>(payload.get("content")),
+        None,
+        call_id,
+      )
     }
     Some("function_call") => {
       let mut output_bytes: u64 = 0;
       output_bytes = output_bytes.saturating_add(string_field_bytes(payload, "name"));
       output_bytes = output_bytes.saturating_add(string_field_bytes(payload, "arguments"));
       usage.add_output(output_bytes);
+      let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("arguments"));
+      non_empty_dump_record("tool_call", text, None, call_id)
     }
-    Some("function_call_output") => usage.add_input(nested_text_bytes(payload.get("output"))),
+    Some("function_call_output") => {
+      usage.add_input(all_strings::<StatsSink>(payload.get("output")).bytes);
+      let text = nested_fields::<StringSink>(payload.get("output"));
+      non_empty_dump_record("tool_call_result", text, None, call_id)
+    }
     Some("custom_tool_call") => {
       let mut output_bytes: u64 = 0;
       output_bytes = output_bytes.saturating_add(string_field_bytes(payload, "name"));
-      output_bytes = output_bytes.saturating_add(nested_text_bytes(payload.get("input")));
+      output_bytes = output_bytes.saturating_add(all_strings::<StatsSink>(payload.get("input")).bytes);
       usage.add_output(output_bytes);
+      let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("input"));
+      non_empty_dump_record("tool_call", text, None, call_id)
     }
-    Some("custom_tool_call_output") => usage.add_input(nested_text_bytes(payload.get("output"))),
-    Some("reasoning") => usage.add_reasoning_output(reasoning_bytes(payload)),
-    _ => {}
+    Some("custom_tool_call_output") => {
+      usage.add_input(all_strings::<StatsSink>(payload.get("output")).bytes);
+      let text = nested_fields::<StringSink>(payload.get("output"));
+      non_empty_dump_record("tool_call_result", text, None, call_id)
+    }
+    Some("reasoning") => {
+      usage.add_reasoning_output(reasoning_bytes(payload));
+      let encrypted_text = payload.get("encrypted_content").and_then(|v| v.as_str());
+      encrypted_text
+        .filter(|s| !s.is_empty())
+        .map(|encrypted_text| DumpRecord {
+          role: "reasoning",
+          text: String::new(),
+          encrypted_text: Some(encrypted_text.to_string()),
+          display: None,
+          call_id: None,
+        })
+    }
+    _ => None,
   };
-  usage
-}
-
-fn message_content_bytes(content: Option<&serde_json::Value>) -> u64 {
-  match content {
-    Some(serde_json::Value::String(s)) => Bytes.count(s),
-    Some(serde_json::Value::Array(items)) => items
-      .iter()
-      .map(|item| {
-        item
-          .get("text")
-          .and_then(|v| v.as_str())
-          .map(|s| Bytes.count(s))
-          .unwrap_or_else(|| nested_text_bytes(Some(item)))
-      })
-      .sum(),
-    Some(value) => nested_text_bytes(Some(value)),
-    None => 0,
-  }
+  ResponseItemAnalysis { bytes: usage, dump }
 }
 
 fn string_field_bytes(value: &serde_json::Value, field: &str) -> u64 {
@@ -436,53 +477,29 @@ fn string_field_bytes(value: &serde_json::Value, field: &str) -> u64 {
     .unwrap_or(0)
 }
 
-fn nested_text_bytes(value: Option<&serde_json::Value>) -> u64 {
-  match value {
-    Some(value) => count_value(&Bytes, value),
-    _ => 0,
-  }
-}
-
 fn dump_rollout(path: &Path) -> Result<Option<DumpedSession>> {
-  let f = File::open(path)?;
-  let reader = BufReader::new(f);
   let mut session_id: Option<String> = None;
   let mut records = Vec::new();
 
-  for line in reader.lines() {
-    let line = match line {
-      Ok(l) => l,
-      Err(_) => continue,
-    };
-    if line.trim().is_empty() {
-      continue;
+  read_rollout_lines(path, |parsed| match parsed.kind.as_deref() {
+    Some("session_meta") if session_id.is_none() => {
+      session_id = parsed
+        .payload
+        .as_ref()
+        .and_then(|payload| payload.get("meta").unwrap_or(payload).get("id"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or(parsed.id.clone());
     }
-    let parsed: RolloutLine = match serde_json::from_str(&line) {
-      Ok(p) => p,
-      Err(_) => continue,
-    };
-
-    match parsed.kind.as_deref() {
-      Some("session_meta") if session_id.is_none() => {
-        session_id = parsed
-          .payload
-          .as_ref()
-          .and_then(|payload| payload.get("meta").unwrap_or(payload).get("id"))
-          .and_then(|v| v.as_str())
-          .map(str::to_string)
-          .or(parsed.id.clone());
-      }
-      Some("response_item") => {
-        let Some(payload) = parsed.payload.as_ref() else {
-          continue;
-        };
+    Some("response_item") => {
+      if let Some(payload) = parsed.payload.as_ref() {
         if let Some(record) = dump_record_from_response_item(payload) {
           records.push(record);
         }
       }
-      _ => {}
     }
-  }
+    _ => {}
+  })?;
 
   if records.is_empty() {
     return Ok(None);
@@ -501,47 +518,7 @@ fn dump_rollout(path: &Path) -> Result<Option<DumpedSession>> {
 }
 
 fn dump_record_from_response_item(payload: &serde_json::Value) -> Option<DumpRecord> {
-  let call_id = payload.get("call_id").and_then(|v| v.as_str()).map(str::to_string);
-  match payload.get("type").and_then(|v| v.as_str()) {
-    Some("message") => {
-      let role = match payload.get("role").and_then(|v| v.as_str()) {
-        Some("user") => "user",
-        Some("assistant") => "assistant",
-        Some("developer") => "developer",
-        Some("system") => "system",
-        _ => return None,
-      };
-      let text = dump_message_content(payload.get("content"));
-      non_empty_dump_record(role, text, None, call_id)
-    }
-    Some("function_call") => {
-      let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("arguments"));
-      non_empty_dump_record("tool_call", text, None, call_id)
-    }
-    Some("custom_tool_call") => {
-      let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("input"));
-      non_empty_dump_record("tool_call", text, None, call_id)
-    }
-    Some("function_call_output" | "custom_tool_call_output") => {
-      let text = dump_nested_text(payload.get("output"));
-      non_empty_dump_record("tool_call_result", text, None, call_id)
-    }
-    Some("reasoning") => {
-      let encrypted_text = payload.get("encrypted_content").and_then(|v| v.as_str())?;
-      if encrypted_text.is_empty() {
-        None
-      } else {
-        Some(DumpRecord {
-          role: "reasoning",
-          text: String::new(),
-          encrypted_text: Some(encrypted_text.to_string()),
-          display: None,
-          call_id: None,
-        })
-      }
-    }
-    _ => None,
-  }
+  analyze_response_item(payload).dump
 }
 
 fn non_empty_dump_record(
@@ -574,45 +551,7 @@ fn dump_tool_call_text(name: Option<&str>, body: Option<&serde_json::Value>) -> 
 }
 
 fn dump_tool_body(value: Option<&serde_json::Value>) -> String {
-  match value {
-    Some(serde_json::Value::String(s)) => s.clone(),
-    Some(value) => serde_json::to_string(value).unwrap_or_default(),
-    None => String::new(),
-  }
-}
-
-fn dump_message_content(content: Option<&serde_json::Value>) -> String {
-  match content {
-    Some(serde_json::Value::String(s)) => s.clone(),
-    Some(serde_json::Value::Array(items)) => join_non_empty(
-      items
-        .iter()
-        .filter_map(|item| item.get("text").and_then(|v| v.as_str()).map(str::to_string)),
-    ),
-    Some(value) => dump_nested_text(Some(value)),
-    None => String::new(),
-  }
-}
-
-fn dump_nested_text(value: Option<&serde_json::Value>) -> String {
-  extract_nested_text::<JoinString>(value)
-}
-
-fn join_non_empty<I>(items: I) -> String
-where
-  I: IntoIterator<Item = String>,
-{
-  let mut buf = String::new();
-  for item in items {
-    if item.is_empty() {
-      continue;
-    }
-    if !buf.is_empty() {
-      buf.push('\n');
-    }
-    buf.push_str(&item);
-  }
-  buf
+  json_serialized_or_string::<StringSink>(value)
 }
 
 fn reasoning_bytes(payload: &serde_json::Value) -> u64 {

@@ -4,13 +4,6 @@ pub trait Counter {
   fn count(&self, s: &str) -> u64;
 }
 
-pub trait Extractor: Default {
-  type Output;
-
-  fn push(&mut self, s: &str);
-  fn finish(self) -> Self::Output;
-}
-
 pub struct Chars;
 
 impl Counter for Chars {
@@ -27,14 +20,35 @@ impl Counter for Bytes {
   }
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TextStats {
+  pub chars: u64,
+  pub bytes: u64,
+}
+
+impl TextStats {
+  pub fn add(&mut self, other: Self) {
+    self.chars = self.chars.saturating_add(other.chars);
+    self.bytes = self.bytes.saturating_add(other.bytes);
+  }
+}
+
+pub trait TextSink: Default {
+  type Output;
+
+  fn text(&mut self, s: &str);
+  fn finish(self) -> Self::Output;
+}
+
 #[derive(Default)]
-pub struct CountChars(u64);
+pub struct StatsSink(TextStats);
 
-impl Extractor for CountChars {
-  type Output = u64;
+impl TextSink for StatsSink {
+  type Output = TextStats;
 
-  fn push(&mut self, s: &str) {
-    self.0 = self.0.saturating_add(Chars.count(s));
+  fn text(&mut self, s: &str) {
+    self.0.chars = self.0.chars.saturating_add(Chars.count(s));
+    self.0.bytes = self.0.bytes.saturating_add(Bytes.count(s));
   }
 
   fn finish(self) -> Self::Output {
@@ -43,27 +57,12 @@ impl Extractor for CountChars {
 }
 
 #[derive(Default)]
-pub struct CountBytes(u64);
+pub struct StringSink(Vec<String>);
 
-impl Extractor for CountBytes {
-  type Output = u64;
-
-  fn push(&mut self, s: &str) {
-    self.0 = self.0.saturating_add(Bytes.count(s));
-  }
-
-  fn finish(self) -> Self::Output {
-    self.0
-  }
-}
-
-#[derive(Default)]
-pub struct JoinString(Vec<String>);
-
-impl Extractor for JoinString {
+impl TextSink for StringSink {
   type Output = String;
 
-  fn push(&mut self, s: &str) {
+  fn text(&mut self, s: &str) {
     if !s.is_empty() {
       self.0.push(s.to_string());
     }
@@ -74,86 +73,135 @@ impl Extractor for JoinString {
   }
 }
 
-pub fn count_value<C: Counter>(counter: &C, value: &Value) -> u64 {
+pub fn all_strings<S: TextSink>(value: Option<&Value>) -> S::Output {
+  extract(value, walk_all_strings::<S>)
+}
+
+pub fn text_value<S: TextSink>(value: Option<&Value>) -> S::Output {
+  extract(value, walk_text_value::<S>)
+}
+
+pub fn rich_text<S: TextSink>(value: Option<&Value>) -> S::Output {
+  extract(value, walk_rich_text::<S>)
+}
+
+pub fn nested_fields<S: TextSink>(value: Option<&Value>) -> S::Output {
+  extract(value, walk_nested_fields::<S>)
+}
+
+pub fn message_content<S: TextSink>(value: Option<&Value>) -> S::Output {
+  extract(value, walk_message_content::<S>)
+}
+
+pub fn json_serialized_or_string<S: TextSink>(value: Option<&Value>) -> S::Output {
+  extract(value, walk_json_serialized_or_string::<S>)
+}
+
+fn extract<S: TextSink>(value: Option<&Value>, walk: fn(Option<&Value>, &mut S)) -> S::Output {
+  let mut sink = S::default();
+  walk(value, &mut sink);
+  sink.finish()
+}
+
+fn walk_all_strings<S: TextSink>(value: Option<&Value>, sink: &mut S) {
   match value {
-    Value::String(s) => counter.count(s),
-    Value::Array(items) => items.iter().map(|item| count_value(counter, item)).sum(),
-    Value::Object(map) => map.values().map(|item| count_value(counter, item)).sum(),
-    _ => 0,
-  }
-}
-
-pub fn extract_text_like<E: Extractor>(value: Option<&Value>) -> E::Output {
-  let mut extractor = E::default();
-  walk_text_like(value, &mut extractor);
-  extractor.finish()
-}
-
-pub fn extract_rich_text<E: Extractor>(value: Option<&Value>) -> E::Output {
-  let mut extractor = E::default();
-  walk_rich_text(value, &mut extractor);
-  extractor.finish()
-}
-
-pub fn extract_nested_text<E: Extractor>(value: Option<&Value>) -> E::Output {
-  let mut extractor = E::default();
-  walk_nested_text(value, &mut extractor);
-  extractor.finish()
-}
-
-fn walk_text_like<E: Extractor>(value: Option<&Value>, extractor: &mut E) {
-  match value {
-    Some(Value::String(s)) => extractor.push(s),
-    Some(Value::Object(map)) => {
-      if let Some(s) = map.get("text").or_else(|| map.get("value")).and_then(|v| v.as_str()) {
-        extractor.push(s);
-      }
-    }
+    Some(Value::String(s)) => sink.text(s),
     Some(Value::Array(items)) => {
       for item in items {
-        walk_text_like(Some(item), extractor);
+        walk_all_strings(Some(item), sink);
+      }
+    }
+    Some(Value::Object(map)) => {
+      for item in map.values() {
+        walk_all_strings(Some(item), sink);
       }
     }
     _ => {}
   }
 }
 
-fn walk_rich_text<E: Extractor>(value: Option<&Value>, extractor: &mut E) {
+fn walk_text_value<S: TextSink>(value: Option<&Value>, sink: &mut S) {
   match value {
-    Some(Value::String(s)) => extractor.push(s),
+    Some(Value::String(s)) => sink.text(s),
+    Some(Value::Object(map)) => {
+      if let Some(s) = map.get("text").or_else(|| map.get("value")).and_then(|v| v.as_str()) {
+        sink.text(s);
+      }
+    }
     Some(Value::Array(items)) => {
       for item in items {
-        walk_rich_text(Some(item), extractor);
+        walk_text_value(Some(item), sink);
+      }
+    }
+    _ => {}
+  }
+}
+
+fn walk_rich_text<S: TextSink>(value: Option<&Value>, sink: &mut S) {
+  match value {
+    Some(Value::String(s)) => sink.text(s),
+    Some(Value::Array(items)) => {
+      for item in items {
+        walk_rich_text(Some(item), sink);
       }
     }
     Some(Value::Object(map)) => {
       if let Some(s) = map.get("text").and_then(|v| v.as_str()) {
-        extractor.push(s);
+        sink.text(s);
       }
       if let Some(children) = map.get("children").and_then(|v| v.as_array()) {
         for child in children {
-          walk_rich_text(Some(child), extractor);
+          walk_rich_text(Some(child), sink);
         }
       }
-      walk_rich_text(map.get("node"), extractor);
+      walk_rich_text(map.get("node"), sink);
     }
     _ => {}
   }
 }
 
-fn walk_nested_text<E: Extractor>(value: Option<&Value>, extractor: &mut E) {
+fn walk_nested_fields<S: TextSink>(value: Option<&Value>, sink: &mut S) {
   match value {
-    Some(Value::String(s)) => extractor.push(s),
+    Some(Value::String(s)) => sink.text(s),
     Some(Value::Array(items)) => {
       for item in items {
-        walk_nested_text(Some(item), extractor);
+        walk_nested_fields(Some(item), sink);
       }
     }
     Some(Value::Object(map)) => {
       for key in ["text", "value", "output", "content"] {
-        walk_nested_text(map.get(key), extractor);
+        walk_nested_fields(map.get(key), sink);
       }
     }
     _ => {}
+  }
+}
+
+fn walk_message_content<S: TextSink>(value: Option<&Value>, sink: &mut S) {
+  match value {
+    Some(Value::String(s)) => sink.text(s),
+    Some(Value::Array(items)) => {
+      for item in items {
+        if let Some(s) = item.get("text").and_then(|v| v.as_str()) {
+          sink.text(s);
+        } else {
+          walk_nested_fields(Some(item), sink);
+        }
+      }
+    }
+    Some(value) => walk_nested_fields(Some(value), sink),
+    None => {}
+  }
+}
+
+fn walk_json_serialized_or_string<S: TextSink>(value: Option<&Value>, sink: &mut S) {
+  match value {
+    Some(Value::String(s)) => sink.text(s),
+    Some(value) => {
+      if let Ok(serialized) = serde_json::to_string(value) {
+        sink.text(&serialized);
+      }
+    }
+    None => {}
   }
 }
