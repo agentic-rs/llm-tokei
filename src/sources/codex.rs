@@ -1,13 +1,14 @@
 use crate::model::{Source, UsageRecord};
-use crate::sources::dump::{DumpRecord, DumpedSession};
+use crate::sources::dump::{DumpSink, DumpedSession};
 use crate::sources::{read_jsonl, summarize_records, UsageSource};
 use crate::text_count::{
-  all_strings, json_serialized_or_string, message_content, nested_fields, stats_for_str, DumpSink, SpanSink, StatsSink,
-  StringSink, TextSpan, TextStats, TokenSpan, TokenStatsSink, TokenUsageStats,
+  all_strings, json_serialized_or_string, message_content, nested_fields, BytesSink, SpanSink, SpanStatsSink,
+  StatsSink, StringSink, TextSpan, TextStats, TokenSpan, TokenStatsSink, TokenUsageStats,
 };
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 use walkdir::WalkDir;
@@ -50,76 +51,15 @@ impl CodexSource {
   }
 
   pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
-    parse_rollout(path)
+    let mut builder = RecordBuilder::new(path);
+    walk_rollout(path, &mut builder)?;
+    Ok(builder.into_records())
   }
 
   pub fn dump_session_messages(path: &Path) -> Result<Option<DumpedSession>> {
-    dump_rollout(path)
-  }
-}
-
-#[derive(Debug, Deserialize)]
-struct RolloutLine {
-  #[serde(default, rename = "type")]
-  kind: Option<String>,
-  #[serde(default)]
-  timestamp: Option<String>,
-  #[serde(default)]
-  payload: Option<serde_json::Value>,
-  // session_meta inline fields (some versions emit at top level)
-  #[serde(default)]
-  id: Option<String>,
-  #[serde(default)]
-  cwd: Option<String>,
-  #[serde(default)]
-  model: Option<String>,
-  #[serde(default)]
-  originator: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Default, Clone)]
-struct TokenUsage {
-  #[serde(default)]
-  input_tokens: u64,
-  #[serde(default)]
-  cached_input_tokens: u64,
-  #[serde(default)]
-  output_tokens: u64,
-  #[serde(default)]
-  reasoning_output_tokens: u64,
-  #[serde(default)]
-  total_tokens: u64,
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-struct BytesUsage {
-  input_bytes: u64,
-  output_bytes: u64,
-  reasoning_output_bytes: u64,
-  total_bytes: u64,
-}
-
-impl BytesUsage {
-  fn add_input(&mut self, bytes: u64) {
-    self.input_bytes = self.input_bytes.saturating_add(bytes);
-    self.total_bytes = self.total_bytes.saturating_add(bytes);
-  }
-
-  fn add_output(&mut self, bytes: u64) {
-    self.output_bytes = self.output_bytes.saturating_add(bytes);
-    self.total_bytes = self.total_bytes.saturating_add(bytes);
-  }
-
-  fn add_reasoning_output(&mut self, bytes: u64) {
-    self.reasoning_output_bytes = self.reasoning_output_bytes.saturating_add(bytes);
-    self.total_bytes = self.total_bytes.saturating_add(bytes);
-  }
-
-  fn add(&mut self, other: BytesUsage) {
-    self.input_bytes = self.input_bytes.saturating_add(other.input_bytes);
-    self.output_bytes = self.output_bytes.saturating_add(other.output_bytes);
-    self.reasoning_output_bytes = self.reasoning_output_bytes.saturating_add(other.reasoning_output_bytes);
-    self.total_bytes = self.total_bytes.saturating_add(other.total_bytes);
+    let mut builder = DumpBuilder::new(path);
+    walk_rollout(path, &mut builder)?;
+    Ok(builder.into_session())
   }
 }
 
@@ -146,286 +86,369 @@ impl UsageSource for CodexSource {
   }
 }
 
-struct Turn {
-  ts: DateTime<Utc>,
-  model: Option<String>,
-  provider: Option<String>,
-  usage: TokenUsage,
-  bytes: BytesUsage,
-  rounds: u64,
+// ---------------------------------------------------------------------------
+// Walker + Visitor
+// ---------------------------------------------------------------------------
+
+/// Visitor over a single codex rollout file. The walker invokes one method per
+/// logical record kind. All methods have empty default impls so a Visitor only
+/// overrides what it cares about.
+trait RolloutVisitor {
+  fn session_meta(&mut self, _line: &RolloutLine) {}
+  fn token_count(&mut self, _ts: DateTime<Utc>, _payload: &Value) {}
+  fn turn_context(&mut self, _payload: &Value) {}
+  fn response_item(&mut self, _payload: &Value) {}
+  fn timestamp(&mut self, _ts: DateTime<Utc>) {}
 }
 
-fn parse_rollout(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
-  // We emit one record per `token_count` event. Source data is one of:
-  //   - `last_token_usage` (per-turn delta), preferred when present
-  //   - `total_token_usage` (cumulative), in which case we emit deltas
-  //     vs. the previous cumulative snapshot.
-  let mut session_id: Option<String> = None;
-  let mut cwd: Option<String> = None;
-  let mut model: Option<String> = None;
-  let mut provider: Option<String> = None;
-  let mut session_ts: Option<DateTime<Utc>> = None;
-  let mut turns: Vec<Turn> = Vec::new();
-  let mut prev_total: Option<TokenUsage> = None;
-  let mut pending_round: u64 = 0;
-  let mut pending_bytes = BytesUsage::default();
-  let mut last_ts: Option<DateTime<Utc>> = None;
+#[derive(Debug, Deserialize)]
+struct RolloutLine {
+  #[serde(default, rename = "type")]
+  kind: Option<String>,
+  #[serde(default)]
+  timestamp: Option<String>,
+  #[serde(default)]
+  payload: Option<Value>,
+  // session_meta inline fields (some versions emit at top level)
+  #[serde(default)]
+  id: Option<String>,
+  #[serde(default)]
+  cwd: Option<String>,
+  #[serde(default)]
+  model: Option<String>,
+  #[serde(default)]
+  originator: Option<String>,
+}
 
-  read_jsonl::<RolloutLine, _>(path, |parsed| {
-    if let Some(ts_str) = &parsed.timestamp {
-      if let Ok(dt) = DateTime::parse_from_rfc3339(ts_str) {
-        let utc = dt.with_timezone(&Utc);
-        last_ts = Some(utc);
-        session_ts.get_or_insert(utc);
-      }
+fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<()> {
+  read_jsonl::<RolloutLine, _>(path, |line| {
+    let ts = parse_rfc3339(line.timestamp.as_deref());
+    if let Some(ts) = ts {
+      visitor.timestamp(ts);
     }
-
-    match parsed.kind.as_deref() {
-      Some("session_meta") => {
-        apply_session_meta(&parsed, &mut session_id, &mut cwd, &mut model, &mut provider);
-      }
+    match line.kind.as_deref() {
+      Some("session_meta") => visitor.session_meta(&line),
       Some("event_msg") => {
-        if let Some(payload) = &parsed.payload {
+        if let Some(payload) = line.payload.as_ref() {
           if payload.get("type").and_then(|v| v.as_str()) == Some("token_count") {
-            if let Some(usage) = extract_turn_usage(payload, &mut prev_total) {
-              let ts = last_ts
-                .or(session_ts)
-                .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
-              turns.push(Turn {
-                ts,
-                model: model.clone(),
-                provider: provider.clone(),
-                usage,
-                bytes: std::mem::take(&mut pending_bytes),
-                rounds: std::mem::take(&mut pending_round),
-              });
-            }
+            let ts = ts.unwrap_or_else(epoch_utc);
+            visitor.token_count(ts, payload);
           }
         }
       }
       Some("turn_context") => {
-        pending_round += 1;
-        if let Some(payload) = &parsed.payload {
-          if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
-            model = Some(m.to_string());
-          }
-          if let Some(p) = payload.get("model_provider").and_then(|v| v.as_str()) {
-            provider = Some(p.to_string());
-          }
+        if let Some(payload) = line.payload.as_ref() {
+          visitor.turn_context(payload);
         }
       }
       Some("response_item") => {
-        if let Some(payload) = &parsed.payload {
-          if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
-            model.get_or_insert_with(|| m.to_string());
-          }
-          pending_bytes.add(response_item_bytes(payload));
+        if let Some(payload) = line.payload.as_ref() {
+          visitor.response_item(payload);
         }
       }
       _ => {}
     }
-  })?;
+  })
+}
 
-  if turns.is_empty() {
-    return Ok(None);
-  }
+fn parse_rfc3339(s: Option<&str>) -> Option<DateTime<Utc>> {
+  DateTime::parse_from_rfc3339(s?).ok().map(|dt| dt.with_timezone(&Utc))
+}
 
-  // If no turn_context events were ever observed, attribute one round to the
-  // first turn so totals match historical behavior.
-  if turns.iter().all(|t| t.rounds == 0) {
-    turns[0].rounds = 1;
-  }
+fn epoch_utc() -> DateTime<Utc> {
+  Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now)
+}
 
-  let sid = session_id.unwrap_or_else(|| file_stem_or(path, "unknown"));
+// ---------------------------------------------------------------------------
+// Session metadata (shared by every visitor)
+// ---------------------------------------------------------------------------
 
-  let records = turns
-    .into_iter()
-    .map(|t| {
-      let tokens = token_stats_from_usage(&t.usage);
-      UsageRecord {
-        source: Source::Codex,
-        session_id: sid.clone(),
-        session_title: None,
-        project_cwd: cwd.clone(),
-        project_name: None,
-        provider: t.provider,
-        model: t.model,
-        ts: t.ts,
-        input: tokens.input,
-        output: tokens.output,
-        input_bytes: t.bytes.input_bytes,
-        output_bytes: t.bytes.output_bytes,
-        input_estimated: false,
-        output_estimated: false,
-        input_bytes_estimated: true,
-        output_bytes_estimated: true,
-        reasoning: tokens.reasoning,
-        cache_read: tokens.cache_read,
-        cache_write: tokens.cache_write,
-        mode: None,
-        agent: None,
-        is_compaction: false,
-        rounds: t.rounds,
-        turns: 1,
-        cost_embedded: None,
+#[derive(Default)]
+struct SessionMeta {
+  session_id: Option<String>,
+  cwd: Option<String>,
+  model: Option<String>,
+  provider: Option<String>,
+}
+
+impl SessionMeta {
+  fn apply(&mut self, line: &RolloutLine) {
+    if let Some(payload) = &line.payload {
+      let meta = payload.get("meta").unwrap_or(payload);
+      let str_field = |key: &str| meta.get(key).and_then(|v| v.as_str()).map(str::to_string);
+      if self.session_id.is_none() {
+        self.session_id = str_field("id");
       }
+      if self.cwd.is_none() {
+        self.cwd = str_field("cwd");
+      }
+      if self.model.is_none() {
+        self.model = str_field("model");
+      }
+      if self.provider.is_none() {
+        self.provider = str_field("model_provider").or_else(|| str_field("originator"));
+      }
+    }
+    if self.session_id.is_none() {
+      self.session_id = line.id.clone();
+    }
+    if self.cwd.is_none() {
+      self.cwd = line.cwd.clone();
+    }
+    if self.model.is_none() {
+      self.model = line.model.clone();
+    }
+    if self.provider.is_none() {
+      self.provider = line.originator.clone();
+    }
+  }
+
+  fn resolved_session_id(&self, path: &Path) -> String {
+    self.session_id.clone().unwrap_or_else(|| file_stem_or(path, "unknown"))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Parse visitor: builds UsageRecord per token_count event
+// ---------------------------------------------------------------------------
+
+struct RecordBuilder<'a> {
+  path: &'a Path,
+  meta: SessionMeta,
+  session_ts: Option<DateTime<Utc>>,
+  last_ts: Option<DateTime<Utc>>,
+  prev_total: Option<TokenUsageStats>,
+  pending_bytes: BytesSink,
+  pending_rounds: u64,
+  turns: Vec<Turn>,
+}
+
+struct Turn {
+  ts: DateTime<Utc>,
+  model: Option<String>,
+  provider: Option<String>,
+  tokens: TokenUsageStats,
+  bytes: BytesSink,
+  rounds: u64,
+}
+
+impl<'a> RecordBuilder<'a> {
+  fn new(path: &'a Path) -> Self {
+    Self {
+      path,
+      meta: SessionMeta::default(),
+      session_ts: None,
+      last_ts: None,
+      prev_total: None,
+      pending_bytes: BytesSink::default(),
+      pending_rounds: 0,
+      turns: Vec::new(),
+    }
+  }
+
+  fn into_records(mut self) -> Option<Vec<UsageRecord>> {
+    if self.turns.is_empty() {
+      return None;
+    }
+    // If no turn_context events were observed, attribute one round to the
+    // first turn so totals match historical behavior.
+    if self.turns.iter().all(|t| t.rounds == 0) {
+      self.turns[0].rounds = 1;
+    }
+    let sid = self.meta.resolved_session_id(self.path);
+    Some(
+      self
+        .turns
+        .into_iter()
+        .map(|t| UsageRecord {
+          source: Source::Codex,
+          session_id: sid.clone(),
+          session_title: None,
+          project_cwd: self.meta.cwd.clone(),
+          project_name: None,
+          provider: t.provider,
+          model: t.model,
+          ts: t.ts,
+          input: t.tokens.input,
+          output: t.tokens.output,
+          input_bytes: t.bytes.input,
+          output_bytes: t.bytes.output,
+          input_estimated: false,
+          output_estimated: false,
+          input_bytes_estimated: true,
+          output_bytes_estimated: true,
+          reasoning: t.tokens.reasoning,
+          cache_read: t.tokens.cache_read,
+          cache_write: t.tokens.cache_write,
+          mode: None,
+          agent: None,
+          is_compaction: false,
+          rounds: t.rounds,
+          turns: 1,
+          cost_embedded: None,
+        })
+        .collect(),
+    )
+  }
+}
+
+impl RolloutVisitor for RecordBuilder<'_> {
+  fn timestamp(&mut self, ts: DateTime<Utc>) {
+    self.last_ts = Some(ts);
+    self.session_ts.get_or_insert(ts);
+  }
+
+  fn session_meta(&mut self, line: &RolloutLine) {
+    self.meta.apply(line);
+  }
+
+  fn token_count(&mut self, ts: DateTime<Utc>, payload: &Value) {
+    let Some(tokens) = extract_turn_usage(payload, &mut self.prev_total) else {
+      return;
+    };
+    let ts = self.last_ts.or(self.session_ts).unwrap_or(ts);
+    self.turns.push(Turn {
+      ts,
+      model: self.meta.model.clone(),
+      provider: self.meta.provider.clone(),
+      tokens,
+      bytes: self.pending_bytes.take(),
+      rounds: std::mem::take(&mut self.pending_rounds),
+    });
+  }
+
+  fn turn_context(&mut self, payload: &Value) {
+    self.pending_rounds += 1;
+    if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
+      self.meta.model = Some(m.to_string());
+    }
+    if let Some(p) = payload.get("model_provider").and_then(|v| v.as_str()) {
+      self.meta.provider = Some(p.to_string());
+    }
+  }
+
+  fn response_item(&mut self, payload: &Value) {
+    if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
+      self.meta.model.get_or_insert_with(|| m.to_string());
+    }
+    visit_response_item(payload, &mut self.pending_bytes);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dump visitor: builds DumpedSession
+// ---------------------------------------------------------------------------
+
+struct DumpBuilder<'a> {
+  path: &'a Path,
+  meta: SessionMeta,
+  sink: DumpSink,
+}
+
+impl<'a> DumpBuilder<'a> {
+  fn new(path: &'a Path) -> Self {
+    Self {
+      path,
+      meta: SessionMeta::default(),
+      sink: DumpSink::default(),
+    }
+  }
+
+  fn into_session(self) -> Option<DumpedSession> {
+    if self.sink.records.is_empty() {
+      return None;
+    }
+    Some(DumpedSession {
+      session_id: self.meta.resolved_session_id(self.path),
+      records: self.sink.records,
     })
-    .collect();
-
-  Ok(Some(records))
+  }
 }
 
-fn apply_session_meta(
-  parsed: &RolloutLine,
-  session_id: &mut Option<String>,
-  cwd: &mut Option<String>,
-  model: &mut Option<String>,
-  provider: &mut Option<String>,
-) {
-  if let Some(payload) = &parsed.payload {
-    let meta = payload.get("meta").unwrap_or(payload);
-    let str_field = |key: &str| meta.get(key).and_then(|v| v.as_str()).map(str::to_string);
-    if session_id.is_none() {
-      *session_id = str_field("id");
+impl RolloutVisitor for DumpBuilder<'_> {
+  fn session_meta(&mut self, line: &RolloutLine) {
+    self.meta.apply(line);
+  }
+
+  fn response_item(&mut self, payload: &Value) {
+    // Only push the first non-empty span per response_item (matches historical
+    // behavior where `dump` emitted at most one record per item).
+    let mut once = OnceDump::new(&mut self.sink);
+    visit_response_item(payload, &mut once);
+  }
+}
+
+/// SpanSink wrapper that forwards only the first non-empty span to the inner
+/// DumpSink, mirroring the legacy `analyze_response_item` semantics.
+struct OnceDump<'a> {
+  inner: &'a mut DumpSink,
+  done: bool,
+}
+
+impl<'a> OnceDump<'a> {
+  fn new(inner: &'a mut DumpSink) -> Self {
+    Self { inner, done: false }
+  }
+}
+
+impl SpanSink for OnceDump<'_> {
+  fn text(&mut self, span: TextSpan<'_>) {
+    if self.done {
+      return;
     }
-    if cwd.is_none() {
-      *cwd = str_field("cwd");
-    }
-    if model.is_none() {
-      *model = str_field("model");
-    }
-    if provider.is_none() {
-      *provider = str_field("model_provider").or_else(|| str_field("originator"));
+    if let Some(record) = DumpSink::record_from(span) {
+      self.inner.records.push(record);
+      self.done = true;
     }
   }
-  if session_id.is_none() {
-    *session_id = parsed.id.clone();
-  }
-  if cwd.is_none() {
-    *cwd = parsed.cwd.clone();
-  }
-  if model.is_none() {
-    *model = parsed.model.clone();
-  }
-  if provider.is_none() {
-    *provider = parsed.originator.clone();
-  }
 }
 
-/// Extract the per-turn token usage from a `token_count` payload, updating
-/// the cumulative snapshot when present.
-fn extract_turn_usage(payload: &serde_json::Value, prev_total: &mut Option<TokenUsage>) -> Option<TokenUsage> {
-  let info = payload.get("info").unwrap_or(payload);
-  let last = info
-    .get("last_token_usage")
-    .and_then(|v| serde_json::from_value::<TokenUsage>(v.clone()).ok());
-  let total = info
-    .get("total_token_usage")
-    .and_then(|v| serde_json::from_value::<TokenUsage>(v.clone()).ok());
+// ---------------------------------------------------------------------------
+// Response-item extractor: one walker, three accumulators (BytesSink, DumpSink,
+// SpanStatsSink in tests).
+// ---------------------------------------------------------------------------
 
-  match (last, total) {
-    (Some(usage), total) => {
-      if let Some(t) = total {
-        *prev_total = Some(t);
-      }
-      Some(usage)
-    }
-    (None, Some(total)) => {
-      let delta = match prev_total {
-        Some(prev) => sub_usage(&total, prev),
-        None => total.clone(),
-      };
-      *prev_total = Some(total);
-      Some(delta)
-    }
-    (None, None) => None,
-  }
-}
-
-fn token_stats_from_usage(usage: &TokenUsage) -> TokenUsageStats {
-  let mut sink = TokenStatsSink::default();
-  sink.token(TokenSpan::usage(
-    usage.input_tokens.saturating_sub(usage.cached_input_tokens),
-    usage.output_tokens,
-    usage.reasoning_output_tokens,
-    usage.cached_input_tokens,
-    0,
-  ));
-  sink.usage
-}
-
-fn sub_usage(a: &TokenUsage, b: &TokenUsage) -> TokenUsage {
-  TokenUsage {
-    input_tokens: a.input_tokens.saturating_sub(b.input_tokens),
-    cached_input_tokens: a.cached_input_tokens.saturating_sub(b.cached_input_tokens),
-    output_tokens: a.output_tokens.saturating_sub(b.output_tokens),
-    reasoning_output_tokens: a.reasoning_output_tokens.saturating_sub(b.reasoning_output_tokens),
-    total_tokens: a.total_tokens.saturating_sub(b.total_tokens),
-  }
-}
-
-fn response_item_bytes(payload: &serde_json::Value) -> BytesUsage {
-  analyze_response_item(payload).bytes
-}
-
-struct ResponseItemAnalysis {
-  bytes: BytesUsage,
-  dump: Option<DumpRecord>,
-}
-
-fn analyze_response_item(payload: &serde_json::Value) -> ResponseItemAnalysis {
+fn visit_response_item<S: SpanSink>(payload: &Value, sink: &mut S) {
   let call_id = payload.get("call_id").and_then(|v| v.as_str()).map(str::to_string);
-  let spans = match payload.get("type").and_then(|v| v.as_str()) {
+  match payload.get("type").and_then(|v| v.as_str()) {
     Some("message") => {
-      let Some(role) = message_role(payload) else {
-        return ResponseItemAnalysis::empty();
-      };
+      let Some(role) = message_role(payload) else { return };
       let text = message_content::<StringSink>(payload.get("content"));
       let stats = message_content::<StatsSink>(payload.get("content"));
-      vec![TextSpan::new(role, text).with_stats(stats).with_call_id(call_id)]
+      sink.text(TextSpan::new(role, text).with_stats(stats).with_call_id(call_id));
     }
     Some("function_call") => {
       let mut stats = string_field_stats(payload, "name");
       stats.add(string_field_stats(payload, "arguments"));
       let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("arguments"));
-      vec![TextSpan::new("tool_call", text).with_stats(stats).with_call_id(call_id)]
+      sink.text(TextSpan::new("tool_call", text).with_stats(stats).with_call_id(call_id));
     }
-    Some("function_call_output") => tool_result_spans(payload, call_id),
+    Some("function_call_output") | Some("custom_tool_call_output") => {
+      let stats = all_strings::<StatsSink>(payload.get("output"));
+      let text = nested_fields::<StringSink>(payload.get("output"));
+      sink.text(
+        TextSpan::new("tool_call_result", text)
+          .with_stats(stats)
+          .with_call_id(call_id),
+      );
+    }
     Some("custom_tool_call") => {
       let mut stats = string_field_stats(payload, "name");
       stats.add(all_strings::<StatsSink>(payload.get("input")));
       let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("input"));
-      vec![TextSpan::new("tool_call", text).with_stats(stats).with_call_id(call_id)]
+      sink.text(TextSpan::new("tool_call", text).with_stats(stats).with_call_id(call_id));
     }
-    Some("custom_tool_call_output") => tool_result_spans(payload, call_id),
-    Some("reasoning") => match payload.get("encrypted_content").and_then(|v| v.as_str()) {
-      Some(text) => vec![TextSpan::encrypted("reasoning", text.to_string(), stats_for_str(text))],
-      None => return ResponseItemAnalysis::empty(),
-    },
-    _ => Vec::new(),
-  };
-
-  let mut bytes = BytesUsage::default();
-  let mut dump = None;
-  for span in spans {
-    accumulate_span_bytes(&mut bytes, &span);
-    if dump.is_none() {
-      dump = DumpSink::record_from(span);
+    Some("reasoning") => {
+      if let Some(text) = payload.get("encrypted_content").and_then(|v| v.as_str()) {
+        let stats = TextStats::from_str(text);
+        sink.text(TextSpan::encrypted("reasoning", text.to_string(), stats));
+      }
     }
-  }
-  ResponseItemAnalysis { bytes, dump }
-}
-
-impl ResponseItemAnalysis {
-  fn empty() -> Self {
-    Self {
-      bytes: BytesUsage::default(),
-      dump: None,
-    }
+    _ => {}
   }
 }
 
-fn message_role(payload: &serde_json::Value) -> Option<&'static str> {
+fn message_role(payload: &Value) -> Option<&'static str> {
   match payload.get("role").and_then(|v| v.as_str())? {
     "user" => Some("user"),
     "assistant" => Some("assistant"),
@@ -435,73 +458,92 @@ fn message_role(payload: &serde_json::Value) -> Option<&'static str> {
   }
 }
 
-fn tool_result_spans(payload: &serde_json::Value, call_id: Option<String>) -> Vec<TextSpan<'_>> {
-  let stats = all_strings::<StatsSink>(payload.get("output"));
-  let text = nested_fields::<StringSink>(payload.get("output"));
-  vec![TextSpan::new("tool_call_result", text)
-    .with_stats(stats)
-    .with_call_id(call_id)]
-}
-
-fn accumulate_span_bytes(usage: &mut BytesUsage, span: &TextSpan<'_>) {
-  let stats = span.resolved_stats();
-  match span.role {
-    "user" | "system" | "developer" | "tool_call_result" => usage.add_input(stats.bytes),
-    "assistant" | "tool_call" => usage.add_output(stats.bytes),
-    "reasoning" => usage.add_reasoning_output(stats.bytes),
-    _ => {}
-  }
-}
-
-fn string_field_stats(value: &serde_json::Value, field: &str) -> TextStats {
+fn string_field_stats(value: &Value, field: &str) -> TextStats {
   value
     .get(field)
     .and_then(|v| v.as_str())
-    .map(stats_for_str)
+    .map(TextStats::from_str)
     .unwrap_or_default()
 }
 
-fn dump_rollout(path: &Path) -> Result<Option<DumpedSession>> {
-  let mut session_id: Option<String> = None;
-  let mut records = Vec::new();
-
-  read_jsonl::<RolloutLine, _>(path, |parsed| match parsed.kind.as_deref() {
-    Some("session_meta") if session_id.is_none() => {
-      session_id = parsed
-        .payload
-        .as_ref()
-        .and_then(|payload| payload.get("meta").unwrap_or(payload).get("id"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .or(parsed.id.clone());
-    }
-    Some("response_item") => {
-      if let Some(payload) = parsed.payload.as_ref() {
-        if let Some(record) = analyze_response_item(payload).dump {
-          records.push(record);
-        }
-      }
-    }
-    _ => {}
-  })?;
-
-  if records.is_empty() {
-    return Ok(None);
-  }
-
-  Ok(Some(DumpedSession {
-    session_id: session_id.unwrap_or_else(|| file_stem_or(path, "unknown")),
-    records,
-  }))
-}
-
-fn dump_tool_call_text(name: Option<&str>, body: Option<&serde_json::Value>) -> String {
+fn dump_tool_call_text(name: Option<&str>, body: Option<&Value>) -> String {
   let name = name.unwrap_or("tool");
   let args = json_serialized_or_string::<StringSink>(body);
   if args.is_empty() {
     name.to_string()
   } else {
     format!("{name}: {args}")
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Token-usage delta extraction
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+struct RawTokenUsage {
+  #[serde(default)]
+  input_tokens: u64,
+  #[serde(default)]
+  cached_input_tokens: u64,
+  #[serde(default)]
+  output_tokens: u64,
+  #[serde(default)]
+  reasoning_output_tokens: u64,
+}
+
+impl RawTokenUsage {
+  fn into_stats(self) -> TokenUsageStats {
+    let mut sink = TokenStatsSink::default();
+    sink.token(TokenSpan::usage(
+      self.input_tokens.saturating_sub(self.cached_input_tokens),
+      self.output_tokens,
+      self.reasoning_output_tokens,
+      self.cached_input_tokens,
+      0,
+    ));
+    sink.usage
+  }
+}
+
+fn sub_stats(a: TokenUsageStats, b: TokenUsageStats) -> TokenUsageStats {
+  TokenUsageStats {
+    input: a.input.saturating_sub(b.input),
+    output: a.output.saturating_sub(b.output),
+    reasoning: a.reasoning.saturating_sub(b.reasoning),
+    cache_read: a.cache_read.saturating_sub(b.cache_read),
+    cache_write: a.cache_write.saturating_sub(b.cache_write),
+  }
+}
+
+/// Returns the per-turn delta as `TokenUsageStats`, updating the cumulative
+/// snapshot when only `total_token_usage` is present.
+fn extract_turn_usage(payload: &Value, prev_total: &mut Option<TokenUsageStats>) -> Option<TokenUsageStats> {
+  let info = payload.get("info").unwrap_or(payload);
+  let last = info
+    .get("last_token_usage")
+    .and_then(|v| serde_json::from_value::<RawTokenUsage>(v.clone()).ok());
+  let total = info
+    .get("total_token_usage")
+    .and_then(|v| serde_json::from_value::<RawTokenUsage>(v.clone()).ok())
+    .map(RawTokenUsage::into_stats);
+
+  match (last, total) {
+    (Some(usage), total) => {
+      if let Some(t) = total {
+        *prev_total = Some(t);
+      }
+      Some(usage.into_stats())
+    }
+    (None, Some(total)) => {
+      let delta = match prev_total {
+        Some(prev) => sub_stats(total, *prev),
+        None => total,
+      };
+      *prev_total = Some(total);
+      Some(delta)
+    }
+    (None, None) => None,
   }
 }
 
@@ -517,11 +559,15 @@ fn file_stem_or(path: &Path, fallback: &str) -> String {
 mod tests {
   use super::*;
 
-  #[test]
-  fn response_item_bytes_are_attached_to_each_pushed_turn() {
+  fn parse_fixture() -> Vec<UsageRecord> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
       .join("tests/fixtures/codex/sessions/2025/01/02/rollout-2025-01-02T10-00-00-test.jsonl");
-    let records = parse_rollout(&path).expect("parse fixture").expect("records");
+    CodexSource::parse_file(&path).expect("parse fixture").expect("records")
+  }
+
+  #[test]
+  fn response_item_bytes_are_attached_to_each_pushed_turn() {
+    let records = parse_fixture();
 
     assert_eq!(records.len(), 4);
     assert_eq!(
@@ -554,11 +600,24 @@ mod tests {
       "encrypted_content": "sealed",
       "summary": [{ "type": "summary_text", "text": "ignored" }]
     });
-    let usage = response_item_bytes(&payload);
+    let mut bytes = BytesSink::default();
+    visit_response_item(&payload, &mut bytes);
 
-    assert_eq!(usage.input_bytes, 0);
-    assert_eq!(usage.output_bytes, 0);
-    assert_eq!(usage.reasoning_output_bytes, 6);
-    assert_eq!(usage.total_bytes, 6);
+    assert_eq!(bytes.input, 0);
+    assert_eq!(bytes.output, 0);
+    assert_eq!(bytes.reasoning, 6);
+    assert_eq!(bytes.total(), 6);
+  }
+
+  #[test]
+  fn response_item_can_drive_stats_sink_for_aggregate_text() {
+    let payload = serde_json::json!({
+      "type": "message",
+      "role": "assistant",
+      "content": [{ "type": "output_text", "text": "hello world" }]
+    });
+    let mut stats = SpanStatsSink::default();
+    visit_response_item(&payload, &mut stats);
+    assert_eq!(stats.stats.bytes, "hello world".len() as u64);
   }
 }

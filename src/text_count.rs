@@ -6,14 +6,13 @@
 //!   Implementations decide whether to accumulate stats ([`StatsSink`]) or
 //!   stitch the strings back together ([`StringSink`]).
 //! * [`SpanSink`] - receives semantically labelled [`TextSpan`]/[`TokenSpan`]
-//!   values from source parsers. Used to compute byte/char stats per role
-//!   ([`SpanStatsSink`]), token totals ([`TokenStatsSink`]), or build dump
-//!   transcripts ([`DumpSink`]).
+//!   values from source visitors. Used to compute byte/char stats per role
+//!   ([`SpanStatsSink`]), token totals ([`TokenStatsSink`]), per-role byte
+//!   breakdowns ([`BytesSink`]), or build dump transcripts (see
+//!   `crate::sources::dump::DumpSink`).
 
 use serde_json::Value;
 use std::borrow::Cow;
-
-use crate::sources::dump::DumpRecord;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TextStats {
@@ -33,12 +32,6 @@ impl TextStats {
     self.chars = self.chars.saturating_add(other.chars);
     self.bytes = self.bytes.saturating_add(other.bytes);
   }
-}
-
-/// Free function kept for convenience at call sites; equivalent to
-/// [`TextStats::from_str`].
-pub fn stats_for_str(s: &str) -> TextStats {
-  TextStats::from_str(s)
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -126,7 +119,7 @@ impl<'a> TextSpan<'a> {
 
   /// Resolve the span's stats, computing from `text` when not pre-attached.
   pub fn resolved_stats(&self) -> TextStats {
-    self.stats.unwrap_or_else(|| stats_for_str(&self.text))
+    self.stats.unwrap_or_else(|| TextStats::from_str(&self.text))
   }
 }
 
@@ -160,32 +153,45 @@ impl SpanSink for SpanStatsSink {
   }
 }
 
-#[derive(Default)]
-pub struct DumpSink {
-  pub records: Vec<DumpRecord>,
+/// Per-role byte accumulator used by source visitors to attribute bytes
+/// between input, output, and reasoning channels based on a span's `role`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct BytesSink {
+  pub input: u64,
+  pub output: u64,
+  pub reasoning: u64,
 }
 
-impl DumpSink {
-  /// Convert a span into a [`DumpRecord`] without going through the trait,
-  /// returning `None` when both text payloads are empty.
-  pub fn record_from(span: TextSpan<'_>) -> Option<DumpRecord> {
-    if span.text.is_empty() && span.encrypted_text.as_deref().unwrap_or_default().is_empty() {
-      return None;
-    }
-    Some(DumpRecord {
-      role: span.role,
-      text: span.text.into_owned(),
-      encrypted_text: span.encrypted_text.map(Cow::into_owned),
-      display: span.display.map(Cow::into_owned),
-      call_id: span.call_id.map(Cow::into_owned),
-    })
+impl BytesSink {
+  pub fn total(&self) -> u64 {
+    self.input.saturating_add(self.output).saturating_add(self.reasoning)
+  }
+
+  pub fn take(&mut self) -> Self {
+    std::mem::take(self)
+  }
+
+  pub fn add(&mut self, other: Self) {
+    self.input = self.input.saturating_add(other.input);
+    self.output = self.output.saturating_add(other.output);
+    self.reasoning = self.reasoning.saturating_add(other.reasoning);
   }
 }
 
-impl SpanSink for DumpSink {
+impl SpanSink for BytesSink {
   fn text(&mut self, span: TextSpan<'_>) {
-    if let Some(record) = Self::record_from(span) {
-      self.records.push(record);
+    let bytes = span.resolved_stats().bytes;
+    match span.role {
+      "user" | "system" | "developer" | "tool_call_result" => {
+        self.input = self.input.saturating_add(bytes);
+      }
+      "assistant" | "tool_call" => {
+        self.output = self.output.saturating_add(bytes);
+      }
+      "reasoning" => {
+        self.reasoning = self.reasoning.saturating_add(bytes);
+      }
+      _ => {}
     }
   }
 }
@@ -204,7 +210,7 @@ impl TextSink for StatsSink {
   type Output = TextStats;
 
   fn text(&mut self, s: &str) {
-    self.0.add(stats_for_str(s));
+    self.0.add(TextStats::from_str(s));
   }
 
   fn finish(self) -> Self::Output {

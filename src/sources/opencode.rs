@@ -1,11 +1,10 @@
 use crate::model::{Source, UsageRecord};
-use crate::sources::UsageSource;
+use crate::sources::{ms_to_dt, summarize_records, UsageSource};
 use anyhow::{Context, Result};
-use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::debug;
 
 pub struct OpenCodeSource {
@@ -200,7 +199,7 @@ impl UsageSource for OpenCodeSource {
     debug!(
       source = "opencode",
       file = %self.db_path.display(),
-      summary = %summarize(&records),
+      summary = %summarize_records(&records),
       "file summary"
     );
     Ok(records)
@@ -245,40 +244,4 @@ fn load_session_meta(conn: &Connection) -> Result<HashMap<String, SessionMeta>> 
     );
   }
   Ok(out)
-}
-
-fn ms_to_dt(ms: i64) -> DateTime<Utc> {
-  let secs = ms.div_euclid(1000);
-  let nanos = (ms.rem_euclid(1000) * 1_000_000) as u32;
-  Utc.timestamp_opt(secs, nanos).single().unwrap_or_else(Utc::now)
-}
-
-#[allow(dead_code)]
-pub fn _phantom(_p: &Path) {}
-
-fn summarize(records: &[UsageRecord]) -> String {
-  let input: u64 = records.iter().map(|r| r.input).sum();
-  let output: u64 = records.iter().map(|r| r.output).sum();
-  let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
-  let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
-  let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();
-  let input_est = records.iter().any(|r| r.input_estimated);
-  let output_est = records.iter().any(|r| r.output_estimated);
-  format!(
-    "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}",
-    records.len(),
-    if input_est {
-      format!("~{input}")
-    } else {
-      input.to_string()
-    },
-    if output_est {
-      format!("~{output}")
-    } else {
-      output.to_string()
-    },
-    reasoning,
-    cache_read,
-    cache_write
-  )
 }

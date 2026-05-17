@@ -4,9 +4,7 @@ use crate::sources::copilot_shutdown::{
 };
 use crate::sources::dump::{DumpRecord, DumpedSession};
 use crate::sources::{ms_to_dt, read_jsonl_collect, summarize_records, UsageSource};
-use crate::text_count::{
-  rich_text, stats_for_str, text_value, SpanSink, SpanStatsSink, StatsSink, StringSink, TextSpan, TextStats,
-};
+use crate::text_count::{rich_text, text_value, SpanSink, SpanStatsSink, StatsSink, StringSink, TextSpan, TextStats};
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -159,6 +157,74 @@ impl UsageSource for CopilotSource {
   }
 }
 
+// ---------------------------------------------------------------------------
+// State replay + visitor
+// ---------------------------------------------------------------------------
+
+/// Visitor over a replayed Copilot chat-session JSONL file.
+///
+/// The walker exposes both state-machine events (`session_snapshot`,
+/// `patch_applied`) and the final, deduped request stream (`request_finalized`).
+/// Current consumers only need the final state, but the replay callbacks keep
+/// the state-machine boundary explicit.
+trait CopilotVisitor {
+  fn session_snapshot(&mut self, _state: &Value) {}
+  fn patch_applied(&mut self, _state: &Value, _path: &[Value]) {}
+  fn replay_complete(&mut self, _state: &Value) {}
+  fn request_finalized(&mut self, _request: &Value) {}
+}
+
+fn walk_session<V: CopilotVisitor>(path: &Path, visitor: &mut V) -> Result<Option<()>> {
+  let mut state = Value::Null;
+  let mut requests_by_id: HashMap<String, Value> = HashMap::new();
+
+  for rec in read_jsonl_collect::<Value>(path)? {
+    let kind = rec.get("kind").and_then(|v| v.as_i64()).unwrap_or(-1);
+    match kind {
+      0 => {
+        if let Some(v) = rec.get("v") {
+          state = v.clone();
+          visitor.session_snapshot(&state);
+          capture_requests_from_state(&state, &mut requests_by_id);
+        }
+      }
+      1 | 2 => {
+        let Some(v) = rec.get("v").cloned() else {
+          continue;
+        };
+        let Some(path_arr) = rec.get("k").and_then(|v| v.as_array()).cloned() else {
+          continue;
+        };
+        let segments: Vec<PathSeg> = path_arr.iter().filter_map(PathSeg::from_value).collect();
+        apply_patch(&mut state, &segments, v);
+        visitor.patch_applied(&state, &path_arr);
+        capture_request_patch(&state, &path_arr, &mut requests_by_id);
+      }
+      _ => {}
+    }
+  }
+
+  if state.is_null() {
+    return Ok(None);
+  }
+
+  visitor.replay_complete(&state);
+  let requests = if requests_by_id.is_empty() {
+    state
+      .get("requests")
+      .and_then(|v| v.as_array())
+      .cloned()
+      .unwrap_or_default()
+  } else {
+    requests_by_id.into_values().collect()
+  };
+  for request in requests {
+    visitor.request_finalized(&request);
+  }
+
+  Ok(Some(()))
+}
+
 fn is_transcript_file(path: &Path) -> bool {
   path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) == Some("transcripts")
 }
@@ -247,53 +313,78 @@ fn hex(b: u8) -> Option<u8> {
 }
 
 fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<UsageRecord>>> {
-  let Some((state, requests)) = replay_session(path)? else {
+  let mut builder = RecordBuilder::new(path, project_cwd);
+  if walk_session(path, &mut builder)?.is_none() {
     return Ok(None);
-  };
+  }
+  let records = builder.into_records();
+  Ok(if records.is_empty() { None } else { Some(records) })
+}
 
-  // Extract metadata.
-  let session_id = state
-    .get("sessionId")
-    .and_then(|v| v.as_str())
-    .map(|s| s.to_string())
-    .unwrap_or_else(|| {
-      path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string()
-    });
+struct RecordBuilder<'a> {
+  path: &'a Path,
+  project_cwd: Option<String>,
+  project_name: Option<String>,
+  session_id: String,
+  creation_ms: Option<i64>,
+  title: Option<String>,
+  default_model: Option<String>,
+  records: Vec<UsageRecord>,
+}
 
-  let creation_ms = state.get("creationDate").and_then(|v| v.as_i64());
-  let title = state.get("customTitle").and_then(|v| v.as_str()).map(|s| s.to_string());
-
-  let default_model = state
-    .pointer("/inputState/selectedModel/metadata/family")
-    .and_then(|v| v.as_str())
-    .or_else(|| {
-      state
-        .pointer("/inputState/selectedModel/metadata/id")
-        .and_then(|v| v.as_str())
-    })
-    .map(|s| s.to_string());
-
-  let project_name = project_cwd
-    .as_ref()
-    .and_then(|p| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()));
-
-  let mut records: Vec<UsageRecord> = Vec::new();
-
-  for req in &requests {
-    if !req.is_object() {
-      continue;
+impl<'a> RecordBuilder<'a> {
+  fn new(path: &'a Path, project_cwd: Option<String>) -> Self {
+    let project_name = project_cwd
+      .as_ref()
+      .and_then(|p| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()));
+    Self {
+      path,
+      project_cwd,
+      project_name,
+      session_id: file_stem_or(path, "unknown"),
+      creation_ms: None,
+      title: None,
+      default_model: None,
+      records: Vec::new(),
     }
-    let req_ts_ms = req.get("timestamp").and_then(|v| v.as_i64()).or(creation_ms);
+  }
+
+  fn into_records(self) -> Vec<UsageRecord> {
+    self.records
+  }
+}
+
+impl CopilotVisitor for RecordBuilder<'_> {
+  fn replay_complete(&mut self, state: &Value) {
+    self.session_id = state
+      .get("sessionId")
+      .and_then(|v| v.as_str())
+      .map(str::to_string)
+      .unwrap_or_else(|| file_stem_or(self.path, "unknown"));
+    self.creation_ms = state.get("creationDate").and_then(|v| v.as_i64());
+    self.title = state.get("customTitle").and_then(|v| v.as_str()).map(str::to_string);
+    self.default_model = state
+      .pointer("/inputState/selectedModel/metadata/family")
+      .and_then(|v| v.as_str())
+      .or_else(|| {
+        state
+          .pointer("/inputState/selectedModel/metadata/id")
+          .and_then(|v| v.as_str())
+      })
+      .map(str::to_string);
+  }
+
+  fn request_finalized(&mut self, req: &Value) {
+    if !req.is_object() {
+      return;
+    }
+    let req_ts_ms = req.get("timestamp").and_then(|v| v.as_i64()).or(self.creation_ms);
     let req_model_raw = req
       .pointer("/modelId")
       .and_then(|v| v.as_str())
       .or_else(|| req.pointer("/agent/modelId").and_then(|v| v.as_str()))
-      .map(|s| s.to_string())
-      .or_else(|| default_model.clone());
+      .map(str::to_string)
+      .or_else(|| self.default_model.clone());
     let (provider, req_model) = match req_model_raw {
       Some(m) => {
         let (p, mm) = normalize_copilot_model(m);
@@ -302,7 +393,6 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       None => (Some("github-copilot".to_string()), None),
     };
 
-    // --- Input estimate ---
     let mut input_chars: u64 = 0;
     let mut input_bytes: u64 = 0;
     let rendered_user = text_like_usage(req.pointer("/result/metadata/renderedUserMessage"));
@@ -311,15 +401,12 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
     let rendered_global_context = text_like_usage(req.pointer("/result/metadata/renderedGlobalContext"));
     input_chars = input_chars.saturating_add(rendered_global_context.chars);
     input_bytes = input_bytes.saturating_add(rendered_global_context.bytes);
-    // Fallback to request.message.text when no rendered user message is present
-    // (older session shapes / queued-but-unsent prompts).
     if rendered_user.chars == 0 {
       let usage = message_text_usage(req);
       input_chars = input_chars.saturating_add(usage.chars);
       input_bytes = input_bytes.saturating_add(usage.bytes);
     }
 
-    // --- Output estimate ---
     let mut output_chars: u64 = 0;
     let mut output_bytes: u64 = 0;
     if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
@@ -330,9 +417,6 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       }
     }
 
-    // --- toolCallRounds: thinking tokens (exact) ---
-    // Tool call arguments are model output.
-    // Tool call results/responses are fed back as model input.
     let mut reasoning: u64 = 0;
     let mut extra_turns: u64 = 0;
     let tool_call_results = req
@@ -358,7 +442,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
               }
             }
             if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
-              let usage = stats_for_str(args);
+              let usage = TextStats::from_str(args);
               output_chars = output_chars.saturating_add(usage.chars);
               output_bytes = output_bytes.saturating_add(usage.bytes);
             }
@@ -366,7 +450,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
         }
         if round_result_chars == 0 {
           if let Some(resp) = round.get("response").and_then(|v| v.as_str()) {
-            let usage = stats_for_str(resp);
+            let usage = TextStats::from_str(resp);
             round_result_chars = round_result_chars.saturating_add(usage.chars);
             input_bytes = input_bytes.saturating_add(usage.bytes);
           }
@@ -375,10 +459,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       }
     }
 
-    let input = input_chars.div_ceil(4);
     let output_exact = req.get("completionTokens").and_then(|v| v.as_u64());
-    let output = output_exact.unwrap_or_else(|| output_chars.div_ceil(4));
-    let ts = req_ts_ms.map(ms_to_dt).unwrap_or_else(|| ms_to_dt(0));
     let command = req
       .get("command")
       .and_then(|v| v.as_str())
@@ -394,17 +475,17 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
         .map(str::to_string)
     };
 
-    records.push(UsageRecord {
+    self.records.push(UsageRecord {
       source: Source::Copilot,
-      session_id: session_id.clone(),
-      session_title: title.clone(),
-      project_cwd: project_cwd.clone(),
-      project_name: project_name.clone(),
+      session_id: self.session_id.clone(),
+      session_title: self.title.clone(),
+      project_cwd: self.project_cwd.clone(),
+      project_name: self.project_name.clone(),
       provider,
       model: req_model,
-      ts,
-      input,
-      output,
+      ts: req_ts_ms.map(ms_to_dt).unwrap_or_else(|| ms_to_dt(0)),
+      input: input_chars.div_ceil(4),
+      output: output_exact.unwrap_or_else(|| output_chars.div_ceil(4)),
       input_bytes,
       output_bytes,
       input_estimated: true,
@@ -422,203 +503,175 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
       cost_embedded: None,
     });
   }
-
-  if records.is_empty() {
-    return Ok(None);
-  }
-
-  Ok(Some(records))
-}
-
-fn replay_session(path: &Path) -> Result<Option<(Value, Vec<Value>)>> {
-  let mut state = Value::Null;
-  let mut requests_by_id: HashMap<String, Value> = HashMap::new();
-
-  for rec in read_jsonl_collect::<Value>(path)? {
-    let kind = rec.get("kind").and_then(|v| v.as_i64()).unwrap_or(-1);
-    match kind {
-      0 => {
-        if let Some(v) = rec.get("v") {
-          state = v.clone();
-          capture_requests_from_state(&state, &mut requests_by_id);
-        }
-      }
-      1 | 2 => {
-        let Some(v) = rec.get("v").cloned() else {
-          continue;
-        };
-        let Some(path_arr) = rec.get("k").and_then(|v| v.as_array()).cloned() else {
-          continue;
-        };
-        let segments: Vec<PathSeg> = path_arr.iter().filter_map(PathSeg::from_value).collect();
-        apply_patch(&mut state, &segments, v);
-        capture_request_patch(&state, &path_arr, &mut requests_by_id);
-      }
-      _ => {}
-    }
-  }
-
-  if state.is_null() {
-    return Ok(None);
-  }
-
-  // Use the deduped per-id request map when available; fall back to
-  // state.requests for sessions emitted as a single snapshot.
-  let requests = if requests_by_id.is_empty() {
-    state
-      .get("requests")
-      .and_then(|v| v.as_array())
-      .cloned()
-      .unwrap_or_default()
-  } else {
-    requests_by_id.into_values().collect()
-  };
-
-  Ok(Some((state, requests)))
 }
 
 fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
-  let Some((state, mut requests)) = replay_session(path)? else {
+  let mut builder = DumpBuilder::new(path);
+  if walk_session(path, &mut builder)?.is_none() {
     return Ok(None);
-  };
+  }
+  Ok(Some(builder.into_session()))
+}
 
-  let session_id = state
-    .get("sessionId")
-    .and_then(|v| v.as_str())
-    .map(|s| s.to_string())
-    .unwrap_or_else(|| {
-      path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string()
+struct DumpBuilder<'a> {
+  path: &'a Path,
+  session_id: String,
+  requests: Vec<Value>,
+}
+
+impl<'a> DumpBuilder<'a> {
+  fn new(path: &'a Path) -> Self {
+    Self {
+      path,
+      session_id: file_stem_or(path, "unknown"),
+      requests: Vec::new(),
+    }
+  }
+
+  fn into_session(mut self) -> DumpedSession {
+    self
+      .requests
+      .sort_by_key(|r| r.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0));
+    let mut out: Vec<DumpRecord> = Vec::new();
+    for req in &self.requests {
+      dump_request(req, &mut out);
+    }
+    DumpedSession {
+      session_id: self.session_id,
+      records: out,
+    }
+  }
+}
+
+impl CopilotVisitor for DumpBuilder<'_> {
+  fn replay_complete(&mut self, state: &Value) {
+    self.session_id = state
+      .get("sessionId")
+      .and_then(|v| v.as_str())
+      .map(str::to_string)
+      .unwrap_or_else(|| file_stem_or(self.path, "unknown"));
+  }
+
+  fn request_finalized(&mut self, request: &Value) {
+    self.requests.push(request.clone());
+  }
+}
+
+fn dump_request(req: &Value, out: &mut Vec<DumpRecord>) {
+  if !req.is_object() {
+    return;
+  }
+
+  // 1) User prompt: prefer renderedUserMessage (post-template), fall back to
+  //    the raw `message.text` / `message.parts[].text`.
+  let mut prompt = collect_text_like(req.pointer("/result/metadata/renderedUserMessage"));
+  if prompt.is_empty() {
+    if let Some(t) = req.pointer("/message/text").and_then(|v| v.as_str()) {
+      prompt = t.to_string();
+    } else if let Some(parts) = req.pointer("/message/parts").and_then(|v| v.as_array()) {
+      let mut buf = String::new();
+      for p in parts {
+        if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
+          if !buf.is_empty() {
+            buf.push('\n');
+          }
+          buf.push_str(t);
+        }
+      }
+      prompt = buf;
+    }
+  }
+  if !prompt.is_empty() {
+    out.push(DumpRecord {
+      role: "user",
+      text: prompt,
+      encrypted_text: None,
+      display: None,
+      call_id: None,
     });
+  }
 
-  // Stable order by timestamp where present (HashMap iteration is undefined).
-  requests.sort_by_key(|r| r.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0));
+  let tool_call_results = req
+    .pointer("/result/metadata/toolCallResults")
+    .and_then(|v| v.as_object());
+  let mut emitted_tool_call_ids: HashSet<String> = HashSet::new();
 
-  let mut out: Vec<DumpRecord> = Vec::new();
-  for req in &requests {
-    if !req.is_object() {
-      continue;
-    }
-
-    // 1) User prompt: prefer renderedUserMessage (post-template), fall back to
-    //    the raw `message.text` / `message.parts[].text`.
-    let mut prompt = collect_text_like(req.pointer("/result/metadata/renderedUserMessage"));
-    if prompt.is_empty() {
-      if let Some(t) = req.pointer("/message/text").and_then(|v| v.as_str()) {
-        prompt = t.to_string();
-      } else if let Some(parts) = req.pointer("/message/parts").and_then(|v| v.as_array()) {
-        let mut buf = String::new();
-        for p in parts {
-          if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
-            if !buf.is_empty() {
-              buf.push('\n');
-            }
-            buf.push_str(t);
-          }
+  // 2) Assistant response: visible text/progress messages. Tool invocation
+  //    records are emitted as tool_call/tool_call_result pairs.
+  if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
+    for item in resp {
+      if item.get("kind").and_then(|v| v.as_str()) == Some("toolInvocationSerialized") {
+        if let Some(id) = emit_tool_invocation_pair(item, tool_call_results, out) {
+          emitted_tool_call_ids.insert(id);
         }
-        prompt = buf;
+        continue;
+      }
+      let text = collect_response_item_text(item);
+      if !text.is_empty() {
+        out.push(DumpRecord {
+          role: "assistant",
+          text,
+          encrypted_text: None,
+          display: None,
+          call_id: item.get("toolCallId").and_then(|v| v.as_str()).map(str::to_string),
+        });
       }
     }
-    if !prompt.is_empty() {
-      out.push(DumpRecord {
-        role: "user",
-        text: prompt,
-        encrypted_text: None,
-        display: None,
-        call_id: None,
-      });
-    }
+  }
 
-    let tool_call_results = req
-      .pointer("/result/metadata/toolCallResults")
-      .and_then(|v| v.as_object());
-    let mut emitted_tool_call_ids: HashSet<String> = HashSet::new();
-
-    // 2) Assistant response: visible text/progress messages. Tool invocation
-    //    records are emitted as tool_call/tool_call_result pairs.
-    if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
-      for item in resp {
-        if item.get("kind").and_then(|v| v.as_str()) == Some("toolInvocationSerialized") {
-          if let Some(id) = emit_tool_invocation_pair(item, tool_call_results, &mut out) {
-            emitted_tool_call_ids.insert(id);
+  // 3) Tool call rounds: emit tool_call/tool_call_result pairs with matching
+  //    call_id so consumers can replay round-trips exactly.
+  if let Some(rounds) = req
+    .pointer("/result/metadata/toolCallRounds")
+    .and_then(|v| v.as_array())
+  {
+    for round in rounds {
+      if let Some(calls) = round.get("toolCalls").and_then(|v| v.as_array()) {
+        for call in calls {
+          let Some(id) = call.get("id").and_then(|v| v.as_str()) else {
+            continue;
+          };
+          if emitted_tool_call_ids.contains(id) {
+            continue;
           }
-          continue;
-        }
-        let text = collect_response_item_text(item);
-        if !text.is_empty() {
-          out.push(DumpRecord {
-            role: "assistant",
-            text,
-            encrypted_text: None,
-            display: None,
-            call_id: item.get("toolCallId").and_then(|v| v.as_str()).map(str::to_string),
-          });
-        }
-      }
-    }
-
-    // 3) Tool call rounds: emit tool_call/tool_call_result pairs with matching
-    //    call_id so consumers can replay round-trips exactly.
-    if let Some(rounds) = req
-      .pointer("/result/metadata/toolCallRounds")
-      .and_then(|v| v.as_array())
-    {
-      for round in rounds {
-        if let Some(calls) = round.get("toolCalls").and_then(|v| v.as_array()) {
-          for call in calls {
-            let Some(id) = call.get("id").and_then(|v| v.as_str()) else {
-              continue;
-            };
-            if emitted_tool_call_ids.contains(id) {
-              continue;
-            }
-            if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
-              if !args.is_empty() {
-                let name = call.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
-                out.push(DumpRecord {
-                  role: "tool_call",
-                  text: format!("{name}: {args}"),
-                  encrypted_text: None,
-                  display: None,
-                  call_id: Some(id.to_string()),
-                });
-              }
-            }
-            let text = match tool_call_results.and_then(|m| m.get(id)) {
-              Some(result) => collect_tool_result_text(result),
-              None => round
-                .get("response")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            };
-            if !text.is_empty() {
-              let display = round
-                .get("response")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .map(str::to_string);
+          if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
+            if !args.is_empty() {
+              let name = call.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
               out.push(DumpRecord {
-                role: "tool_call_result",
-                text,
+                role: "tool_call",
+                text: format!("{name}: {args}"),
                 encrypted_text: None,
-                display,
+                display: None,
                 call_id: Some(id.to_string()),
               });
             }
           }
+          let text = match tool_call_results.and_then(|m| m.get(id)) {
+            Some(result) => collect_tool_result_text(result),
+            None => round
+              .get("response")
+              .and_then(|v| v.as_str())
+              .map(|s| s.to_string())
+              .unwrap_or_default(),
+          };
+          if !text.is_empty() {
+            let display = round
+              .get("response")
+              .and_then(|v| v.as_str())
+              .filter(|s| !s.is_empty())
+              .map(str::to_string);
+            out.push(DumpRecord {
+              role: "tool_call_result",
+              text,
+              encrypted_text: None,
+              display,
+              call_id: Some(id.to_string()),
+            });
+          }
         }
       }
     }
   }
-
-  Ok(Some(DumpedSession {
-    session_id,
-    records: out,
-  }))
 }
 
 fn emit_tool_invocation_pair(
@@ -769,7 +822,7 @@ fn placeholder_for(seg: &PathSeg) -> Value {
 
 fn message_text_usage(req: &Value) -> TextStats {
   if let Some(text) = req.pointer("/message/text").and_then(|v| v.as_str()) {
-    return stats_for_str(text);
+    return TextStats::from_str(text);
   }
   req
     .pointer("/message/parts")
@@ -779,7 +832,7 @@ fn message_text_usage(req: &Value) -> TextStats {
       parts
         .iter()
         .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
-        .for_each(|text| stats.add(stats_for_str(text)));
+        .for_each(|text| stats.add(TextStats::from_str(text)));
       stats
     })
     .unwrap_or_default()
@@ -920,4 +973,12 @@ fn merge_objects(base: &mut Value, next: &Value) {
   for (key, value) in next_obj {
     base_obj.insert(key.clone(), value.clone());
   }
+}
+
+fn file_stem_or(path: &Path, fallback: &str) -> String {
+  path
+    .file_stem()
+    .and_then(|s| s.to_str())
+    .unwrap_or(fallback)
+    .to_string()
 }
