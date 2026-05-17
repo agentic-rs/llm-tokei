@@ -87,6 +87,7 @@ fn token_stats_from_shutdown_usage(usage: &Value) -> crate::text_count::TokenUsa
     reasoning,
     token(usage, "cacheReadTokens"),
     token(usage, "cacheWriteTokens"),
+    usage.get("totalTokens").and_then(|v| v.as_u64()),
   ));
   sink.usage
 }

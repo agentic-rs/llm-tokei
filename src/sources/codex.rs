@@ -568,14 +568,11 @@ impl RawTokenUsage {
       self.reasoning_output_tokens,
       self.cached_input_tokens,
       0,
+      self.total_tokens,
     ));
     sink.usage.total = self.total_tokens;
     sink.usage
   }
-}
-
-fn sub_stats(a: TokenUsageStats, b: TokenUsageStats) -> TokenUsageStats {
-  a.sub(b)
 }
 
 /// Returns the per-turn delta as `TokenUsageStats`, updating the cumulative
@@ -600,7 +597,7 @@ fn extract_turn_usage(payload: &Value, prev_total: &mut Option<TokenUsageStats>)
     }
     (None, Some(total)) => {
       let delta = match prev_total {
-        Some(prev) => sub_stats(total, *prev),
+        Some(prev) => total.sub(*prev),
         None => total,
       };
       *prev_total = Some(total);

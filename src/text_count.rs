@@ -41,21 +41,39 @@ pub struct TokenSpan {
   pub reasoning: Option<u64>,
   pub cache_read: Option<u64>,
   pub cache_write: Option<u64>,
+  pub total: Option<u64>,
 }
 
 impl TokenSpan {
-  pub fn usage(prompt: u64, completion: u64, reasoning: u64, cache_read: u64, cache_write: u64) -> Self {
+  pub fn usage(
+    prompt: u64,
+    completion: u64,
+    reasoning: u64,
+    cache_read: u64,
+    cache_write: u64,
+    total: Option<u64>,
+  ) -> Self {
     Self {
       prompt: Some(prompt),
       completion: Some(completion),
       reasoning: Some(reasoning),
       cache_read: Some(cache_read),
       cache_write: Some(cache_write),
+      total,
     }
+  }
+
+  pub fn is_none(&self) -> bool {
+    self.prompt.is_none()
+      && self.completion.is_none()
+      && self.reasoning.is_none()
+      && self.cache_read.is_none()
+      && self.cache_write.is_none()
+      && self.total.is_none()
   }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct TokenUsageStats {
   pub prompt: u64,
   pub completion: u64,
@@ -65,25 +83,48 @@ pub struct TokenUsageStats {
   pub total: Option<u64>,
 }
 
+impl Default for TokenUsageStats {
+  fn default() -> Self {
+    Self {
+      prompt: Default::default(),
+      completion: Default::default(),
+      reasoning: Default::default(),
+      cache_read: Default::default(),
+      cache_write: Default::default(),
+      total: Some(0),
+    }
+  }
+}
+
 impl TokenUsageStats {
   pub fn add_span(&mut self, span: TokenSpan) {
+    if span.is_none() {
+      return;
+    }
     self.prompt = self.prompt.saturating_add(span.prompt.unwrap_or(0));
     self.completion = self.completion.saturating_add(span.completion.unwrap_or(0));
     self.reasoning = self.reasoning.saturating_add(span.reasoning.unwrap_or(0));
     self.cache_read = self.cache_read.saturating_add(span.cache_read.unwrap_or(0));
     self.cache_write = self.cache_write.saturating_add(span.cache_write.unwrap_or(0));
-  }
-
-  pub fn add(&mut self, other: Self) {
-    self.prompt = self.prompt.saturating_add(other.prompt);
-    self.completion = self.completion.saturating_add(other.completion);
-    self.reasoning = self.reasoning.saturating_add(other.reasoning);
-    self.cache_read = self.cache_read.saturating_add(other.cache_read);
-    self.cache_write = self.cache_write.saturating_add(other.cache_write);
-    self.total = match (self.total, other.total) {
+    self.total = match (self.total, span.total) {
       (Some(a), Some(b)) => Some(a.saturating_add(b)),
       _ => None,
     };
+  }
+
+  #[allow(dead_code)]
+  pub fn add(&self, other: Self) -> Self {
+    Self {
+      prompt: self.prompt.saturating_add(other.prompt),
+      completion: self.completion.saturating_add(other.completion),
+      reasoning: self.reasoning.saturating_add(other.reasoning),
+      cache_read: self.cache_read.saturating_add(other.cache_read),
+      cache_write: self.cache_write.saturating_add(other.cache_write),
+      total: match (self.total, other.total) {
+        (Some(a), Some(b)) => Some(a.saturating_add(b)),
+        _ => None,
+      },
+    }
   }
 
   pub fn sub(&self, other: Self) -> Self {
@@ -401,7 +442,7 @@ mod tests {
 
   #[test]
   fn token_usage_stats_add_both_some() {
-    let mut a = TokenUsageStats {
+    let a = TokenUsageStats {
       prompt: 10,
       completion: 20,
       reasoning: 5,
@@ -417,18 +458,18 @@ mod tests {
       cache_write: 1,
       total: Some(20),
     };
-    a.add(b);
-    assert_eq!(a.prompt, 15);
-    assert_eq!(a.completion, 30);
-    assert_eq!(a.reasoning, 8);
-    assert_eq!(a.cache_read, 4);
-    assert_eq!(a.cache_write, 3);
-    assert_eq!(a.total, Some(60));
+    let sum = a.add(b);
+    assert_eq!(sum.prompt, 15);
+    assert_eq!(sum.completion, 30);
+    assert_eq!(sum.reasoning, 8);
+    assert_eq!(sum.cache_read, 4);
+    assert_eq!(sum.cache_write, 3);
+    assert_eq!(sum.total, Some(60));
   }
 
   #[test]
   fn token_usage_stats_add_one_none() {
-    let mut a = TokenUsageStats {
+    let a = TokenUsageStats {
       prompt: 10,
       completion: 20,
       reasoning: 5,
@@ -436,10 +477,10 @@ mod tests {
       cache_write: 2,
       total: Some(40),
     };
-    a.add(TokenUsageStats::default());
-    assert_eq!(a.total, None);
+    let sum = a.add(TokenUsageStats::default());
+    assert_eq!(sum.total, None);
 
-    let mut a = TokenUsageStats {
+    let a = TokenUsageStats {
       prompt: 10,
       completion: 20,
       reasoning: 5,
@@ -447,7 +488,7 @@ mod tests {
       cache_write: 2,
       total: None,
     };
-    a.add(TokenUsageStats {
+    let sum = a.add(TokenUsageStats {
       prompt: 0,
       completion: 0,
       reasoning: 0,
@@ -455,7 +496,7 @@ mod tests {
       cache_write: 0,
       total: Some(10),
     });
-    assert_eq!(a.total, None);
+    assert_eq!(sum.total, None);
   }
 
   #[test]
@@ -517,5 +558,26 @@ mod tests {
     };
     let delta = a.sub(b);
     assert_eq!(delta.total, None);
+  }
+
+  #[test]
+  fn token_usage_stats_add_span_adds_total_only_when_both_present() {
+    let mut stats = TokenUsageStats {
+      prompt: 1,
+      completion: 2,
+      reasoning: 3,
+      cache_read: 4,
+      cache_write: 5,
+      total: Some(6),
+    };
+    stats.add_span(TokenSpan::usage(10, 20, 30, 40, 50, Some(60)));
+    assert_eq!(stats.total, Some(66));
+
+    let mut stats = TokenUsageStats {
+      total: Some(6),
+      ..TokenUsageStats::default()
+    };
+    stats.add_span(TokenSpan::usage(10, 20, 30, 40, 50, None));
+    assert_eq!(stats.total, None);
   }
 }

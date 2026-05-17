@@ -556,6 +556,7 @@ fn token_stats_from_compaction_usage(usage: &Value) -> TokenUsageStats {
     token_alias(usage, "reasoningTokens", "reasoning"),
     token_alias(usage, "cacheReadTokens", "cachedInput"),
     usage.get("cacheWriteTokens").and_then(|v| v.as_u64()).unwrap_or(0),
+    usage.get("totalTokens").and_then(|v| v.as_u64()),
   ));
   sink.usage
 }
