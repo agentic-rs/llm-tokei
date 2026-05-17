@@ -479,7 +479,11 @@ mod tests {
       cache_write: 2,
       total: Some(40),
     };
-    let sum = a.add(TokenUsageStats::default());
+    let b = TokenUsageStats {
+      total: None,
+      ..Default::default()
+    };
+    let sum = a.add(b);
     assert_eq!(sum.total, None);
 
     let a = TokenUsageStats {
@@ -538,7 +542,10 @@ mod tests {
       cache_write: 3,
       total: Some(60),
     };
-    let b = TokenUsageStats::default();
+    let b = TokenUsageStats {
+      total: None,
+      ..Default::default()
+    };
     let delta = a.sub(b);
     assert_eq!(delta.total, None);
 

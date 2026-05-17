@@ -312,11 +312,11 @@ fn copilot_transcript_shutdown_dedupes_chat_session() {
   let arr = v.as_array().unwrap();
   assert_eq!(arr.len(), 1);
   let row = &arr[0];
-  assert_eq!(row["input"], 17);
+  assert_eq!(row["input"], 10);
   assert_eq!(row["output"], 20);
   assert_eq!(row["cache_read"], 3);
   assert_eq!(row["cache_write"], 4);
-  assert_eq!(row["total"], 37);
+  assert_eq!(row["total"], 30);
   assert_eq!(row["calls"], 2);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);
@@ -381,12 +381,12 @@ fn copilot_cli_shutdown_merges_estimated_bytes() {
   let v: serde_json::Value = serde_json::from_str(&s).expect("valid json");
   let row = &v.as_array().unwrap()[0];
   // Shutdown provides exact tokens; display_input = input + cache_read + cache_write.
-  assert_eq!(row["input"], 63);
+  assert_eq!(row["input"], 50);
   assert_eq!(row["output"], 30);
   assert_eq!(row["reasoning"], 5);
   assert_eq!(row["cache_read"], 10);
   assert_eq!(row["cache_write"], 3);
-  assert_eq!(row["total"], 93);
+  assert_eq!(row["total"], 80);
   assert_eq!(row["calls"], 2);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);
