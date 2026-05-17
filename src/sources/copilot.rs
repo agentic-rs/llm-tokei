@@ -593,6 +593,7 @@ impl SessionVisitor for RecordBuilder<'_> {
       reasoning,
       cache_read: 0,
       cache_write: 0,
+      total_direct: None,
       mode,
       agent: req.pointer("/agent/id").and_then(|v| v.as_str()).map(str::to_string),
       is_compaction,

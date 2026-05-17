@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-const CACHE_SCHEMA_VERSION: i64 = 5;
+const CACHE_SCHEMA_VERSION: i64 = 6;
 
 const SCHEMA: &str = "\
 CREATE TABLE IF NOT EXISTS sessions (
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS records (
     reasoning     INTEGER NOT NULL,
     cache_read    INTEGER NOT NULL,
     cache_write   INTEGER NOT NULL,
+    total         INTEGER,
     mode          TEXT,
     agent         TEXT,
     is_compaction INTEGER NOT NULL,
@@ -81,6 +82,7 @@ const EXPECTED_RECORDS_COLUMNS: &[&str] = &[
   "reasoning",
   "cache_read",
   "cache_write",
+  "total",
   "mode",
   "agent",
   "is_compaction",
@@ -179,7 +181,7 @@ impl CacheDb {
       "SELECT s.source, s.session_id, s.session_title, s.project_cwd, s.project_name, \
                r.provider, r.model, r.ts, r.prompt, r.completion, r.input_bytes, r.output_bytes, \
                r.input_estimated, r.output_estimated, r.input_bytes_estimated, r.output_bytes_estimated, \
-               r.reasoning, r.cache_read, r.cache_write, r.mode, r.agent, r.is_compaction, r.rounds, \
+               r.reasoning, r.cache_read, r.cache_write, r.total, r.mode, r.agent, r.is_compaction, r.rounds, \
                r.calls, r.cost_embedded \
        FROM records r \
        INNER JOIN sessions s ON s.id = r.session_rowid \
@@ -238,9 +240,9 @@ impl CacheDb {
       let mut insert_record = self.conn.prepare(
         "INSERT INTO records (session_rowid, provider, model, ts, prompt, completion, input_bytes, output_bytes, \
                              input_estimated, output_estimated, input_bytes_estimated, output_bytes_estimated, \
-                             reasoning, cache_read, cache_write, mode, agent, is_compaction, rounds, calls, \
+                             reasoning, cache_read, cache_write, total, mode, agent, is_compaction, rounds, calls, \
                              cost_embedded) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
       )?;
       for record in session_records {
         insert_record.execute(params![
@@ -259,6 +261,7 @@ impl CacheDb {
           to_sql_i64(record.reasoning),
           to_sql_i64(record.cache_read),
           to_sql_i64(record.cache_write),
+          record.total_direct.map(to_sql_i64),
           record.mode,
           record.agent,
           if record.is_compaction { 1 } else { 0 },
@@ -379,12 +382,13 @@ fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> Usa
     reasoning: row.get::<_, i64>(16).ok().map(from_sql_i64).unwrap_or(0),
     cache_read: row.get::<_, i64>(17).ok().map(from_sql_i64).unwrap_or(0),
     cache_write: row.get::<_, i64>(18).ok().map(from_sql_i64).unwrap_or(0),
-    mode: row.get(19).unwrap_or(None),
-    agent: row.get(20).unwrap_or(None),
-    is_compaction: row.get::<_, i64>(21).unwrap_or(0) != 0,
-    rounds: row.get::<_, i64>(22).ok().map(from_sql_i64).unwrap_or(0),
-    calls: row.get::<_, i64>(23).ok().map(from_sql_i64).unwrap_or(0),
-    cost_embedded: row.get(24).unwrap_or(None),
+    total_direct: row.get::<_, Option<i64>>(19).unwrap_or(None).map(from_sql_i64),
+    mode: row.get(20).unwrap_or(None),
+    agent: row.get(21).unwrap_or(None),
+    is_compaction: row.get::<_, i64>(22).unwrap_or(0) != 0,
+    rounds: row.get::<_, i64>(23).ok().map(from_sql_i64).unwrap_or(0),
+    calls: row.get::<_, i64>(24).ok().map(from_sql_i64).unwrap_or(0),
+    cost_embedded: row.get(25).unwrap_or(None),
   }
 }
 

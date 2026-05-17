@@ -188,6 +188,7 @@ impl UsageSource for OpenCodeSource {
         reasoning: tokens.reasoning,
         cache_read: cache.read,
         cache_write: cache.write,
+        total_direct: None,
         mode: None,
         agent: None,
         is_compaction: false,

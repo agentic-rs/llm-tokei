@@ -66,6 +66,7 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
         reasoning: tokens.reasoning,
         cache_read: tokens.cache_read,
         cache_write: tokens.cache_write,
+        total_direct: None,
         mode: Some("session.shutdown".to_string()),
         agent: None,
         is_compaction: false,

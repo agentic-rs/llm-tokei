@@ -49,6 +49,9 @@ pub struct UsageRecord {
   pub reasoning: u64,
   pub cache_read: u64,
   pub cache_write: u64,
+  /// Source-reported total token count when available. This is stored as-is
+  /// from the upstream entry and may differ from the derived display total.
+  pub total_direct: Option<u64>,
   pub mode: Option<String>,
   pub agent: Option<String>,
   pub is_compaction: bool,

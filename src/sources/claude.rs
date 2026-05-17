@@ -259,6 +259,7 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       reasoning: 0,
       cache_read: turn.cache_read,
       cache_write: turn.cache_write,
+      total_direct: None,
       mode: None,
       agent: None,
       is_compaction: false,
