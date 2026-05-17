@@ -349,9 +349,10 @@ fn copilot_cli_fixture_parses_fallback_and_compaction() {
   let row = &arr[0];
   assert_eq!(row["input"], 20);
   assert_eq!(row["output"], 20);
+  assert_eq!(row["reasoning"], 3);
   assert_eq!(row["cache_read"], 5);
   assert_eq!(row["cache_write"], 2);
-  assert_eq!(row["total"], 40);
+  assert_eq!(row["total"], 43);
   assert_eq!(row["turns"], 2);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);

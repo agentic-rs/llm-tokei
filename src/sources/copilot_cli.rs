@@ -302,7 +302,7 @@ impl EventsVisitor for RecordBuilder<'_> {
       output_estimated: false,
       input_bytes_estimated: true,
       output_bytes_estimated: true,
-      reasoning: 0,
+      reasoning: tokens.reasoning,
       cache_read: tokens.cache_read,
       cache_write: tokens.cache_write,
       mode: Some("compaction".to_string()),
@@ -437,7 +437,7 @@ fn token_stats_from_compaction_usage(usage: &Value) -> TokenUsageStats {
   sink.token(TokenSpan::usage(
     token_alias(usage, "inputTokens", "input"),
     token_alias(usage, "outputTokens", "output"),
-    0,
+    token_alias(usage, "reasoningTokens", "reasoning"),
     token_alias(usage, "cacheReadTokens", "cachedInput"),
     usage.get("cacheWriteTokens").and_then(|v| v.as_u64()).unwrap_or(0),
   ));
