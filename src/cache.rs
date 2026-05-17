@@ -27,8 +27,8 @@ CREATE TABLE IF NOT EXISTS records (
     provider      TEXT,
     model         TEXT,
     ts            TEXT NOT NULL,
-    input         INTEGER NOT NULL,
-    output        INTEGER NOT NULL,
+    prompt        INTEGER NOT NULL,
+    completion    INTEGER NOT NULL,
     input_bytes   INTEGER NOT NULL,
     output_bytes  INTEGER NOT NULL,
     input_estimated INTEGER NOT NULL,
@@ -70,8 +70,8 @@ const EXPECTED_RECORDS_COLUMNS: &[&str] = &[
   "provider",
   "model",
   "ts",
-  "input",
-  "output",
+  "prompt",
+  "completion",
   "input_bytes",
   "output_bytes",
   "input_estimated",
@@ -177,7 +177,7 @@ impl CacheDb {
     let fp_str = file_path.to_string_lossy();
     let mut stmt = self.conn.prepare(
       "SELECT s.source, s.session_id, s.session_title, s.project_cwd, s.project_name, \
-               r.provider, r.model, r.ts, r.input, r.output, r.input_bytes, r.output_bytes, \
+               r.provider, r.model, r.ts, r.prompt, r.completion, r.input_bytes, r.output_bytes, \
                r.input_estimated, r.output_estimated, r.input_bytes_estimated, r.output_bytes_estimated, \
                r.reasoning, r.cache_read, r.cache_write, r.mode, r.agent, r.is_compaction, r.rounds, \
                r.calls, r.cost_embedded \
@@ -236,7 +236,7 @@ impl CacheDb {
       )?;
       let sid = self.conn.last_insert_rowid();
       let mut insert_record = self.conn.prepare(
-        "INSERT INTO records (session_rowid, provider, model, ts, input, output, input_bytes, output_bytes, \
+        "INSERT INTO records (session_rowid, provider, model, ts, prompt, completion, input_bytes, output_bytes, \
                              input_estimated, output_estimated, input_bytes_estimated, output_bytes_estimated, \
                              reasoning, cache_read, cache_write, mode, agent, is_compaction, rounds, calls, \
                              cost_embedded) \
@@ -248,8 +248,8 @@ impl CacheDb {
           record.provider,
           record.model,
           record.ts.to_rfc3339(),
-          to_sql_i64(record.input),
-          to_sql_i64(record.output),
+          to_sql_i64(record.prompt),
+          to_sql_i64(record.completion),
           to_sql_i64(record.input_bytes),
           to_sql_i64(record.output_bytes),
           if record.input_estimated { 1 } else { 0 },
@@ -368,8 +368,8 @@ fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> Usa
     provider: row.get(5).unwrap_or(None),
     model: row.get(6).unwrap_or(None),
     ts,
-    input: row.get::<_, i64>(8).ok().map(from_sql_i64).unwrap_or(0),
-    output: row.get::<_, i64>(9).ok().map(from_sql_i64).unwrap_or(0),
+    prompt: row.get::<_, i64>(8).ok().map(from_sql_i64).unwrap_or(0),
+    completion: row.get::<_, i64>(9).ok().map(from_sql_i64).unwrap_or(0),
     input_bytes: row.get::<_, i64>(10).ok().map(from_sql_i64).unwrap_or(0),
     output_bytes: row.get::<_, i64>(11).ok().map(from_sql_i64).unwrap_or(0),
     input_estimated: row.get::<_, i64>(12).unwrap_or(0) != 0,

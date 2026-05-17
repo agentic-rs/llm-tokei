@@ -38,8 +38,8 @@ pub struct UsageRecord {
   pub provider: Option<String>,
   pub model: Option<String>,
   pub ts: DateTime<Utc>,
-  pub input: u64,
-  pub output: u64,
+  pub prompt: u64,
+  pub completion: u64,
   pub input_bytes: u64,
   pub output_bytes: u64,
   pub input_estimated: bool,
@@ -61,19 +61,21 @@ pub struct UsageRecord {
 }
 
 impl UsageRecord {
-  /// Displayed input includes cached reads and writes.
+  /// Displayed input includes prompt and cache traffic.
   pub fn display_input(&self) -> u64 {
     self
-      .input
+      .prompt
       .saturating_add(self.cache_read)
       .saturating_add(self.cache_write)
   }
 
-  /// Display total uses the displayed input column as-is.
+  /// Displayed output includes visible completion and reasoning.
+  pub fn display_output(&self) -> u64 {
+    self.completion.saturating_add(self.reasoning)
+  }
+
+  /// Display total uses the displayed input/output columns as-is.
   pub fn total(&self) -> u64 {
-    self
-      .display_input()
-      .saturating_add(self.output)
-      .saturating_add(self.reasoning)
+    self.display_input().saturating_add(self.display_output())
   }
 }

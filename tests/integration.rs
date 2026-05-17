@@ -77,19 +77,18 @@ fn codex_fixture_parses_last_total() {
   assert_eq!(row["output"], 220);
   assert_eq!(row["reasoning"], 50);
   assert_eq!(row["cache_read"], 200);
-  // total = input + output + reasoning.
-  assert_eq!(row["total"], 770);
+  // total = input + output, where output already includes reasoning.
+  assert_eq!(row["total"], 720);
   assert_eq!(row["calls"], 4);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["model"], "gpt-5");
   assert_eq!(row["keys"]["source"], "codex");
   // gpt-5 base price: input 1.25 + output 10 + cache_read 0.125 (per 1M).
-  // Billing uses uncached_input = 300.
-  // 300*1.25 + 220*10 + 50*10 (reasoning falls back to output) + 200*0.125
-  //   = 375 + 2200 + 500 + 25 = 3100 → / 1e6 = 0.003100
+  // Billing uses prompt = 300, completion = 170, reasoning = 50, cache_read = 200.
+  // 300*1.25 + 170*10 + 50*10 + 200*0.125 = 375 + 1700 + 500 + 25 = 2600 → / 1e6 = 0.002600
   let cost = row["cost"].as_f64().unwrap();
-  assert!((cost - 0.003100).abs() < 1e-9, "got {cost}");
+  assert!((cost - 0.002600).abs() < 1e-9, "got {cost}");
 }
 
 #[test]
@@ -120,7 +119,7 @@ fn codex_fixture_reports_response_item_bytes() {
   assert_eq!(row["input"], 37);
   assert_eq!(row["output"], 34);
   assert_eq!(row["reasoning"], 50);
-  assert_eq!(row["total"], 770);
+  assert_eq!(row["total"], 720);
   assert_eq!(row["calls"], 4);
   assert_eq!(row["rounds"], 2);
 }
@@ -157,8 +156,8 @@ fn codex_bytes_mode_rebuilds_stale_zero_byte_cache() {
             provider      TEXT,
             model         TEXT,
             ts            TEXT NOT NULL,
-            input         INTEGER NOT NULL,
-            output        INTEGER NOT NULL,
+            prompt        INTEGER NOT NULL,
+            completion    INTEGER NOT NULL,
             input_bytes   INTEGER NOT NULL,
             output_bytes  INTEGER NOT NULL,
             input_estimated INTEGER NOT NULL,
@@ -232,7 +231,7 @@ fn claude_fixture_parses_usage() {
   // output = 40+20 = 60
   // cache_read  = 250
   // cache_write = 37
-  // total = input + output + reasoning = 347+60+0 = 407
+  // total = input + output = 347+60 = 407
   assert_eq!(row["input"], 347);
   assert_eq!(row["output"], 60);
   assert_eq!(row["reasoning"], 0);
@@ -277,7 +276,7 @@ fn copilot_fixture_estimates_and_thinking() {
   // (`toolCallResults` is preferred over short `toolCallRounds.response` summaries.)
   // reasoning = 17 (exact, from thinking.tokens)
   assert_eq!(row["input"], 21);
-  assert_eq!(row["output"], 13);
+  assert_eq!(row["output"], 30);
   assert_eq!(row["reasoning"], 17);
   assert_eq!(row["cache_read"], 0);
   assert_eq!(row["cache_write"], 0);
@@ -348,7 +347,7 @@ fn copilot_cli_fixture_parses_fallback_and_compaction() {
   assert_eq!(arr.len(), 1);
   let row = &arr[0];
   assert_eq!(row["input"], 20);
-  assert_eq!(row["output"], 20);
+  assert_eq!(row["output"], 23);
   assert_eq!(row["reasoning"], 3);
   assert_eq!(row["cache_read"], 5);
   assert_eq!(row["cache_write"], 2);
@@ -387,7 +386,7 @@ fn copilot_cli_shutdown_merges_estimated_bytes() {
   assert_eq!(row["reasoning"], 5);
   assert_eq!(row["cache_read"], 10);
   assert_eq!(row["cache_write"], 3);
-  assert_eq!(row["total"], 98);
+  assert_eq!(row["total"], 93);
   assert_eq!(row["calls"], 2);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);
@@ -446,7 +445,7 @@ fn bytes_mode_switches_input_output_units_only() {
     .expect("bytes row for claude-sonnet-4.5");
 
   assert_eq!(token_row["input"], 21);
-  assert_eq!(token_row["output"], 13);
+  assert_eq!(token_row["output"], 30);
   assert_eq!(bytes_row["input"], 82);
   assert_eq!(bytes_row["output"], 49);
   assert_eq!(token_row["total"], bytes_row["total"]);
@@ -523,7 +522,7 @@ fn table_width_does_not_affect_json_output() {
   let row = &v.as_array().unwrap()[0];
   assert_eq!(row["input"], 500);
   assert_eq!(row["output"], 220);
-  assert_eq!(row["total"], 770);
+  assert_eq!(row["total"], 720);
 }
 
 #[test]

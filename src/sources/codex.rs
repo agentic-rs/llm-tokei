@@ -289,8 +289,8 @@ impl<'a> RecordBuilder<'a> {
           provider: t.provider,
           model: t.model,
           ts: t.ts,
-          input: t.tokens.input,
-          output: t.tokens.output,
+          prompt: t.tokens.prompt,
+          completion: t.tokens.completion,
           input_bytes: t.bytes.input,
           output_bytes: t.bytes.output,
           input_estimated: false,
@@ -561,7 +561,7 @@ impl RawTokenUsage {
     let mut sink = TokenStatsSink::default();
     sink.token(TokenSpan::usage(
       self.input_tokens.saturating_sub(self.cached_input_tokens),
-      self.output_tokens,
+      self.output_tokens.saturating_sub(self.reasoning_output_tokens),
       self.reasoning_output_tokens,
       self.cached_input_tokens,
       0,
@@ -572,8 +572,8 @@ impl RawTokenUsage {
 
 fn sub_stats(a: TokenUsageStats, b: TokenUsageStats) -> TokenUsageStats {
   TokenUsageStats {
-    input: a.input.saturating_sub(b.input),
-    output: a.output.saturating_sub(b.output),
+    prompt: a.prompt.saturating_sub(b.prompt),
+    completion: a.completion.saturating_sub(b.completion),
     reasoning: a.reasoning.saturating_sub(b.reasoning),
     cache_read: a.cache_read.saturating_sub(b.cache_read),
     cache_write: a.cache_write.saturating_sub(b.cache_write),
@@ -643,14 +643,14 @@ mod tests {
       records.iter().map(|r| r.output_bytes).collect::<Vec<_>>(),
       vec![20, 4, 5, 5]
     );
-    // `input` stores the uncached portion (input_tokens - cached_input_tokens).
+    // `prompt` stores the uncached portion (input_tokens - cached_input_tokens).
     assert_eq!(
-      records.iter().map(|r| r.input).collect::<Vec<_>>(),
+      records.iter().map(|r| r.prompt).collect::<Vec<_>>(),
       vec![60, 60, 120, 60]
     );
     assert_eq!(
-      records.iter().map(|r| r.output).collect::<Vec<_>>(),
-      vec![50, 40, 90, 40]
+      records.iter().map(|r| r.completion).collect::<Vec<_>>(),
+      vec![40, 30, 70, 30]
     );
     assert_eq!(
       records.iter().map(|r| r.cache_read).collect::<Vec<_>>(),

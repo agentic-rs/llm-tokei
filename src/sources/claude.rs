@@ -234,7 +234,8 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     } else {
       0
     };
-    let input = turn.input;
+    let prompt = turn.input;
+    let completion = turn.output;
     let ts = turn
       .ts
       .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
@@ -247,8 +248,8 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       provider: Some("anthropic".to_string()),
       model: turn.model,
       ts,
-      input,
-      output: turn.output,
+      prompt,
+      completion,
       input_bytes: 0,
       output_bytes: 0,
       input_estimated: false,
@@ -312,8 +313,8 @@ fn decode_dir_name(path: &Path) -> Option<String> {
 }
 
 fn summarize(records: &[UsageRecord]) -> String {
-  let input: u64 = records.iter().map(|r| r.input).sum();
-  let output: u64 = records.iter().map(|r| r.output).sum();
+  let input: u64 = records.iter().map(UsageRecord::display_input).sum();
+  let output: u64 = records.iter().map(UsageRecord::display_output).sum();
   let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
   let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
   let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();

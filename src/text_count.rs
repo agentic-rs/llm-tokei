@@ -36,18 +36,18 @@ impl TextStats {
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TokenSpan {
-  pub input: Option<u64>,
-  pub output: Option<u64>,
+  pub prompt: Option<u64>,
+  pub completion: Option<u64>,
   pub reasoning: Option<u64>,
   pub cache_read: Option<u64>,
   pub cache_write: Option<u64>,
 }
 
 impl TokenSpan {
-  pub fn usage(input: u64, output: u64, reasoning: u64, cache_read: u64, cache_write: u64) -> Self {
+  pub fn usage(prompt: u64, completion: u64, reasoning: u64, cache_read: u64, cache_write: u64) -> Self {
     Self {
-      input: Some(input),
-      output: Some(output),
+      prompt: Some(prompt),
+      completion: Some(completion),
       reasoning: Some(reasoning),
       cache_read: Some(cache_read),
       cache_write: Some(cache_write),
@@ -57,8 +57,8 @@ impl TokenSpan {
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TokenUsageStats {
-  pub input: u64,
-  pub output: u64,
+  pub prompt: u64,
+  pub completion: u64,
   pub reasoning: u64,
   pub cache_read: u64,
   pub cache_write: u64,
@@ -66,8 +66,8 @@ pub struct TokenUsageStats {
 
 impl TokenUsageStats {
   pub fn add_span(&mut self, span: TokenSpan) {
-    self.input = self.input.saturating_add(span.input.unwrap_or(0));
-    self.output = self.output.saturating_add(span.output.unwrap_or(0));
+    self.prompt = self.prompt.saturating_add(span.prompt.unwrap_or(0));
+    self.completion = self.completion.saturating_add(span.completion.unwrap_or(0));
     self.reasoning = self.reasoning.saturating_add(span.reasoning.unwrap_or(0));
     self.cache_read = self.cache_read.saturating_add(span.cache_read.unwrap_or(0));
     self.cache_write = self.cache_write.saturating_add(span.cache_write.unwrap_or(0));

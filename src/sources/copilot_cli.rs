@@ -89,10 +89,17 @@ impl CopilotCliSource {
       let total_input_bytes = bytes_collector.input_bytes;
       let total_output_bytes = bytes_collector.output_bytes;
       // Distribute bytes proportionally across shutdown records.
-      let token_total: u64 = shutdown.iter().map(|r| r.input + r.output).sum();
+      let token_total: u64 = shutdown
+        .iter()
+        .map(|r| r.prompt.saturating_add(r.completion).saturating_add(r.reasoning))
+        .sum();
       for record in &mut shutdown {
         if token_total > 0 {
-          let share = (record.input + record.output) as f64 / token_total as f64;
+          let share = record
+            .prompt
+            .saturating_add(record.completion)
+            .saturating_add(record.reasoning) as f64
+            / token_total as f64;
           record.input_bytes = (total_input_bytes as f64 * share).round() as u64;
           record.output_bytes = (total_output_bytes as f64 * share).round() as u64;
         }
@@ -361,8 +368,8 @@ impl EventsVisitor for RecordBuilder<'_> {
       provider: Some(provider),
       model: Some(model),
       ts: timestamp_from_event(event),
-      input: self.pending_input,
-      output: output_exact.unwrap_or(output_estimated_tokens),
+      prompt: self.pending_input,
+      completion: output_exact.unwrap_or(output_estimated_tokens),
       input_bytes: self.pending_input_bytes,
       output_bytes: output_estimated_bytes,
       input_estimated: true,
@@ -404,8 +411,8 @@ impl EventsVisitor for RecordBuilder<'_> {
       provider: Some(provider),
       model: Some(model),
       ts: timestamp_from_event(event),
-      input: tokens.input,
-      output: tokens.output,
+      prompt: tokens.prompt,
+      completion: tokens.completion,
       input_bytes: 0,
       output_bytes: 0,
       input_estimated: false,

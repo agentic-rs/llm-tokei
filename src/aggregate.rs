@@ -179,7 +179,7 @@ pub fn aggregate(
     sess_set.insert(r.session_id.clone());
 
     agg.input += r.display_input();
-    agg.output += r.output;
+    agg.output += r.display_output();
     agg.input_bytes += r.input_bytes;
     agg.output_bytes += r.output_bytes;
     agg.input_estimated |= r.input_estimated;

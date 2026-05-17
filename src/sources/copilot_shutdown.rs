@@ -55,8 +55,8 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
         provider: Some(provider),
         model: Some(normalized_model),
         ts,
-        input: tokens.input,
-        output: tokens.output,
+        prompt: tokens.prompt,
+        completion: tokens.completion,
         input_bytes: 0,
         output_bytes: 0,
         input_estimated: false,
@@ -79,10 +79,11 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
 
 fn token_stats_from_shutdown_usage(usage: &Value) -> crate::text_count::TokenUsageStats {
   let mut sink = TokenStatsSink::default();
+  let reasoning = token(usage, "reasoningTokens");
   sink.token(TokenSpan::usage(
     token(usage, "inputTokens"),
-    token(usage, "outputTokens"),
-    token(usage, "reasoningTokens"),
+    token(usage, "outputTokens").saturating_sub(reasoning),
+    reasoning,
     token(usage, "cacheReadTokens"),
     token(usage, "cacheWriteTokens"),
   ));

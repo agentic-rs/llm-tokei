@@ -177,8 +177,8 @@ impl UsageSource for OpenCodeSource {
         model: parsed.model_id,
         ts,
         // Keep `input` as uncached prompt tokens only.
-        input: tokens.input,
-        output: tokens.output,
+        prompt: tokens.input,
+        completion: tokens.output,
         input_bytes: 0,
         output_bytes: 0,
         input_estimated: false,

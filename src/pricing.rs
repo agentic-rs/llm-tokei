@@ -670,8 +670,8 @@ fn token_cost(r: &UsageRecord, p: &Price) -> f64 {
   let m = 1_000_000.0_f64;
   let reasoning_rate = p.reasoning.unwrap_or(p.output);
   let cache_write_rate = p.cache_write.unwrap_or(p.input);
-  (r.input as f64 * p.input
-    + r.output as f64 * p.output
+  (r.prompt as f64 * p.input
+    + r.completion as f64 * p.output
     + r.cache_read as f64 * p.cache_read
     + r.cache_write as f64 * cache_write_rate
     + r.reasoning as f64 * reasoning_rate)
