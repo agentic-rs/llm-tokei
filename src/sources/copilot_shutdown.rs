@@ -81,12 +81,15 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
 fn token_stats_from_shutdown_usage(usage: &Value) -> crate::text_count::TokenUsageStats {
   let mut sink = TokenStatsSink::default();
   let reasoning = token(usage, "reasoningTokens");
+  let input = token(usage, "inputTokens");
+  let cache_read = token(usage, "cacheReadTokens");
+  let cache_write = token(usage, "cacheWriteTokens");
   sink.token(TokenSpan::usage(
-    token(usage, "inputTokens"),
+    input.saturating_sub(cache_read).saturating_sub(cache_write),
     token(usage, "outputTokens").saturating_sub(reasoning),
     reasoning,
-    token(usage, "cacheReadTokens"),
-    token(usage, "cacheWriteTokens"),
+    cache_read,
+    cache_write,
     usage.get("totalTokens").and_then(|v| v.as_u64()),
   ));
   sink.usage

@@ -231,6 +231,7 @@ pub struct BytesSink {
 }
 
 impl BytesSink {
+  #[allow(dead_code)]
   pub fn total(&self) -> u64 {
     self.input.saturating_add(self.output).saturating_add(self.reasoning)
   }
@@ -239,6 +240,7 @@ impl BytesSink {
     std::mem::take(self)
   }
 
+  #[allow(dead_code)]
   pub fn add(&mut self, other: Self) {
     self.input = self.input.saturating_add(other.input);
     self.output = self.output.saturating_add(other.output);
