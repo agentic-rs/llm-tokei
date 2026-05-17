@@ -1,27 +1,19 @@
+//! Text and token counting primitives shared across sources.
+//!
+//! Two sink families live here:
+//!
+//! * [`TextSink`] - drives the JSON walkers (`all_strings`, `text_value`, etc.).
+//!   Implementations decide whether to accumulate stats ([`StatsSink`]) or
+//!   stitch the strings back together ([`StringSink`]).
+//! * [`SpanSink`] - receives semantically labelled [`TextSpan`]/[`TokenSpan`]
+//!   values from source parsers. Used to compute byte/char stats per role
+//!   ([`SpanStatsSink`]), token totals ([`TokenStatsSink`]), or build dump
+//!   transcripts ([`DumpSink`]).
+
 use serde_json::Value;
 use std::borrow::Cow;
 
 use crate::sources::dump::DumpRecord;
-
-pub trait Counter {
-  fn count(&self, s: &str) -> u64;
-}
-
-pub struct Chars;
-
-impl Counter for Chars {
-  fn count(&self, s: &str) -> u64 {
-    s.chars().count() as u64
-  }
-}
-
-pub struct Bytes;
-
-impl Counter for Bytes {
-  fn count(&self, s: &str) -> u64 {
-    s.len() as u64
-  }
-}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TextStats {
@@ -30,10 +22,23 @@ pub struct TextStats {
 }
 
 impl TextStats {
+  pub fn from_str(s: &str) -> Self {
+    Self {
+      chars: s.chars().count() as u64,
+      bytes: s.len() as u64,
+    }
+  }
+
   pub fn add(&mut self, other: Self) {
     self.chars = self.chars.saturating_add(other.chars);
     self.bytes = self.bytes.saturating_add(other.bytes);
   }
+}
+
+/// Free function kept for convenience at call sites; equivalent to
+/// [`TextStats::from_str`].
+pub fn stats_for_str(s: &str) -> TextStats {
+  TextStats::from_str(s)
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -43,7 +48,6 @@ pub struct TokenSpan {
   pub reasoning: Option<u64>,
   pub cache_read: Option<u64>,
   pub cache_write: Option<u64>,
-  pub role: Option<&'static str>,
 }
 
 impl TokenSpan {
@@ -54,7 +58,6 @@ impl TokenSpan {
       reasoning: Some(reasoning),
       cache_read: Some(cache_read),
       cache_write: Some(cache_write),
-      role: None,
     }
   }
 }
@@ -70,7 +73,6 @@ pub struct TokenUsageStats {
 
 impl TokenUsageStats {
   pub fn add_span(&mut self, span: TokenSpan) {
-    let _ = span.role;
     self.input = self.input.saturating_add(span.input.unwrap_or(0));
     self.output = self.output.saturating_add(span.output.unwrap_or(0));
     self.reasoning = self.reasoning.saturating_add(span.reasoning.unwrap_or(0));
@@ -111,12 +113,6 @@ impl<'a> TextSpan<'a> {
     self
   }
 
-  #[allow(dead_code)]
-  pub fn with_display(mut self, display: Option<impl Into<Cow<'a, str>>>) -> Self {
-    self.display = display.map(Into::into);
-    self
-  }
-
   pub fn encrypted(role: &'static str, encrypted_text: impl Into<Cow<'a, str>>, stats: TextStats) -> Self {
     Self {
       role,
@@ -127,13 +123,11 @@ impl<'a> TextSpan<'a> {
       call_id: None,
     }
   }
-}
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum Span<'a> {
-  Text(TextSpan<'a>),
-  Token(TokenSpan),
+  /// Resolve the span's stats, computing from `text` when not pre-attached.
+  pub fn resolved_stats(&self) -> TextStats {
+    self.stats.unwrap_or_else(|| stats_for_str(&self.text))
+  }
 }
 
 pub trait SpanSink {
@@ -162,7 +156,7 @@ pub struct SpanStatsSink {
 
 impl SpanSink for SpanStatsSink {
   fn text(&mut self, span: TextSpan<'_>) {
-    self.stats.add(span.stats.unwrap_or_else(|| stats_for_str(&span.text)));
+    self.stats.add(span.resolved_stats());
   }
 }
 
@@ -171,25 +165,28 @@ pub struct DumpSink {
   pub records: Vec<DumpRecord>,
 }
 
-impl SpanSink for DumpSink {
-  fn text(&mut self, span: TextSpan<'_>) {
+impl DumpSink {
+  /// Convert a span into a [`DumpRecord`] without going through the trait,
+  /// returning `None` when both text payloads are empty.
+  pub fn record_from(span: TextSpan<'_>) -> Option<DumpRecord> {
     if span.text.is_empty() && span.encrypted_text.as_deref().unwrap_or_default().is_empty() {
-      return;
+      return None;
     }
-    self.records.push(DumpRecord {
+    Some(DumpRecord {
       role: span.role,
       text: span.text.into_owned(),
       encrypted_text: span.encrypted_text.map(Cow::into_owned),
       display: span.display.map(Cow::into_owned),
       call_id: span.call_id.map(Cow::into_owned),
-    });
+    })
   }
 }
 
-pub fn stats_for_str(s: &str) -> TextStats {
-  TextStats {
-    chars: Chars.count(s),
-    bytes: Bytes.count(s),
+impl SpanSink for DumpSink {
+  fn text(&mut self, span: TextSpan<'_>) {
+    if let Some(record) = Self::record_from(span) {
+      self.records.push(record);
+    }
   }
 }
 
@@ -207,8 +204,7 @@ impl TextSink for StatsSink {
   type Output = TextStats;
 
   fn text(&mut self, s: &str) {
-    self.0.chars = self.0.chars.saturating_add(Chars.count(s));
-    self.0.bytes = self.0.bytes.saturating_add(Bytes.count(s));
+    self.0.add(stats_for_str(s));
   }
 
   fn finish(self) -> Self::Output {

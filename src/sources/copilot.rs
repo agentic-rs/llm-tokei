@@ -3,16 +3,13 @@ use crate::sources::copilot_shutdown::{
   normalize_copilot_model, records_from_shutdown_model_metrics, ShutdownRecordArgs,
 };
 use crate::sources::dump::{DumpRecord, DumpedSession};
-use crate::sources::UsageSource;
+use crate::sources::{ms_to_dt, read_jsonl_collect, summarize_records, UsageSource};
 use crate::text_count::{
-  rich_text, text_value, Bytes, Chars, Counter, SpanSink, SpanStatsSink, StatsSink, StringSink, TextSpan, TextStats,
+  rich_text, stats_for_str, text_value, SpanSink, SpanStatsSink, StatsSink, StringSink, TextSpan, TextStats,
 };
 use anyhow::Result;
-use chrono::{DateTime, TimeZone, Utc};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tracing::debug;
 use walkdir::WalkDir;
@@ -151,7 +148,7 @@ impl UsageSource for CopilotSource {
         debug!(
           source = "copilot",
           file = %path.display(),
-          summary = %summarize(&recs),
+          summary = %summarize_records(&recs),
           "file summary"
         );
         out.extend(recs);
@@ -175,26 +172,14 @@ fn workspace_dir_for_file(path: &Path) -> Option<&Path> {
 }
 
 fn parse_transcript(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<UsageRecord>>> {
-  let f = File::open(path)?;
-  let reader = BufReader::new(f);
+  let events = read_jsonl_collect::<Value>(path)?;
   let project_name = project_cwd
     .as_ref()
     .and_then(|p| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()));
 
   let mut session_id: Option<String> = None;
   let mut records = Vec::new();
-  for line in reader.lines() {
-    let line = match line {
-      Ok(l) => l,
-      Err(_) => continue,
-    };
-    if line.trim().is_empty() {
-      continue;
-    }
-    let event: Value = match serde_json::from_str(&line) {
-      Ok(v) => v,
-      Err(_) => continue,
-    };
+  for event in events {
     if event.get("type").and_then(|v| v.as_str()) == Some("session.start") {
       session_id = event
         .pointer("/data/sessionId")
@@ -262,52 +247,9 @@ fn hex(b: u8) -> Option<u8> {
 }
 
 fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<UsageRecord>>> {
-  let f = File::open(path)?;
-  let reader = BufReader::new(f);
-
-  // Replay patches into a single JSON document.
-  let mut state: Value = Value::Null;
-  let mut requests_by_id: HashMap<String, Value> = HashMap::new();
-  for line in reader.lines() {
-    let line = match line {
-      Ok(l) => l,
-      Err(_) => continue,
-    };
-    if line.trim().is_empty() {
-      continue;
-    }
-    let rec: Value = match serde_json::from_str(&line) {
-      Ok(v) => v,
-      Err(_) => continue,
-    };
-    let kind = rec.get("kind").and_then(|v| v.as_i64()).unwrap_or(-1);
-    match kind {
-      0 => {
-        if let Some(v) = rec.get("v") {
-          state = v.clone();
-          capture_requests_from_state(&state, &mut requests_by_id);
-        }
-      }
-      1 | 2 => {
-        let v = match rec.get("v") {
-          Some(v) => v.clone(),
-          None => continue,
-        };
-        let path_arr = match rec.get("k").and_then(|v| v.as_array()) {
-          Some(a) => a.clone(),
-          None => continue,
-        };
-        let segments: Vec<PathSeg> = path_arr.iter().filter_map(PathSeg::from_value).collect();
-        apply_patch(&mut state, &segments, v);
-        capture_request_patch(&state, &path_arr, &mut requests_by_id);
-      }
-      _ => {}
-    }
-  }
-
-  if state.is_null() {
+  let Some((state, requests)) = replay_session(path)? else {
     return Ok(None);
-  }
+  };
 
   // Extract metadata.
   let session_id = state
@@ -341,16 +283,6 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
 
   let mut records: Vec<UsageRecord> = Vec::new();
 
-  let requests: Vec<Value> = if requests_by_id.is_empty() {
-    state
-      .get("requests")
-      .and_then(|v| v.as_array())
-      .cloned()
-      .unwrap_or_default()
-  } else {
-    requests_by_id.into_values().collect()
-  };
-
   for req in &requests {
     if !req.is_object() {
       continue;
@@ -382,8 +314,9 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
     // Fallback to request.message.text when no rendered user message is present
     // (older session shapes / queued-but-unsent prompts).
     if rendered_user.chars == 0 {
-      input_chars = input_chars.saturating_add(message_text(&Chars, req));
-      input_bytes = input_bytes.saturating_add(message_text(&Bytes, req));
+      let usage = message_text_usage(req);
+      input_chars = input_chars.saturating_add(usage.chars);
+      input_bytes = input_bytes.saturating_add(usage.bytes);
     }
 
     // --- Output estimate ---
@@ -425,15 +358,17 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
               }
             }
             if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
-              output_chars = output_chars.saturating_add(Chars.count(args));
-              output_bytes = output_bytes.saturating_add(Bytes.count(args));
+              let usage = stats_for_str(args);
+              output_chars = output_chars.saturating_add(usage.chars);
+              output_bytes = output_bytes.saturating_add(usage.bytes);
             }
           }
         }
         if round_result_chars == 0 {
           if let Some(resp) = round.get("response").and_then(|v| v.as_str()) {
-            round_result_chars = round_result_chars.saturating_add(Chars.count(resp));
-            input_bytes = input_bytes.saturating_add(Bytes.count(resp));
+            let usage = stats_for_str(resp);
+            round_result_chars = round_result_chars.saturating_add(usage.chars);
+            input_bytes = input_bytes.saturating_add(usage.bytes);
           }
         }
         input_chars = input_chars.saturating_add(round_result_chars);
@@ -443,9 +378,7 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
     let input = input_chars.div_ceil(4);
     let output_exact = req.get("completionTokens").and_then(|v| v.as_u64());
     let output = output_exact.unwrap_or_else(|| output_chars.div_ceil(4));
-    let ts = req_ts_ms
-      .map(ms_to_dt)
-      .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
+    let ts = req_ts_ms.map(ms_to_dt).unwrap_or_else(|| ms_to_dt(0));
     let command = req
       .get("command")
       .and_then(|v| v.as_str())
@@ -497,24 +430,11 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
   Ok(Some(records))
 }
 
-fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
-  let f = File::open(path)?;
-  let reader = BufReader::new(f);
-  let mut state: Value = Value::Null;
+fn replay_session(path: &Path) -> Result<Option<(Value, Vec<Value>)>> {
+  let mut state = Value::Null;
   let mut requests_by_id: HashMap<String, Value> = HashMap::new();
 
-  for line in reader.lines() {
-    let line = match line {
-      Ok(l) => l,
-      Err(_) => continue,
-    };
-    if line.trim().is_empty() {
-      continue;
-    }
-    let rec: Value = match serde_json::from_str(&line) {
-      Ok(v) => v,
-      Err(_) => continue,
-    };
+  for rec in read_jsonl_collect::<Value>(path)? {
     let kind = rec.get("kind").and_then(|v| v.as_i64()).unwrap_or(-1);
     match kind {
       0 => {
@@ -524,13 +444,11 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
         }
       }
       1 | 2 => {
-        let v = match rec.get("v") {
-          Some(v) => v.clone(),
-          None => continue,
+        let Some(v) = rec.get("v").cloned() else {
+          continue;
         };
-        let path_arr = match rec.get("k").and_then(|v| v.as_array()) {
-          Some(a) => a.clone(),
-          None => continue,
+        let Some(path_arr) = rec.get("k").and_then(|v| v.as_array()).cloned() else {
+          continue;
         };
         let segments: Vec<PathSeg> = path_arr.iter().filter_map(PathSeg::from_value).collect();
         apply_patch(&mut state, &segments, v);
@@ -544,6 +462,26 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
     return Ok(None);
   }
 
+  // Use the deduped per-id request map when available; fall back to
+  // state.requests for sessions emitted as a single snapshot.
+  let requests = if requests_by_id.is_empty() {
+    state
+      .get("requests")
+      .and_then(|v| v.as_array())
+      .cloned()
+      .unwrap_or_default()
+  } else {
+    requests_by_id.into_values().collect()
+  };
+
+  Ok(Some((state, requests)))
+}
+
+fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
+  let Some((state, mut requests)) = replay_session(path)? else {
+    return Ok(None);
+  };
+
   let session_id = state
     .get("sessionId")
     .and_then(|v| v.as_str())
@@ -556,17 +494,6 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
         .to_string()
     });
 
-  // Use the deduped per-id request map when available; fall back to
-  // state.requests for sessions emitted as a single snapshot.
-  let mut requests: Vec<Value> = if requests_by_id.is_empty() {
-    state
-      .get("requests")
-      .and_then(|v| v.as_array())
-      .cloned()
-      .unwrap_or_default()
-  } else {
-    requests_by_id.into_values().collect()
-  };
   // Stable order by timestamp where present (HashMap iteration is undefined).
   requests.sort_by_key(|r| r.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0));
 
@@ -578,7 +505,7 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
 
     // 1) User prompt: prefer renderedUserMessage (post-template), fall back to
     //    the raw `message.text` / `message.parts[].text`.
-    let mut prompt = collect_text_array(req.pointer("/result/metadata/renderedUserMessage"));
+    let mut prompt = collect_text_like(req.pointer("/result/metadata/renderedUserMessage"));
     if prompt.is_empty() {
       if let Some(t) = req.pointer("/message/text").and_then(|v| v.as_str()) {
         prompt = t.to_string();
@@ -692,27 +619,6 @@ fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
     session_id,
     records: out,
   }))
-}
-
-fn collect_text_array(node: Option<&Value>) -> String {
-  let arr = match node.and_then(|v| v.as_array()) {
-    Some(a) => a,
-    None => return String::new(),
-  };
-  let mut buf = String::new();
-  for item in arr {
-    let chunk = item
-      .get("text")
-      .and_then(|v| v.as_str())
-      .or_else(|| item.get("value").and_then(|v| v.as_str()));
-    if let Some(s) = chunk {
-      if !buf.is_empty() {
-        buf.push('\n');
-      }
-      buf.push_str(s);
-    }
-  }
-  buf
 }
 
 fn emit_tool_invocation_pair(
@@ -861,21 +767,22 @@ fn placeholder_for(seg: &PathSeg) -> Value {
   }
 }
 
-fn message_text<C: Counter>(counter: &C, req: &Value) -> u64 {
+fn message_text_usage(req: &Value) -> TextStats {
   if let Some(text) = req.pointer("/message/text").and_then(|v| v.as_str()) {
-    return counter.count(text);
+    return stats_for_str(text);
   }
   req
     .pointer("/message/parts")
     .and_then(|v| v.as_array())
     .map(|parts| {
+      let mut stats = TextStats::default();
       parts
         .iter()
         .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
-        .map(|text| counter.count(text))
-        .sum()
+        .for_each(|text| stats.add(stats_for_str(text)));
+      stats
     })
-    .unwrap_or(0)
+    .unwrap_or_default()
 }
 
 fn collect_text_like(value: Option<&Value>) -> String {
@@ -956,39 +863,6 @@ fn tool_result_spans(result: &Value) -> Vec<TextSpan<'static>> {
     }
   }
   spans
-}
-
-fn summarize(records: &[UsageRecord]) -> String {
-  let input: u64 = records.iter().map(|r| r.input).sum();
-  let output: u64 = records.iter().map(|r| r.output).sum();
-  let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
-  let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
-  let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();
-  let input_est = records.iter().any(|r| r.input_estimated);
-  let output_est = records.iter().any(|r| r.output_estimated);
-  format!(
-    "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}",
-    records.len(),
-    if input_est {
-      format!("~{input}")
-    } else {
-      input.to_string()
-    },
-    if output_est {
-      format!("~{output}")
-    } else {
-      output.to_string()
-    },
-    reasoning,
-    cache_read,
-    cache_write
-  )
-}
-
-fn ms_to_dt(ms: i64) -> DateTime<Utc> {
-  let secs = ms.div_euclid(1000);
-  let nanos = (ms.rem_euclid(1000) * 1_000_000) as u32;
-  Utc.timestamp_opt(secs, nanos).single().unwrap_or_else(Utc::now)
 }
 
 fn capture_requests_from_state(state: &Value, requests_by_id: &mut HashMap<String, Value>) {

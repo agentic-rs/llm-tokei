@@ -3,13 +3,14 @@ use crate::sources::copilot_shutdown::{
   normalize_copilot_model, records_from_shutdown_model_metrics, timestamp_from_event, ShutdownRecordArgs,
 };
 use crate::sources::dump::{DumpRecord, DumpedSession};
-use crate::sources::UsageSource;
-use crate::text_count::{all_strings, DumpSink, SpanSink, StatsSink, TextSpan, TokenSpan, TokenStatsSink};
+use crate::sources::{read_jsonl_collect, summarize_records, UsageSource};
+use crate::text_count::{
+  all_strings, json_serialized_or_string, DumpSink, SpanSink, StatsSink, StringSink, TextSpan, TokenSpan,
+  TokenStatsSink,
+};
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashSet;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tracing::debug;
 use walkdir::WalkDir;
@@ -80,7 +81,7 @@ impl UsageSource for CopilotCliSource {
         debug!(
           source = "copilot-cli",
           file = %path.display(),
-          summary = %summarize(&recs),
+          summary = %summarize_records(&recs),
           "file summary"
         );
         out.extend(recs);
@@ -133,22 +134,7 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
 }
 
 fn read_jsonl_events(path: &Path) -> Result<Vec<Value>> {
-  let f = File::open(path)?;
-  let reader = BufReader::new(f);
-  let mut events = Vec::new();
-  for line in reader.lines() {
-    let line = match line {
-      Ok(l) => l,
-      Err(_) => continue,
-    };
-    if line.trim().is_empty() {
-      continue;
-    }
-    if let Ok(event) = serde_json::from_str(&line) {
-      events.push(event);
-    }
-  }
-  Ok(events)
+  read_jsonl_collect(path)
 }
 
 fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
@@ -239,7 +225,7 @@ fn push_tool_call_record(
   args: &Value,
   call_id: Option<&str>,
 ) -> Option<String> {
-  let args = dump_json_value(args);
+  let args = json_serialized_or_string::<StringSink>(Some(args));
   let text = if args.is_empty() {
     name.to_string()
   } else {
@@ -273,16 +259,8 @@ fn push_tool_result_record(records: &mut Vec<DumpRecord>, data: &Value) {
 }
 
 fn emit_dump_span(records: &mut Vec<DumpRecord>, span: TextSpan<'_>) {
-  let mut sink = DumpSink::default();
-  sink.text(span);
-  records.extend(sink.records);
-}
-
-fn dump_json_value(value: &Value) -> String {
-  match value {
-    Value::Null => String::new(),
-    Value::String(s) => s.clone(),
-    _ => serde_json::to_string(value).unwrap_or_default(),
+  if let Some(record) = DumpSink::record_from(span) {
+    records.push(record);
   }
 }
 
@@ -429,31 +407,4 @@ fn fallback_session_id(path: &Path) -> String {
     .and_then(|s| s.to_str())
     .unwrap_or("unknown")
     .to_string()
-}
-
-fn summarize(records: &[UsageRecord]) -> String {
-  let input: u64 = records.iter().map(|r| r.input).sum();
-  let output: u64 = records.iter().map(|r| r.output).sum();
-  let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
-  let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
-  let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();
-  let input_est = records.iter().any(|r| r.input_estimated);
-  let output_est = records.iter().any(|r| r.output_estimated);
-  format!(
-    "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}",
-    records.len(),
-    if input_est {
-      format!("~{input}")
-    } else {
-      input.to_string()
-    },
-    if output_est {
-      format!("~{output}")
-    } else {
-      output.to_string()
-    },
-    reasoning,
-    cache_read,
-    cache_write
-  )
 }
