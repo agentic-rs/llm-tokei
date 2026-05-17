@@ -129,37 +129,84 @@ impl UsageSource for CopilotCliSource {
 // Walker + Visitor
 // ---------------------------------------------------------------------------
 
-/// Visitor over a copilot-cli `events.jsonl` stream. Methods correspond to the
-/// event kinds we actually care about; the rest are ignored.
+/// Visitor over a Copilot CLI `events.jsonl` stream.
+///
+/// Every callback that corresponds to an event receives the full event object
+/// so consumers can inspect fields beyond the common ones used here. High-level
+/// `assistant_message` fires before low-level `assistant_text`/`tool_request`.
 trait EventsVisitor {
+  /// Called for every event with an RFC3339 `timestamp` field.
+  fn timestamp(&mut self, _ts: chrono::DateTime<chrono::Utc>) {}
+
+  /// `event.type == "session.start"`; full event with `data.sessionId`.
   fn session_start(&mut self, _event: &Value) {}
-  fn model_change(&mut self, _event: &Value, _new_model: &str) {}
+
+  /// `event.type == "session.model_change"`; full event with `data.newModel`.
+  fn model_change(&mut self, _event: &Value) {}
+
+  /// `event.type == "system.message"`; full event with `data.content`.
   fn system_message(&mut self, _event: &Value) {}
+
+  /// `event.type == "user.message"`; full event with `data.content`.
   fn user_message(&mut self, _event: &Value) {}
+
+  /// `event.type == "assistant.message"`; full event, before low-level callbacks.
   fn assistant_message(&mut self, _event: &Value) {}
+
+  /// Low-level assistant text from `assistant.message`; receives the full event.
+  fn assistant_text(&mut self, _event: &Value) {}
+
+  /// Low-level tool request from `assistant.message.data.toolRequests[]`.
+  /// Receives the full assistant event and the full request object.
+  fn tool_request(&mut self, _event: &Value, _request: &Value) {}
+
+  /// `event.type == "tool.execution_start"`; full event with `data.toolName`,
+  /// `data.arguments`, and `data.toolCallId`.
   fn tool_execution_start(&mut self, _event: &Value) {}
+
+  /// `event.type == "tool.execution_complete"`; full event with result/error.
   fn tool_execution_complete(&mut self, _event: &Value) {}
+
+  /// `event.type == "session.compaction_complete"`; full event with
+  /// `data.compactionTokensUsed`.
   fn compaction_complete(&mut self, _event: &Value) {}
 }
 
 fn walk_events<V: EventsVisitor>(events: &[Value], visitor: &mut V) {
   for event in events {
+    if let Some(ts) = timestamp_from_event_opt(event) {
+      visitor.timestamp(ts);
+    }
     match event.get("type").and_then(|v| v.as_str()) {
       Some("session.start") => visitor.session_start(event),
-      Some("session.model_change") => {
-        if let Some(model) = event.pointer("/data/newModel").and_then(|v| v.as_str()) {
-          visitor.model_change(event, model);
-        }
-      }
+      Some("session.model_change") => visitor.model_change(event),
       Some("system.message") => visitor.system_message(event),
       Some("user.message") => visitor.user_message(event),
-      Some("assistant.message") => visitor.assistant_message(event),
+      Some("assistant.message") => {
+        visitor.assistant_message(event);
+        if event.pointer("/data/content").is_some() {
+          visitor.assistant_text(event);
+        }
+        if let Some(tool_requests) = event.pointer("/data/toolRequests").and_then(|v| v.as_array()) {
+          for request in tool_requests {
+            visitor.tool_request(event, request);
+          }
+        }
+      }
       Some("tool.execution_start") => visitor.tool_execution_start(event),
       Some("tool.execution_complete") => visitor.tool_execution_complete(event),
       Some("session.compaction_complete") => visitor.compaction_complete(event),
       _ => {}
     }
   }
+}
+
+fn timestamp_from_event_opt(event: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
+  event
+    .get("timestamp")
+    .and_then(|v| v.as_str())
+    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+    .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
 fn find_session_id(events: &[Value]) -> Option<String> {
@@ -218,8 +265,10 @@ impl<'a> RecordBuilder<'a> {
 }
 
 impl EventsVisitor for RecordBuilder<'_> {
-  fn model_change(&mut self, _event: &Value, new_model: &str) {
-    self.current_model = normalize_copilot_model(new_model.to_string()).1;
+  fn model_change(&mut self, event: &Value) {
+    if let Some(new_model) = event.pointer("/data/newModel").and_then(|v| v.as_str()) {
+      self.current_model = normalize_copilot_model(new_model.to_string()).1;
+    }
   }
 
   fn system_message(&mut self, event: &Value) {
@@ -382,18 +431,17 @@ impl EventsVisitor for DumpBuilder {
     self.push_message("user", event.pointer("/data/content"), None);
   }
 
-  fn assistant_message(&mut self, event: &Value) {
+  fn assistant_text(&mut self, event: &Value) {
     self.push_message("assistant", event.pointer("/data/content"), None);
-    if let Some(tool_requests) = event.pointer("/data/toolRequests").and_then(|v| v.as_array()) {
-      for request in tool_requests {
-        if let Some(id) = self.push_tool_call(
-          request.get("name").and_then(|v| v.as_str()).unwrap_or("tool"),
-          request.get("arguments").unwrap_or(&Value::Null),
-          request.get("toolCallId").and_then(|v| v.as_str()),
-        ) {
-          self.emitted_tool_call_ids.insert(id);
-        }
-      }
+  }
+
+  fn tool_request(&mut self, _event: &Value, request: &Value) {
+    if let Some(id) = self.push_tool_call(
+      request.get("name").and_then(|v| v.as_str()).unwrap_or("tool"),
+      request.get("arguments").unwrap_or(&Value::Null),
+      request.get("toolCallId").and_then(|v| v.as_str()),
+    ) {
+      self.emitted_tool_call_ids.insert(id);
     }
   }
 

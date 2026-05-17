@@ -2,8 +2,8 @@ use crate::model::{Source, UsageRecord};
 use crate::sources::dump::{DumpSink, DumpedSession};
 use crate::sources::{read_jsonl, summarize_records, UsageSource};
 use crate::text_count::{
-  all_strings, json_serialized_or_string, message_content, nested_fields, BytesSink, SpanSink, SpanStatsSink,
-  StatsSink, StringSink, TextSpan, TextStats, TokenSpan, TokenStatsSink, TokenUsageStats,
+  all_strings, json_serialized_or_string, message_content, nested_fields, BytesSink, SpanSink, StatsSink, StringSink,
+  TextSpan, TextStats, TokenSpan, TokenStatsSink, TokenUsageStats,
 };
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
@@ -90,60 +90,80 @@ impl UsageSource for CodexSource {
 // Walker + Visitor
 // ---------------------------------------------------------------------------
 
-/// Visitor over a single codex rollout file. The walker invokes one method per
-/// logical record kind. All methods have empty default impls so a Visitor only
-/// overrides what it cares about.
+/// Visitor over a Codex rollout JSONL file.
+///
+/// The walker parses each JSONL line as a full `Value` and passes the full
+/// line/payload to visitors. High-level callbacks fire before low-level
+/// response-item callbacks so consumers can choose their granularity.
 trait RolloutVisitor {
-  fn session_meta(&mut self, _line: &RolloutLine) {}
-  fn token_count(&mut self, _ts: DateTime<Utc>, _payload: &Value) {}
-  fn turn_context(&mut self, _payload: &Value) {}
-  fn response_item(&mut self, _payload: &Value) {}
+  /// Called for every line with a top-level RFC3339 `timestamp` field.
   fn timestamp(&mut self, _ts: DateTime<Utc>) {}
-}
 
-#[derive(Debug, Deserialize)]
-struct RolloutLine {
-  #[serde(default, rename = "type")]
-  kind: Option<String>,
-  #[serde(default)]
-  timestamp: Option<String>,
-  #[serde(default)]
-  payload: Option<Value>,
-  // session_meta inline fields (some versions emit at top level)
-  #[serde(default)]
-  id: Option<String>,
-  #[serde(default)]
-  cwd: Option<String>,
-  #[serde(default)]
-  model: Option<String>,
-  #[serde(default)]
-  originator: Option<String>,
+  /// Called for `line.type == "session_meta"`; receives the full JSONL line.
+  fn session_meta(&mut self, _line: &Value) {}
+
+  /// Called for `line.type == "turn_context"`; receives `line.payload`.
+  fn turn_context(&mut self, _payload: &Value) {}
+
+  /// Called for `line.type == "event_msg" && line.payload.type == "token_count"`.
+  /// Receives the parsed line timestamp and the full `line.payload` object.
+  fn turn_end(&mut self, _ts: DateTime<Utc>, _payload: &Value) {}
+
+  /// Called for every `line.type == "response_item"`, before low-level dispatch.
+  fn response_item(&mut self, _payload: &Value) {}
+
+  /// `response_item.payload.type == "message"`; full response-item payload.
+  fn message(&mut self, _payload: &Value) {}
+
+  /// `response_item.payload.type == "function_call"`; full response-item payload.
+  fn function_call(&mut self, _payload: &Value) {}
+
+  /// `response_item.payload.type == "function_call_output"`; full payload.
+  fn function_call_output(&mut self, _payload: &Value) {}
+
+  /// `response_item.payload.type == "custom_tool_call"`; full payload.
+  fn custom_tool_call(&mut self, _payload: &Value) {}
+
+  /// `response_item.payload.type == "custom_tool_call_output"`; full payload.
+  fn custom_tool_call_output(&mut self, _payload: &Value) {}
+
+  /// `response_item.payload.type == "reasoning"`; full payload.
+  fn reasoning(&mut self, _payload: &Value) {}
 }
 
 fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<()> {
-  read_jsonl::<RolloutLine, _>(path, |line| {
-    let ts = parse_rfc3339(line.timestamp.as_deref());
+  read_jsonl::<Value, _>(path, |line| {
+    let ts = parse_rfc3339(line.get("timestamp").and_then(|v| v.as_str()));
     if let Some(ts) = ts {
       visitor.timestamp(ts);
     }
-    match line.kind.as_deref() {
+    match line.get("type").and_then(|v| v.as_str()) {
       Some("session_meta") => visitor.session_meta(&line),
       Some("event_msg") => {
-        if let Some(payload) = line.payload.as_ref() {
+        if let Some(payload) = line.get("payload") {
           if payload.get("type").and_then(|v| v.as_str()) == Some("token_count") {
             let ts = ts.unwrap_or_else(epoch_utc);
-            visitor.token_count(ts, payload);
+            visitor.turn_end(ts, payload);
           }
         }
       }
       Some("turn_context") => {
-        if let Some(payload) = line.payload.as_ref() {
+        if let Some(payload) = line.get("payload") {
           visitor.turn_context(payload);
         }
       }
       Some("response_item") => {
-        if let Some(payload) = line.payload.as_ref() {
+        if let Some(payload) = line.get("payload") {
           visitor.response_item(payload);
+          match payload.get("type").and_then(|v| v.as_str()) {
+            Some("message") => visitor.message(payload),
+            Some("function_call") => visitor.function_call(payload),
+            Some("function_call_output") => visitor.function_call_output(payload),
+            Some("custom_tool_call") => visitor.custom_tool_call(payload),
+            Some("custom_tool_call_output") => visitor.custom_tool_call_output(payload),
+            Some("reasoning") => visitor.reasoning(payload),
+            _ => {}
+          }
         }
       }
       _ => {}
@@ -172,8 +192,8 @@ struct SessionMeta {
 }
 
 impl SessionMeta {
-  fn apply(&mut self, line: &RolloutLine) {
-    if let Some(payload) = &line.payload {
+  fn apply(&mut self, line: &Value) {
+    if let Some(payload) = line.get("payload") {
       let meta = payload.get("meta").unwrap_or(payload);
       let str_field = |key: &str| meta.get(key).and_then(|v| v.as_str()).map(str::to_string);
       if self.session_id.is_none() {
@@ -190,16 +210,16 @@ impl SessionMeta {
       }
     }
     if self.session_id.is_none() {
-      self.session_id = line.id.clone();
+      self.session_id = line.get("id").and_then(|v| v.as_str()).map(str::to_string);
     }
     if self.cwd.is_none() {
-      self.cwd = line.cwd.clone();
+      self.cwd = line.get("cwd").and_then(|v| v.as_str()).map(str::to_string);
     }
     if self.model.is_none() {
-      self.model = line.model.clone();
+      self.model = line.get("model").and_then(|v| v.as_str()).map(str::to_string);
     }
     if self.provider.is_none() {
-      self.provider = line.originator.clone();
+      self.provider = line.get("originator").and_then(|v| v.as_str()).map(str::to_string);
     }
   }
 
@@ -298,11 +318,11 @@ impl RolloutVisitor for RecordBuilder<'_> {
     self.session_ts.get_or_insert(ts);
   }
 
-  fn session_meta(&mut self, line: &RolloutLine) {
+  fn session_meta(&mut self, line: &Value) {
     self.meta.apply(line);
   }
 
-  fn token_count(&mut self, ts: DateTime<Utc>, payload: &Value) {
+  fn turn_end(&mut self, ts: DateTime<Utc>, payload: &Value) {
     let Some(tokens) = extract_turn_usage(payload, &mut self.prev_total) else {
       return;
     };
@@ -331,7 +351,30 @@ impl RolloutVisitor for RecordBuilder<'_> {
     if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
       self.meta.model.get_or_insert_with(|| m.to_string());
     }
-    visit_response_item(payload, &mut self.pending_bytes);
+  }
+
+  fn message(&mut self, payload: &Value) {
+    visit_message(payload, &mut self.pending_bytes);
+  }
+
+  fn function_call(&mut self, payload: &Value) {
+    visit_tool_call(payload, "name", "arguments", &mut self.pending_bytes);
+  }
+
+  fn function_call_output(&mut self, payload: &Value) {
+    visit_tool_call_output(payload, &mut self.pending_bytes);
+  }
+
+  fn custom_tool_call(&mut self, payload: &Value) {
+    visit_tool_call(payload, "name", "input", &mut self.pending_bytes);
+  }
+
+  fn custom_tool_call_output(&mut self, payload: &Value) {
+    visit_tool_call_output(payload, &mut self.pending_bytes);
+  }
+
+  fn reasoning(&mut self, payload: &Value) {
+    visit_reasoning(payload, &mut self.pending_bytes);
   }
 }
 
@@ -366,20 +409,96 @@ impl<'a> DumpBuilder<'a> {
 }
 
 impl RolloutVisitor for DumpBuilder<'_> {
-  fn session_meta(&mut self, line: &RolloutLine) {
+  fn session_meta(&mut self, line: &Value) {
     self.meta.apply(line);
   }
 
-  fn response_item(&mut self, payload: &Value) {
-    // Only push the first non-empty span per response_item (matches historical
-    // behavior where `dump` emitted at most one record per item).
+  fn message(&mut self, payload: &Value) {
     let mut once = OnceDump::new(&mut self.sink);
-    visit_response_item(payload, &mut once);
+    visit_message(payload, &mut once);
+  }
+
+  fn function_call(&mut self, payload: &Value) {
+    let mut once = OnceDump::new(&mut self.sink);
+    visit_tool_call(payload, "name", "arguments", &mut once);
+  }
+
+  fn function_call_output(&mut self, payload: &Value) {
+    let mut once = OnceDump::new(&mut self.sink);
+    visit_tool_call_output(payload, &mut once);
+  }
+
+  fn custom_tool_call(&mut self, payload: &Value) {
+    let mut once = OnceDump::new(&mut self.sink);
+    visit_tool_call(payload, "name", "input", &mut once);
+  }
+
+  fn custom_tool_call_output(&mut self, payload: &Value) {
+    let mut once = OnceDump::new(&mut self.sink);
+    visit_tool_call_output(payload, &mut once);
+  }
+
+  fn reasoning(&mut self, payload: &Value) {
+    let mut once = OnceDump::new(&mut self.sink);
+    visit_reasoning(payload, &mut once);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-kind response-item extractors. Each writes to an arbitrary SpanSink
+// (BytesSink for parse, OnceDump for dump, SpanStatsSink in tests).
+// ---------------------------------------------------------------------------
+
+fn visit_message<S: SpanSink>(payload: &Value, sink: &mut S) {
+  let Some(role) = message_role(payload) else {
+    return;
+  };
+  let call_id = payload.get("call_id").and_then(|v| v.as_str()).map(str::to_string);
+  let text = message_content::<StringSink>(payload.get("content"));
+  let stats = message_content::<StatsSink>(payload.get("content"));
+  sink.text(TextSpan::new(role, text).with_stats(stats).with_call_id(call_id));
+}
+
+/// Extracts a tool-call span from `function_call` or `custom_tool_call`.
+/// `name_field` and `body_field` select which JSON keys carry the tool name
+/// and arguments/input respectively.
+fn visit_tool_call<S: SpanSink>(payload: &Value, name_field: &str, body_field: &str, sink: &mut S) {
+  let call_id = payload.get("call_id").and_then(|v| v.as_str()).map(str::to_string);
+  let mut stats = string_field_stats(payload, name_field);
+  stats.add(all_strings::<StatsSink>(payload.get(body_field)));
+  let name = payload.get(name_field).and_then(|v| v.as_str()).unwrap_or("tool");
+  let args = json_serialized_or_string::<StringSink>(payload.get(body_field));
+  let text = if args.is_empty() {
+    name.to_string()
+  } else {
+    format!("{name}: {args}")
+  };
+  sink.text(TextSpan::new("tool_call", text).with_stats(stats).with_call_id(call_id));
+}
+
+/// Extracts a tool-call-result span from `function_call_output` or
+/// `custom_tool_call_output`.
+fn visit_tool_call_output<S: SpanSink>(payload: &Value, sink: &mut S) {
+  let call_id = payload.get("call_id").and_then(|v| v.as_str()).map(str::to_string);
+  let stats = all_strings::<StatsSink>(payload.get("output"));
+  let text = nested_fields::<StringSink>(payload.get("output"));
+  sink.text(
+    TextSpan::new("tool_call_result", text)
+      .with_stats(stats)
+      .with_call_id(call_id),
+  );
+}
+
+fn visit_reasoning<S: SpanSink>(payload: &Value, sink: &mut S) {
+  if let Some(text) = payload.get("encrypted_content").and_then(|v| v.as_str()) {
+    let stats = TextStats::from_str(text);
+    sink.text(TextSpan::encrypted("reasoning", text.to_string(), stats));
   }
 }
 
 /// SpanSink wrapper that forwards only the first non-empty span to the inner
-/// DumpSink, mirroring the legacy `analyze_response_item` semantics.
+/// DumpSink, matching the legacy semantics where dump emits at most one record
+/// per response_item.
 struct OnceDump<'a> {
   inner: &'a mut DumpSink,
   done: bool,
@@ -403,51 +522,6 @@ impl SpanSink for OnceDump<'_> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Response-item extractor: one walker, three accumulators (BytesSink, DumpSink,
-// SpanStatsSink in tests).
-// ---------------------------------------------------------------------------
-
-fn visit_response_item<S: SpanSink>(payload: &Value, sink: &mut S) {
-  let call_id = payload.get("call_id").and_then(|v| v.as_str()).map(str::to_string);
-  match payload.get("type").and_then(|v| v.as_str()) {
-    Some("message") => {
-      let Some(role) = message_role(payload) else { return };
-      let text = message_content::<StringSink>(payload.get("content"));
-      let stats = message_content::<StatsSink>(payload.get("content"));
-      sink.text(TextSpan::new(role, text).with_stats(stats).with_call_id(call_id));
-    }
-    Some("function_call") => {
-      let mut stats = string_field_stats(payload, "name");
-      stats.add(string_field_stats(payload, "arguments"));
-      let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("arguments"));
-      sink.text(TextSpan::new("tool_call", text).with_stats(stats).with_call_id(call_id));
-    }
-    Some("function_call_output") | Some("custom_tool_call_output") => {
-      let stats = all_strings::<StatsSink>(payload.get("output"));
-      let text = nested_fields::<StringSink>(payload.get("output"));
-      sink.text(
-        TextSpan::new("tool_call_result", text)
-          .with_stats(stats)
-          .with_call_id(call_id),
-      );
-    }
-    Some("custom_tool_call") => {
-      let mut stats = string_field_stats(payload, "name");
-      stats.add(all_strings::<StatsSink>(payload.get("input")));
-      let text = dump_tool_call_text(payload.get("name").and_then(|v| v.as_str()), payload.get("input"));
-      sink.text(TextSpan::new("tool_call", text).with_stats(stats).with_call_id(call_id));
-    }
-    Some("reasoning") => {
-      if let Some(text) = payload.get("encrypted_content").and_then(|v| v.as_str()) {
-        let stats = TextStats::from_str(text);
-        sink.text(TextSpan::encrypted("reasoning", text.to_string(), stats));
-      }
-    }
-    _ => {}
-  }
-}
-
 fn message_role(payload: &Value) -> Option<&'static str> {
   match payload.get("role").and_then(|v| v.as_str())? {
     "user" => Some("user"),
@@ -464,16 +538,6 @@ fn string_field_stats(value: &Value, field: &str) -> TextStats {
     .and_then(|v| v.as_str())
     .map(TextStats::from_str)
     .unwrap_or_default()
-}
-
-fn dump_tool_call_text(name: Option<&str>, body: Option<&Value>) -> String {
-  let name = name.unwrap_or("tool");
-  let args = json_serialized_or_string::<StringSink>(body);
-  if args.is_empty() {
-    name.to_string()
-  } else {
-    format!("{name}: {args}")
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -558,6 +622,7 @@ fn file_stem_or(path: &Path, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::text_count::SpanStatsSink;
 
   fn parse_fixture() -> Vec<UsageRecord> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -601,7 +666,7 @@ mod tests {
       "summary": [{ "type": "summary_text", "text": "ignored" }]
     });
     let mut bytes = BytesSink::default();
-    visit_response_item(&payload, &mut bytes);
+    visit_reasoning(&payload, &mut bytes);
 
     assert_eq!(bytes.input, 0);
     assert_eq!(bytes.output, 0);
@@ -617,7 +682,7 @@ mod tests {
       "content": [{ "type": "output_text", "text": "hello world" }]
     });
     let mut stats = SpanStatsSink::default();
-    visit_response_item(&payload, &mut stats);
+    visit_message(&payload, &mut stats);
     assert_eq!(stats.stats.bytes, "hello world".len() as u64);
   }
 }

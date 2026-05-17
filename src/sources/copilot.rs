@@ -167,14 +167,24 @@ impl UsageSource for CopilotSource {
 /// `patch_applied`) and the final, deduped request stream (`request_finalized`).
 /// Current consumers only need the final state, but the replay callbacks keep
 /// the state-machine boundary explicit.
-trait CopilotVisitor {
-  fn session_snapshot(&mut self, _state: &Value) {}
-  fn patch_applied(&mut self, _state: &Value, _path: &[Value]) {}
+/// Visitor over the final replayed Copilot chat-session state.
+///
+/// `walk_session` replays the JSONL state-machine protocol (`kind: 0` full
+/// snapshot and `kind: 1|2` patches), deduplicates requests by `requestId`, then
+/// calls these methods. The patch stream itself is an implementation detail;
+/// visitors receive the full final state and each full finalized request.
+trait SessionVisitor {
+  /// Called once after all JSONL records have been replayed. `state` is the
+  /// full reconstructed session object (commonly contains `sessionId`,
+  /// `creationDate`, `customTitle`, and `inputState.selectedModel`).
   fn replay_complete(&mut self, _state: &Value) {}
-  fn request_finalized(&mut self, _request: &Value) {}
+
+  /// Called once per deduped request from `state.requests[]`. `request` is the
+  /// full request object so consumers can inspect any fields they care about.
+  fn request(&mut self, _request: &Value) {}
 }
 
-fn walk_session<V: CopilotVisitor>(path: &Path, visitor: &mut V) -> Result<Option<()>> {
+fn walk_session<V: SessionVisitor>(path: &Path, visitor: &mut V) -> Result<Option<()>> {
   let mut state = Value::Null;
   let mut requests_by_id: HashMap<String, Value> = HashMap::new();
 
@@ -184,7 +194,6 @@ fn walk_session<V: CopilotVisitor>(path: &Path, visitor: &mut V) -> Result<Optio
       0 => {
         if let Some(v) = rec.get("v") {
           state = v.clone();
-          visitor.session_snapshot(&state);
           capture_requests_from_state(&state, &mut requests_by_id);
         }
       }
@@ -197,7 +206,6 @@ fn walk_session<V: CopilotVisitor>(path: &Path, visitor: &mut V) -> Result<Optio
         };
         let segments: Vec<PathSeg> = path_arr.iter().filter_map(PathSeg::from_value).collect();
         apply_patch(&mut state, &segments, v);
-        visitor.patch_applied(&state, &path_arr);
         capture_request_patch(&state, &path_arr, &mut requests_by_id);
       }
       _ => {}
@@ -219,10 +227,100 @@ fn walk_session<V: CopilotVisitor>(path: &Path, visitor: &mut V) -> Result<Optio
     requests_by_id.into_values().collect()
   };
   for request in requests {
-    visitor.request_finalized(&request);
+    visitor.request(&request);
   }
 
   Ok(Some(()))
+}
+
+/// Visitor over the inside of a single Copilot request.
+///
+/// `walk_request` passes the full request/item/round/call/result objects into
+/// callbacks. High-level callbacks (`response_item`, `tool_round`) fire before
+/// their lower-level callbacks, letting consumers pick their granularity.
+trait RequestVisitor {
+  /// User prompt for this request. `request` is the full request; `text` is the
+  /// display text from `result.metadata.renderedUserMessage`, falling back to
+  /// `message.text` or joined `message.parts[].text`.
+  fn user_prompt(&mut self, _request: &Value, _text: &str) {}
+
+  /// High-level callback for every item in `request.response[]`.
+  fn response_item(&mut self, _item: &Value) {}
+
+  /// Low-level callback for assistant-visible text/progress response items.
+  fn assistant_text(&mut self, _item: &Value) {}
+
+  /// Low-level callback for `kind == "toolInvocationSerialized"` response items.
+  /// `results` is `request.result.metadata.toolCallResults`.
+  fn tool_invocation(&mut self, _item: &Value, _results: Option<&serde_json::Map<String, Value>>) {}
+
+  /// High-level callback for each `request.result.metadata.toolCallRounds[]` item.
+  fn tool_round(&mut self, _round: &Value) {}
+
+  /// Low-level reasoning token count from `round.thinking.tokens`.
+  fn thinking(&mut self, _tokens: u64) {}
+
+  /// Low-level callback for a single entry in `round.toolCalls[]`.
+  fn tool_call(&mut self, _call: &Value) {}
+
+  /// Low-level callback for the result corresponding to a tool call.
+  /// `result` comes from `toolCallResults[call_id]`; `fallback_text` is
+  /// `round.response` when no result entry exists.
+  fn tool_call_result(
+    &mut self,
+    _result: Option<&Value>,
+    _fallback_text: Option<&str>,
+    _round: &Value,
+    _call_id: &str,
+  ) {
+  }
+}
+
+fn walk_request<V: RequestVisitor>(request: &Value, visitor: &mut V) {
+  let prompt = request_prompt_text(request);
+  if !prompt.is_empty() {
+    visitor.user_prompt(request, &prompt);
+  }
+
+  let tool_call_results = request
+    .pointer("/result/metadata/toolCallResults")
+    .and_then(|v| v.as_object());
+
+  if let Some(resp) = request.get("response").and_then(|v| v.as_array()) {
+    for item in resp {
+      visitor.response_item(item);
+      if item.get("kind").and_then(|v| v.as_str()) == Some("toolInvocationSerialized") {
+        visitor.tool_invocation(item, tool_call_results);
+      } else if response_item_span(item).is_some() {
+        visitor.assistant_text(item);
+      }
+    }
+  }
+
+  if let Some(rounds) = request
+    .pointer("/result/metadata/toolCallRounds")
+    .and_then(|v| v.as_array())
+  {
+    for round in rounds {
+      visitor.tool_round(round);
+      if let Some(tokens) = round.pointer("/thinking/tokens").and_then(|v| v.as_u64()) {
+        visitor.thinking(tokens);
+      }
+      if let Some(calls) = round.get("toolCalls").and_then(|v| v.as_array()) {
+        for call in calls {
+          visitor.tool_call(call);
+          if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
+            visitor.tool_call_result(
+              tool_call_results.and_then(|results| results.get(id)),
+              round.get("response").and_then(|v| v.as_str()),
+              round,
+              id,
+            );
+          }
+        }
+      }
+    }
+  }
 }
 
 fn is_transcript_file(path: &Path) -> bool {
@@ -354,7 +452,7 @@ impl<'a> RecordBuilder<'a> {
   }
 }
 
-impl CopilotVisitor for RecordBuilder<'_> {
+impl SessionVisitor for RecordBuilder<'_> {
   fn replay_complete(&mut self, state: &Value) {
     self.session_id = state
       .get("sessionId")
@@ -374,7 +472,7 @@ impl CopilotVisitor for RecordBuilder<'_> {
       .map(str::to_string);
   }
 
-  fn request_finalized(&mut self, req: &Value) {
+  fn request(&mut self, req: &Value) {
     if !req.is_object() {
       return;
     }
@@ -543,7 +641,7 @@ impl<'a> DumpBuilder<'a> {
   }
 }
 
-impl CopilotVisitor for DumpBuilder<'_> {
+impl SessionVisitor for DumpBuilder<'_> {
   fn replay_complete(&mut self, state: &Value) {
     self.session_id = state
       .get("sessionId")
@@ -552,125 +650,98 @@ impl CopilotVisitor for DumpBuilder<'_> {
       .unwrap_or_else(|| file_stem_or(self.path, "unknown"));
   }
 
-  fn request_finalized(&mut self, request: &Value) {
+  fn request(&mut self, request: &Value) {
     self.requests.push(request.clone());
   }
 }
 
 fn dump_request(req: &Value, out: &mut Vec<DumpRecord>) {
-  if !req.is_object() {
-    return;
-  }
+  let mut visitor = DumpRequestVisitor {
+    out,
+    emitted_tool_call_ids: HashSet::new(),
+  };
+  walk_request(req, &mut visitor);
+}
 
-  // 1) User prompt: prefer renderedUserMessage (post-template), fall back to
-  //    the raw `message.text` / `message.parts[].text`.
-  let mut prompt = collect_text_like(req.pointer("/result/metadata/renderedUserMessage"));
-  if prompt.is_empty() {
-    if let Some(t) = req.pointer("/message/text").and_then(|v| v.as_str()) {
-      prompt = t.to_string();
-    } else if let Some(parts) = req.pointer("/message/parts").and_then(|v| v.as_array()) {
-      let mut buf = String::new();
-      for p in parts {
-        if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
-          if !buf.is_empty() {
-            buf.push('\n');
-          }
-          buf.push_str(t);
-        }
-      }
-      prompt = buf;
-    }
-  }
-  if !prompt.is_empty() {
-    out.push(DumpRecord {
+struct DumpRequestVisitor<'a> {
+  out: &'a mut Vec<DumpRecord>,
+  emitted_tool_call_ids: HashSet<String>,
+}
+
+impl RequestVisitor for DumpRequestVisitor<'_> {
+  fn user_prompt(&mut self, _request: &Value, text: &str) {
+    self.out.push(DumpRecord {
       role: "user",
-      text: prompt,
+      text: text.to_string(),
       encrypted_text: None,
       display: None,
       call_id: None,
     });
   }
 
-  let tool_call_results = req
-    .pointer("/result/metadata/toolCallResults")
-    .and_then(|v| v.as_object());
-  let mut emitted_tool_call_ids: HashSet<String> = HashSet::new();
+  fn assistant_text(&mut self, item: &Value) {
+    let text = collect_response_item_text(item);
+    if !text.is_empty() {
+      self.out.push(DumpRecord {
+        role: "assistant",
+        text,
+        encrypted_text: None,
+        display: None,
+        call_id: item.get("toolCallId").and_then(|v| v.as_str()).map(str::to_string),
+      });
+    }
+  }
 
-  // 2) Assistant response: visible text/progress messages. Tool invocation
-  //    records are emitted as tool_call/tool_call_result pairs.
-  if let Some(resp) = req.get("response").and_then(|v| v.as_array()) {
-    for item in resp {
-      if item.get("kind").and_then(|v| v.as_str()) == Some("toolInvocationSerialized") {
-        if let Some(id) = emit_tool_invocation_pair(item, tool_call_results, out) {
-          emitted_tool_call_ids.insert(id);
-        }
-        continue;
-      }
-      let text = collect_response_item_text(item);
-      if !text.is_empty() {
-        out.push(DumpRecord {
-          role: "assistant",
-          text,
+  fn tool_invocation(&mut self, item: &Value, results: Option<&serde_json::Map<String, Value>>) {
+    if let Some(id) = emit_tool_invocation_pair(item, results, self.out) {
+      self.emitted_tool_call_ids.insert(id);
+    }
+  }
+
+  fn tool_call(&mut self, call: &Value) {
+    let Some(id) = call.get("id").and_then(|v| v.as_str()) else {
+      return;
+    };
+    if self.emitted_tool_call_ids.contains(id) {
+      return;
+    }
+    if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
+      if !args.is_empty() {
+        let name = call.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+        self.out.push(DumpRecord {
+          role: "tool_call",
+          text: format!("{name}: {args}"),
           encrypted_text: None,
           display: None,
-          call_id: item.get("toolCallId").and_then(|v| v.as_str()).map(str::to_string),
+          call_id: Some(id.to_string()),
         });
       }
     }
   }
 
-  // 3) Tool call rounds: emit tool_call/tool_call_result pairs with matching
-  //    call_id so consumers can replay round-trips exactly.
-  if let Some(rounds) = req
-    .pointer("/result/metadata/toolCallRounds")
-    .and_then(|v| v.as_array())
-  {
-    for round in rounds {
-      if let Some(calls) = round.get("toolCalls").and_then(|v| v.as_array()) {
-        for call in calls {
-          let Some(id) = call.get("id").and_then(|v| v.as_str()) else {
-            continue;
-          };
-          if emitted_tool_call_ids.contains(id) {
-            continue;
-          }
-          if let Some(args) = call.get("arguments").and_then(|v| v.as_str()) {
-            if !args.is_empty() {
-              let name = call.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
-              out.push(DumpRecord {
-                role: "tool_call",
-                text: format!("{name}: {args}"),
-                encrypted_text: None,
-                display: None,
-                call_id: Some(id.to_string()),
-              });
-            }
-          }
-          let text = match tool_call_results.and_then(|m| m.get(id)) {
-            Some(result) => collect_tool_result_text(result),
-            None => round
-              .get("response")
-              .and_then(|v| v.as_str())
-              .map(|s| s.to_string())
-              .unwrap_or_default(),
-          };
-          if !text.is_empty() {
-            let display = round
-              .get("response")
-              .and_then(|v| v.as_str())
-              .filter(|s| !s.is_empty())
-              .map(str::to_string);
-            out.push(DumpRecord {
-              role: "tool_call_result",
-              text,
-              encrypted_text: None,
-              display,
-              call_id: Some(id.to_string()),
-            });
-          }
-        }
-      }
+  fn tool_call_result(&mut self, result: Option<&Value>, fallback_text: Option<&str>, round: &Value, call_id: &str) {
+    if self.emitted_tool_call_ids.contains(call_id) {
+      return;
     }
+    let text = match result {
+      Some(result) => collect_tool_result_text(result),
+      None => fallback_text.map(str::to_string).unwrap_or_default(),
+    };
+    if text.is_empty() {
+      return;
+    }
+    let display = round
+      .get("response")
+      .and_then(|v| v.as_str())
+      .filter(|s| !s.is_empty())
+      .map(str::to_string);
+    self.out.push(DumpRecord {
+      role: "tool_call_result",
+      text,
+      encrypted_text: None,
+      display,
+      call_id: Some(call_id.to_string()),
+    });
   }
 }
 
@@ -840,6 +911,27 @@ fn message_text_usage(req: &Value) -> TextStats {
 
 fn collect_text_like(value: Option<&Value>) -> String {
   text_value::<StringSink>(value)
+}
+
+fn request_prompt_text(req: &Value) -> String {
+  let mut prompt = collect_text_like(req.pointer("/result/metadata/renderedUserMessage"));
+  if prompt.is_empty() {
+    if let Some(t) = req.pointer("/message/text").and_then(|v| v.as_str()) {
+      prompt = t.to_string();
+    } else if let Some(parts) = req.pointer("/message/parts").and_then(|v| v.as_array()) {
+      let mut buf = String::new();
+      for p in parts {
+        if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
+          if !buf.is_empty() {
+            buf.push('\n');
+          }
+          buf.push_str(t);
+        }
+      }
+      prompt = buf;
+    }
+  }
+  prompt
 }
 
 fn text_like_usage(node: Option<&Value>) -> TextStats {
