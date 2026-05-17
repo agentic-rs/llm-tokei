@@ -1,0 +1,10 @@
+{"type":"session.start","timestamp":"2024-03-10T10:00:00Z","data":{"sessionId":"shutdown-session"}}
+{"type":"session.model_change","timestamp":"2024-03-10T10:00:01Z","data":{"newModel":"gpt-5-mini"}}
+{"type":"system.message","timestamp":"2024-03-10T10:00:02Z","data":{"content":"you are helpful"}}
+{"type":"user.message","timestamp":"2024-03-10T10:00:03Z","data":{"content":"hello world, how are you?"}}
+{"type":"assistant.message","id":"a1","timestamp":"2024-03-10T10:00:04Z","data":{"messageId":"a1","content":"I am fine, thanks for asking!","outputTokens":8}}
+{"type":"user.message","timestamp":"2024-03-10T10:00:05Z","data":{"content":"write a function"}}
+{"type":"tool.execution_start","timestamp":"2024-03-10T10:00:06Z","data":{"toolName":"editor","arguments":{"file":"main.rs"},"toolCallId":"tc1"}}
+{"type":"tool.execution_complete","timestamp":"2024-03-10T10:00:07Z","data":{"toolCallId":"tc1","result":{"content":"fn main() {}"}}}
+{"type":"assistant.message","id":"a2","timestamp":"2024-03-10T10:00:08Z","data":{"messageId":"a2","content":"Done!","outputTokens":2,"toolRequests":[{"name":"editor","arguments":{"file":"main.rs"},"toolCallId":"tc1"}]}}
+{"type":"session.shutdown","timestamp":"2024-03-10T10:01:00Z","data":{"sessionId":"shutdown-session","modelMetrics":{"gpt-5-mini":{"usage":{"inputTokens":50,"outputTokens":30,"reasoningTokens":5,"cacheReadTokens":10,"cacheWriteTokens":3},"requests":{"count":2}}}}}

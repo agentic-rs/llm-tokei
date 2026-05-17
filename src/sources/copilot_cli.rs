@@ -66,8 +66,13 @@ impl CopilotCliSource {
     }
     let session_id = find_session_id(&events);
 
-    // Shutdown metrics take precedence when present.
-    let shutdown: Vec<UsageRecord> = events
+    // Always walk events to estimate bytes and count rounds/turns
+    // (even when shutdown metrics exist).
+    let mut bytes_collector = BytesCollector::default();
+    walk_events(&events, &mut bytes_collector);
+
+    // Shutdown metrics provide exact tokens per model when present.
+    let mut shutdown: Vec<UsageRecord> = events
       .iter()
       .flat_map(|event| {
         records_from_shutdown_model_metrics(ShutdownRecordArgs {
@@ -81,6 +86,19 @@ impl CopilotCliSource {
       })
       .collect();
     if !shutdown.is_empty() {
+      let total_input_bytes = bytes_collector.input_bytes;
+      let total_output_bytes = bytes_collector.output_bytes;
+      // Distribute bytes proportionally across shutdown records.
+      let token_total: u64 = shutdown.iter().map(|r| r.input + r.output).sum();
+      for record in &mut shutdown {
+        if token_total > 0 {
+          let share = (record.input + record.output) as f64 / token_total as f64;
+          record.input_bytes = (total_input_bytes as f64 * share).round() as u64;
+          record.output_bytes = (total_output_bytes as f64 * share).round() as u64;
+        }
+        record.rounds = bytes_collector.rounds;
+        record.turns = bytes_collector.turns;
+      }
       return Ok(Some(shutdown));
     }
 
@@ -222,6 +240,46 @@ fn find_session_id(events: &[Value]) -> Option<String> {
   })
 }
 
+/// Lightweight visitor that only accumulates input/output byte estimates
+/// across the full event stream, used to fill `input_bytes`/`output_bytes`
+/// on shutdown records.
+#[derive(Default)]
+struct BytesCollector {
+  input_bytes: u64,
+  output_bytes: u64,
+  pending_input_bytes: u64,
+  rounds: u64,
+  turns: u64,
+}
+
+impl EventsVisitor for BytesCollector {
+  fn system_message(&mut self, event: &Value) {
+    self.pending_input_bytes += rough_bytes(event.get("data").unwrap_or(&Value::Null));
+  }
+
+  fn user_message(&mut self, event: &Value) {
+    self.pending_input_bytes += rough_bytes(event.get("data").unwrap_or(&Value::Null));
+    self.rounds += 1;
+  }
+
+  fn tool_execution_complete(&mut self, event: &Value) {
+    self.pending_input_bytes += rough_bytes(event.get("data").unwrap_or(&Value::Null));
+  }
+
+  fn assistant_message(&mut self, event: &Value) {
+    let content = event.pointer("/data/content").unwrap_or(&Value::Null);
+    let tool_requests = event.pointer("/data/toolRequests").unwrap_or(&Value::Null);
+    self.input_bytes += self.pending_input_bytes;
+    self.output_bytes += rough_bytes(content) + rough_bytes(tool_requests);
+    self.pending_input_bytes = rough_bytes(content) + rough_bytes(tool_requests);
+    self.turns += 1;
+  }
+
+  fn compaction_complete(&mut self, _event: &Value) {
+    self.turns += 1;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Parse visitor: estimates per-turn usage
 // ---------------------------------------------------------------------------
@@ -230,6 +288,7 @@ struct RecordBuilder<'a> {
   path: &'a Path,
   session_id: Option<String>,
   current_model: String,
+  pending_user: u64,
   pending_input: u64,
   pending_input_bytes: u64,
   records: Vec<UsageRecord>,
@@ -241,6 +300,7 @@ impl<'a> RecordBuilder<'a> {
       path,
       session_id,
       current_model: FALLBACK_MODEL.to_string(),
+      pending_user: 0,
       pending_input: 0,
       pending_input_bytes: 0,
       records: Vec::new(),
@@ -276,6 +336,7 @@ impl EventsVisitor for RecordBuilder<'_> {
   }
 
   fn user_message(&mut self, event: &Value) {
+    self.pending_user += 1;
     self.add_pending(event.get("data").unwrap_or(&Value::Null));
   }
 
@@ -314,7 +375,7 @@ impl EventsVisitor for RecordBuilder<'_> {
       mode: None,
       agent: None,
       is_compaction: false,
-      rounds: 1,
+      rounds: if self.pending_user > 0 { 1 } else { 0 },
       turns: 1,
       cost_embedded: None,
     });
@@ -357,15 +418,13 @@ impl EventsVisitor for RecordBuilder<'_> {
       mode: Some("compaction".to_string()),
       agent: Some("compaction".to_string()),
       is_compaction: true,
-      rounds: 1,
+      rounds: 0,
       turns: 1,
       cost_embedded: None,
     });
   }
 }
 
-// ---------------------------------------------------------------------------
-// Dump visitor: builds DumpedSession
 // ---------------------------------------------------------------------------
 
 struct DumpBuilder {

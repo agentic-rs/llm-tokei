@@ -354,6 +354,41 @@ fn copilot_cli_fixture_parses_fallback_and_compaction() {
   assert_eq!(row["cache_write"], 2);
   assert_eq!(row["total"], 43);
   assert_eq!(row["turns"], 2);
+  assert_eq!(row["rounds"], 1);
+  assert_eq!(row["sessions"], 1);
+  assert_eq!(row["keys"]["source"], "copilot-cli");
+  assert_eq!(row["keys"]["model"], "gpt-5-mini");
+}
+
+#[test]
+fn copilot_cli_shutdown_merges_estimated_bytes() {
+  let fixtures =
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_cli_shutdown/session-state");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "copilot-cli",
+      "--copilot-cli-dir",
+      fixtures.to_str().unwrap(),
+      "--format",
+      "json",
+      "--no-cache",
+      "--no-config",
+    ])
+    .output()
+    .expect("run llm-tokei");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let s = String::from_utf8_lossy(&out.stdout);
+  let v: serde_json::Value = serde_json::from_str(&s).expect("valid json");
+  let row = &v.as_array().unwrap()[0];
+  // Shutdown provides exact tokens; display_input = input + cache_read + cache_write.
+  assert_eq!(row["input"], 63);
+  assert_eq!(row["output"], 30);
+  assert_eq!(row["reasoning"], 5);
+  assert_eq!(row["cache_read"], 10);
+  assert_eq!(row["cache_write"], 3);
+  assert_eq!(row["total"], 98);
+  assert_eq!(row["turns"], 2);
   assert_eq!(row["rounds"], 2);
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["source"], "copilot-cli");
