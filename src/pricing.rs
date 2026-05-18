@@ -33,6 +33,21 @@ pub struct Price {
   pub reasoning: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CostBreakdown {
+  pub prompt: f64,
+  pub completion: f64,
+  pub reasoning: f64,
+  pub cache_read: f64,
+  pub cache_write: f64,
+}
+
+impl CostBreakdown {
+  pub fn total(self) -> f64 {
+    self.prompt + self.completion + self.reasoning + self.cache_read + self.cache_write
+  }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct PriceRow {
   pub provider: String,
@@ -297,20 +312,21 @@ impl PricingTable {
     entry.included.unwrap_or(false)
   }
 
-  pub fn cost_for(&self, r: &UsageRecord, mode: CostMode) -> Option<f64> {
+  pub fn cost_breakdown_for(&self, r: &UsageRecord, mode: CostMode) -> Option<CostBreakdown> {
     let provider_base = self
       .lookup_base(r.provider.as_deref(), r.model.as_deref())
-      .map(|p| token_cost(r, p));
+      .map(|p| token_cost_breakdown(r, p));
     let official_base = self
       .lookup_official_base(r.provider.as_deref(), r.model.as_deref())
-      .map(|p| token_cost(r, p));
+      .map(|p| token_cost_breakdown(r, p));
 
     match mode {
       CostMode::Actual => {
         if self.lookup_included(r.provider.as_deref(), r.model.as_deref()) {
-          Some(0.0)
+          Some(CostBreakdown::default())
         } else {
-          provider_base.map(|base| base * self.lookup_multiplier(r.provider.as_deref(), r.model.as_deref()))
+          provider_base
+            .map(|base| scale_cost_breakdown(base, self.lookup_multiplier(r.provider.as_deref(), r.model.as_deref())))
         }
       }
       CostMode::Mixed => {
@@ -666,16 +682,27 @@ fn prefer_price(new: &PriceRow, old: &PriceRow) -> bool {
   new_name_matches && !old_name_matches
 }
 
-fn token_cost(r: &UsageRecord, p: &Price) -> f64 {
+fn token_cost_breakdown(r: &UsageRecord, p: &Price) -> CostBreakdown {
   let m = 1_000_000.0_f64;
   let reasoning_rate = p.reasoning.unwrap_or(p.output);
   let cache_write_rate = p.cache_write.unwrap_or(p.input);
-  (r.prompt as f64 * p.input
-    + r.completion as f64 * p.output
-    + r.cache_read as f64 * p.cache_read
-    + r.cache_write as f64 * cache_write_rate
-    + r.reasoning as f64 * reasoning_rate)
-    / m
+  CostBreakdown {
+    prompt: r.prompt as f64 * p.input / m,
+    completion: r.completion as f64 * p.output / m,
+    reasoning: r.reasoning as f64 * reasoning_rate / m,
+    cache_read: r.cache_read as f64 * p.cache_read / m,
+    cache_write: r.cache_write as f64 * cache_write_rate / m,
+  }
+}
+
+fn scale_cost_breakdown(cost: CostBreakdown, mult: f64) -> CostBreakdown {
+  CostBreakdown {
+    prompt: cost.prompt * mult,
+    completion: cost.completion * mult,
+    reasoning: cost.reasoning * mult,
+    cache_read: cost.cache_read * mult,
+    cache_write: cost.cache_write * mult,
+  }
 }
 
 #[cfg(test)]

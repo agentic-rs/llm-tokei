@@ -1,5 +1,5 @@
 use crate::aggregate::{Aggregate, GroupDim};
-use crate::cli::AvgBy;
+use crate::cli::{AvgBy, Unit};
 use std::collections::BTreeMap;
 
 pub struct TableOpts {
@@ -7,7 +7,7 @@ pub struct TableOpts {
   pub use_color: bool,
   pub split_input: bool,
   pub avg: Option<AvgBy>,
-  pub bytes: bool,
+  pub unit: Unit,
   pub human: bool,
   pub fit_width: Option<usize>,
 }
@@ -230,12 +230,12 @@ impl StatColumnSpec {
       StatColumnId::Input => format!(
         "{}{}{}",
         if opts.split_input { "input_u" } else { "input" },
-        if opts.bytes { "(B)" } else { "" },
+        usage_unit_suffix(opts, self.id),
         avg_suffix
       ),
-      StatColumnId::Output => format!("output{}{}", if opts.bytes { "(B)" } else { "" }, avg_suffix),
+      StatColumnId::Output => format!("output{}{}", usage_unit_suffix(opts, self.id), avg_suffix),
       StatColumnId::Reasoning | StatColumnId::CacheRead | StatColumnId::CacheWrite | StatColumnId::Total => {
-        format!("{}{avg_suffix}", self.label)
+        format!("{}{}{avg_suffix}", self.label, usage_unit_suffix(opts, self.id))
       }
       StatColumnId::Calls | StatColumnId::Rounds | StatColumnId::Sessions | StatColumnId::CostBase => {
         self.label.to_string()
@@ -246,21 +246,12 @@ impl StatColumnSpec {
   fn row_col(&self, a: &Aggregate, opts: &TableOpts, max_units: &[usize]) -> Col {
     let den = avg_den(a, opts.avg);
     let text = match self.id {
-      StatColumnId::Input => fmt_est_usage_avg(shown_input(a, opts), input_estimated(a, opts), den, opts.human),
-      StatColumnId::Output => fmt_est_usage_avg(
-        if opts.bytes { a.output_bytes } else { a.output },
-        if opts.bytes {
-          a.output_bytes_estimated
-        } else {
-          a.output_estimated
-        },
-        den,
-        opts.human,
-      ),
-      StatColumnId::Reasoning => fmt_usage_avg(a.reasoning, den, opts.human),
-      StatColumnId::CacheRead => fmt_usage_avg(a.cache_read, den, opts.human),
-      StatColumnId::CacheWrite => fmt_usage_avg(a.cache_write, den, opts.human),
-      StatColumnId::Total => fmt_usage_avg(a.total, den, opts.human),
+      StatColumnId::Input => fmt_usage_value_avg(shown_input(a, opts), input_estimated(a, opts), den, opts),
+      StatColumnId::Output => fmt_usage_value_avg(shown_output(a, opts), output_estimated(a, opts), den, opts),
+      StatColumnId::Reasoning => fmt_usage_value_avg(shown_reasoning(a, opts), false, den, opts),
+      StatColumnId::CacheRead => fmt_usage_value_avg(shown_cache_read(a, opts), false, den, opts),
+      StatColumnId::CacheWrite => fmt_usage_value_avg(shown_cache_write(a, opts), false, den, opts),
+      StatColumnId::Total => fmt_usage_value_avg(shown_total(a, opts), false, den, opts),
       StatColumnId::Calls => fmt_int(a.calls),
       StatColumnId::Rounds => fmt_int(a.rounds),
       StatColumnId::Sessions => fmt_int(a.sessions),
@@ -276,22 +267,14 @@ impl StatColumnSpec {
   fn total_col(&self, totals: &TableTotals, aggs: &[Aggregate], opts: &TableOpts, max_units: &[usize]) -> Col {
     let den = totals.avg_den(opts.avg);
     let text = match self.id {
-      StatColumnId::Input => fmt_est_usage_avg(
-        totals.shown_input(opts),
-        any_input_estimated(aggs, opts),
-        den,
-        opts.human,
-      ),
-      StatColumnId::Output => fmt_est_usage_avg(
-        totals.shown_output(opts),
-        any_output_estimated(aggs, opts),
-        den,
-        opts.human,
-      ),
-      StatColumnId::Reasoning => fmt_usage_avg(totals.reasoning, den, opts.human),
-      StatColumnId::CacheRead => fmt_usage_avg(totals.cache_read, den, opts.human),
-      StatColumnId::CacheWrite => fmt_usage_avg(totals.cache_write, den, opts.human),
-      StatColumnId::Total => fmt_usage_avg(totals.total, den, opts.human),
+      StatColumnId::Input => fmt_usage_value_avg(totals.shown_input(opts), any_input_estimated(aggs, opts), den, opts),
+      StatColumnId::Output => {
+        fmt_usage_value_avg(totals.shown_output(opts), any_output_estimated(aggs, opts), den, opts)
+      }
+      StatColumnId::Reasoning => fmt_usage_value_avg(totals.shown_reasoning(opts), false, den, opts),
+      StatColumnId::CacheRead => fmt_usage_value_avg(totals.shown_cache_read(opts), false, den, opts),
+      StatColumnId::CacheWrite => fmt_usage_value_avg(totals.shown_cache_write(opts), false, den, opts),
+      StatColumnId::Total => fmt_usage_value_avg(totals.shown_total(opts), false, den, opts),
       StatColumnId::Calls => fmt_int(totals.calls),
       StatColumnId::Rounds => fmt_int(totals.rounds),
       StatColumnId::Sessions => fmt_int(totals.sessions),
@@ -305,35 +288,35 @@ impl StatColumnSpec {
   }
 
   fn human_unit(&self, a: &Aggregate, opts: &TableOpts, den: u64) -> Option<usize> {
+    if opts.unit == Unit::Cost {
+      return None;
+    }
     let value = match self.id {
       StatColumnId::Input => shown_input(a, opts),
-      StatColumnId::Output => {
-        if opts.bytes {
-          a.output_bytes
-        } else {
-          a.output
-        }
-      }
-      StatColumnId::Reasoning => a.reasoning,
-      StatColumnId::CacheRead => a.cache_read,
-      StatColumnId::CacheWrite => a.cache_write,
-      StatColumnId::Total => a.total,
+      StatColumnId::Output => shown_output(a, opts),
+      StatColumnId::Reasoning => shown_reasoning(a, opts),
+      StatColumnId::CacheRead => shown_cache_read(a, opts),
+      StatColumnId::CacheWrite => shown_cache_write(a, opts),
+      StatColumnId::Total => shown_total(a, opts),
       _ => return None,
     };
-    Some(human_unit(value as f64 / den.max(1) as f64))
+    Some(human_unit(value / den.max(1) as f64))
   }
 
   fn total_human_unit(&self, totals: &TableTotals, opts: &TableOpts, den: u64) -> Option<usize> {
+    if opts.unit == Unit::Cost {
+      return None;
+    }
     let value = match self.id {
       StatColumnId::Input => totals.shown_input(opts),
       StatColumnId::Output => totals.shown_output(opts),
-      StatColumnId::Reasoning => totals.reasoning,
-      StatColumnId::CacheRead => totals.cache_read,
-      StatColumnId::CacheWrite => totals.cache_write,
-      StatColumnId::Total => totals.total,
+      StatColumnId::Reasoning => totals.shown_reasoning(opts),
+      StatColumnId::CacheRead => totals.shown_cache_read(opts),
+      StatColumnId::CacheWrite => totals.shown_cache_write(opts),
+      StatColumnId::Total => totals.shown_total(opts),
       _ => return None,
     };
-    Some(human_unit(value as f64 / den.max(1) as f64))
+    Some(human_unit(value / den.max(1) as f64))
   }
 }
 
@@ -379,13 +362,20 @@ fn max_human_units(aggs: &[Aggregate], opts: &TableOpts) -> Vec<usize> {
 }
 
 fn active_stat_specs(opts: &TableOpts) -> impl Iterator<Item = &'static StatColumnSpec> + '_ {
-  STAT_COLUMNS.iter().filter(|spec| !spec.cost || opts.show_cost)
+  STAT_COLUMNS
+    .iter()
+    .filter(|spec| !spec.cost || (opts.show_cost && opts.unit != Unit::Cost))
 }
 
 #[derive(Default)]
 struct TableTotals {
   input: u64,
   output: u64,
+  prompt_cost: f64,
+  completion_cost: f64,
+  reasoning_cost: f64,
+  cache_read_cost: f64,
+  cache_write_cost: f64,
   input_bytes: u64,
   output_bytes: u64,
   reasoning: u64,
@@ -402,6 +392,11 @@ impl TableTotals {
   fn add(&mut self, a: &Aggregate) {
     self.input += a.input;
     self.output += a.output;
+    self.prompt_cost += a.prompt_cost;
+    self.completion_cost += a.completion_cost;
+    self.reasoning_cost += a.reasoning_cost;
+    self.cache_read_cost += a.cache_read_cost;
+    self.cache_write_cost += a.cache_write_cost;
     self.input_bytes += a.input_bytes;
     self.output_bytes += a.output_bytes;
     self.reasoning += a.reasoning;
@@ -414,24 +409,62 @@ impl TableTotals {
     self.cost += a.cost;
   }
 
-  fn shown_input(&self, opts: &TableOpts) -> u64 {
-    if opts.bytes {
-      self.input_bytes
-    } else if opts.split_input {
-      self
-        .input
-        .saturating_sub(self.cache_read)
-        .saturating_sub(self.cache_write)
-    } else {
-      self.input
+  fn shown_input(&self, opts: &TableOpts) -> f64 {
+    match opts.unit {
+      Unit::Tokens => {
+        if opts.split_input {
+          self
+            .input
+            .saturating_sub(self.cache_read)
+            .saturating_sub(self.cache_write) as f64
+        } else {
+          self.input as f64
+        }
+      }
+      Unit::Bytes => self.input_bytes as f64,
+      Unit::Cost => {
+        if opts.split_input {
+          self.prompt_cost
+        } else {
+          self.prompt_cost + self.cache_read_cost + self.cache_write_cost
+        }
+      }
     }
   }
 
-  fn shown_output(&self, opts: &TableOpts) -> u64 {
-    if opts.bytes {
-      self.output_bytes
-    } else {
-      self.output
+  fn shown_output(&self, opts: &TableOpts) -> f64 {
+    match opts.unit {
+      Unit::Tokens => self.output as f64,
+      Unit::Bytes => self.output_bytes as f64,
+      Unit::Cost => self.completion_cost + self.reasoning_cost,
+    }
+  }
+
+  fn shown_reasoning(&self, opts: &TableOpts) -> f64 {
+    match opts.unit {
+      Unit::Cost => self.reasoning_cost,
+      _ => self.reasoning as f64,
+    }
+  }
+
+  fn shown_cache_read(&self, opts: &TableOpts) -> f64 {
+    match opts.unit {
+      Unit::Cost => self.cache_read_cost,
+      _ => self.cache_read as f64,
+    }
+  }
+
+  fn shown_cache_write(&self, opts: &TableOpts) -> f64 {
+    match opts.unit {
+      Unit::Cost => self.cache_write_cost,
+      _ => self.cache_write as f64,
+    }
+  }
+
+  fn shown_total(&self, opts: &TableOpts) -> f64 {
+    match opts.unit {
+      Unit::Cost => self.cost,
+      _ => self.total as f64,
     }
   }
 
@@ -445,26 +478,80 @@ impl TableTotals {
   }
 }
 
-fn shown_input(a: &Aggregate, opts: &TableOpts) -> u64 {
-  if opts.bytes {
-    a.input_bytes
-  } else if opts.split_input {
-    a.input.saturating_sub(a.cache_read).saturating_sub(a.cache_write)
-  } else {
-    a.input
+fn shown_input(a: &Aggregate, opts: &TableOpts) -> f64 {
+  match opts.unit {
+    Unit::Tokens => {
+      if opts.split_input {
+        a.input.saturating_sub(a.cache_read).saturating_sub(a.cache_write) as f64
+      } else {
+        a.input as f64
+      }
+    }
+    Unit::Bytes => a.input_bytes as f64,
+    Unit::Cost => {
+      if opts.split_input {
+        a.prompt_cost
+      } else {
+        a.prompt_cost + a.cache_read_cost + a.cache_write_cost
+      }
+    }
   }
 }
 
 fn input_estimated(a: &Aggregate, opts: &TableOpts) -> bool {
-  if opts.bytes {
+  if opts.unit == Unit::Bytes {
     a.input_bytes_estimated
   } else {
     a.input_estimated
   }
 }
 
+fn shown_output(a: &Aggregate, opts: &TableOpts) -> f64 {
+  match opts.unit {
+    Unit::Tokens => a.output as f64,
+    Unit::Bytes => a.output_bytes as f64,
+    Unit::Cost => a.completion_cost + a.reasoning_cost,
+  }
+}
+
+fn output_estimated(a: &Aggregate, opts: &TableOpts) -> bool {
+  if opts.unit == Unit::Bytes {
+    a.output_bytes_estimated
+  } else {
+    a.output_estimated
+  }
+}
+
+fn shown_reasoning(a: &Aggregate, opts: &TableOpts) -> f64 {
+  match opts.unit {
+    Unit::Cost => a.reasoning_cost,
+    _ => a.reasoning as f64,
+  }
+}
+
+fn shown_cache_read(a: &Aggregate, opts: &TableOpts) -> f64 {
+  match opts.unit {
+    Unit::Cost => a.cache_read_cost,
+    _ => a.cache_read as f64,
+  }
+}
+
+fn shown_cache_write(a: &Aggregate, opts: &TableOpts) -> f64 {
+  match opts.unit {
+    Unit::Cost => a.cache_write_cost,
+    _ => a.cache_write as f64,
+  }
+}
+
+fn shown_total(a: &Aggregate, opts: &TableOpts) -> f64 {
+  match opts.unit {
+    Unit::Cost => a.cost,
+    _ => a.total as f64,
+  }
+}
+
 fn any_input_estimated(aggs: &[Aggregate], opts: &TableOpts) -> bool {
-  if opts.bytes {
+  if opts.unit == Unit::Bytes {
     aggs.iter().any(|a| a.input_bytes_estimated)
   } else {
     aggs.iter().any(|a| a.input_estimated)
@@ -472,10 +559,36 @@ fn any_input_estimated(aggs: &[Aggregate], opts: &TableOpts) -> bool {
 }
 
 fn any_output_estimated(aggs: &[Aggregate], opts: &TableOpts) -> bool {
-  if opts.bytes {
+  if opts.unit == Unit::Bytes {
     aggs.iter().any(|a| a.output_bytes_estimated)
   } else {
     aggs.iter().any(|a| a.output_estimated)
+  }
+}
+
+fn fmt_usage_value_avg(value: f64, estimated: bool, den: u64, opts: &TableOpts) -> String {
+  match opts.unit {
+    Unit::Cost => fmt_cost_avg(value, den),
+    _ => fmt_est_usage_avg(value as u64, estimated, den, opts.human),
+  }
+}
+
+fn usage_unit_suffix(opts: &TableOpts, id: StatColumnId) -> &'static str {
+  if !matches!(
+    id,
+    StatColumnId::Input
+      | StatColumnId::Output
+      | StatColumnId::Reasoning
+      | StatColumnId::CacheRead
+      | StatColumnId::CacheWrite
+      | StatColumnId::Total
+  ) {
+    return "";
+  }
+  match opts.unit {
+    Unit::Tokens => "",
+    Unit::Bytes => "(B)",
+    Unit::Cost => "($)",
   }
 }
 
@@ -816,6 +929,11 @@ mod tests {
       keys: keys.iter().map(|s| s.to_string()).collect(),
       input: 1_234,
       output: 2_500_000,
+      prompt_cost: 1.2345,
+      completion_cost: 9.8765,
+      reasoning_cost: 0.1111,
+      cache_read_cost: 0.2222,
+      cache_write_cost: 0.9013,
       input_bytes: 1_500,
       output_bytes: 2_500_000_000,
       input_estimated: true,
@@ -837,20 +955,20 @@ mod tests {
     }
   }
 
-  fn opts(show_cost: bool, avg: Option<AvgBy>, bytes: bool, human: bool, fit_width: Option<usize>) -> TableOpts {
+  fn opts(show_cost: bool, avg: Option<AvgBy>, unit: Unit, human: bool, fit_width: Option<usize>) -> TableOpts {
     TableOpts {
       show_cost,
       use_color: false,
       split_input: false,
       avg,
-      bytes,
+      unit,
       human,
       fit_width,
     }
   }
 
   fn render_test_table(aggs: &[Aggregate], dims: &[GroupDim], fit_width: Option<usize>) -> String {
-    render_table(aggs, dims, &opts(true, None, false, false, fit_width))
+    render_table(aggs, dims, &opts(true, None, Unit::Tokens, false, fit_width))
   }
 
   #[test]
@@ -858,7 +976,7 @@ mod tests {
     let table = render_table(
       &[aggregate(&["codex"])],
       &[GroupDim::Source],
-      &opts(true, None, false, false, None),
+      &opts(true, None, Unit::Tokens, false, None),
     );
 
     assert!(table.contains("~1,234"), "table output: {table}");
@@ -876,7 +994,7 @@ mod tests {
     let table = render_table(
       &[aggregate(&["codex"])],
       &[GroupDim::Source],
-      &opts(true, None, false, true, None),
+      &opts(true, None, Unit::Tokens, true, None),
     );
 
     assert!(table.contains("~1.2K"), "table output: {table}");
@@ -905,7 +1023,7 @@ mod tests {
     let table = render_table(
       &[agg],
       &[GroupDim::Source],
-      &opts(false, Some(AvgBy::Call), false, true, None),
+      &opts(false, Some(AvgBy::Call), Unit::Tokens, true, None),
     );
 
     assert!(table.contains("~1.2K"), "table output: {table}");
@@ -921,7 +1039,7 @@ mod tests {
     let table = render_table(
       &[aggregate(&["codex"])],
       &[GroupDim::Source],
-      &opts(false, None, true, true, None),
+      &opts(false, None, Unit::Bytes, true, None),
     );
 
     assert!(table.contains("input(B)"), "table output: {table}");
@@ -935,7 +1053,7 @@ mod tests {
     let small = aggregate(&["small"]);
     let mut large = aggregate(&["large"]);
     large.output = 5_000_000;
-    let mut table_opts = opts(false, None, false, true, None);
+    let mut table_opts = opts(false, None, Unit::Tokens, true, None);
     table_opts.use_color = true;
 
     let table = render_table(&[small, large], &[GroupDim::Source], &table_opts);

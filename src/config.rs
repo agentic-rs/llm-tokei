@@ -1,4 +1,4 @@
-use crate::cli::{Args, AvgBy, DateBucket, Format};
+use crate::cli::{Args, AvgBy, DateBucket, Format, Unit};
 use crate::pricing::CostMode;
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, FromArgMatches, ValueEnum};
@@ -97,6 +97,8 @@ struct TableConfig {
   table_width: Option<usize>,
   #[serde(skip_serializing_if = "Option::is_none")]
   split_input: Option<bool>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  unit: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   bytes: Option<bool>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -363,6 +365,7 @@ fn flat_config_from_value(value: &Value) -> Result<FlatConfig> {
       "no-fit" => flat.table.no_fit = value.as_bool(),
       "table-width" => flat.table.table_width = value.as_integer().and_then(|v| usize::try_from(v).ok()),
       "split-input" => flat.table.split_input = value.as_bool(),
+      "unit" => flat.table.unit = value.as_str().map(str::to_string),
       "bytes" => flat.table.bytes = value.as_bool(),
       "avg" => flat.table.avg = value.as_str().map(str::to_string),
       "no-cache" => flat.cache.no_cache = value.as_bool(),
@@ -460,6 +463,9 @@ fn args_from_matches(matches: &clap::ArgMatches) -> Result<ConfigFile> {
     out.table.table_width = matches.get_one::<usize>("table_width").copied();
   }
   out.table.split_input = flag_if_set(matches, "split_input");
+  if cli_set(matches, "unit") {
+    out.table.unit = value_name::<Unit>(matches, "unit");
+  }
   out.table.bytes = flag_if_set(matches, "bytes");
   if cli_set(matches, "avg") {
     out.table.avg = value_name::<AvgBy>(matches, "avg");
@@ -546,6 +552,7 @@ fn config_to_args(config: &ConfigFile, current: &clap::ArgMatches) -> Vec<String
     "--split-input",
     config.table.split_input,
   );
+  push_opt(&mut out, current, "unit", "--unit", config.table.unit.as_deref());
   push_bool(&mut out, current, "bytes", "--bytes", config.table.bytes);
   push_opt(&mut out, current, "avg", "--avg", config.table.avg.as_deref());
   push_bool(&mut out, current, "no_cache", "--no-cache", config.cache.no_cache);

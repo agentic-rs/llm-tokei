@@ -20,7 +20,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
-use crate::cli::{Args, Cmd, ConfigCmd, Format};
+use crate::cli::{Args, Cmd, ConfigCmd, Format, Unit};
 use crate::format::{json::render_json, table::render_table};
 use crate::model::UsageRecord;
 use crate::pricing::{update_cached_prices, PricingTable};
@@ -279,8 +279,10 @@ fn main() -> Result<()> {
     args.cost,
   );
 
+  let unit = output_unit(&args);
+
   let sort_key = SortKey::parse(&args.sort).unwrap_or(SortKey::Total);
-  sort_aggs(&mut aggs, sort_key, !args.asc, args.bytes);
+  sort_aggs(&mut aggs, sort_key, !args.asc, unit);
 
   if let Some(n) = args.limit {
     aggs.truncate(n);
@@ -303,7 +305,7 @@ fn main() -> Result<()> {
               use_color,
               split_input: args.split_input,
               avg: args.avg,
-              bytes: args.bytes,
+              unit,
               human: args.human,
               fit_width: table_fit_width(&args),
             },
@@ -312,11 +314,19 @@ fn main() -> Result<()> {
       }
     }
     Format::Json => {
-      println!("{}", render_json(&aggs, &dims, args.bytes));
+      println!("{}", render_json(&aggs, &dims, unit));
     }
   }
 
   Ok(())
+}
+
+fn output_unit(args: &Args) -> Unit {
+  if args.bytes {
+    Unit::Bytes
+  } else {
+    args.unit.unwrap_or(Unit::Tokens)
+  }
 }
 
 fn table_fit_width(args: &Args) -> Option<usize> {

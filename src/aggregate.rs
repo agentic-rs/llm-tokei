@@ -45,6 +45,11 @@ pub struct Aggregate {
   pub keys: Vec<String>,
   pub input: u64,
   pub output: u64,
+  pub prompt_cost: f64,
+  pub completion_cost: f64,
+  pub reasoning_cost: f64,
+  pub cache_read_cost: f64,
+  pub cache_write_cost: f64,
   pub input_bytes: u64,
   pub output_bytes: u64,
   pub input_estimated: bool,
@@ -156,6 +161,11 @@ pub fn aggregate(
       keys: key.clone(),
       input: 0,
       output: 0,
+      prompt_cost: 0.0,
+      completion_cost: 0.0,
+      reasoning_cost: 0.0,
+      cache_read_cost: 0.0,
+      cache_write_cost: 0.0,
       input_bytes: 0,
       output_bytes: 0,
       input_estimated: false,
@@ -195,7 +205,13 @@ pub fn aggregate(
     if let Some(c) = r.cost_embedded {
       agg.cost_embedded += c;
     }
-    if let Some(cost) = pricing.cost_for(r, cost_mode) {
+    if let Some(costs) = pricing.cost_breakdown_for(r, cost_mode) {
+      agg.prompt_cost += costs.prompt;
+      agg.completion_cost += costs.completion;
+      agg.reasoning_cost += costs.reasoning;
+      agg.cache_read_cost += costs.cache_read;
+      agg.cache_write_cost += costs.cache_write;
+      let cost = costs.total();
       agg.cost += cost;
       if let Some(dim) = cost_per {
         let split_key = key_for(r, &[dim], date_bucket_unit, pricing)
@@ -248,19 +264,30 @@ impl SortKey {
   }
 }
 
-pub fn sort_aggs(aggs: &mut [Aggregate], key: SortKey, descending: bool, use_bytes: bool) {
+pub fn sort_aggs(aggs: &mut [Aggregate], key: SortKey, descending: bool, unit: crate::cli::Unit) {
   aggs.sort_by(|a, b| {
     let ord = match key {
-      SortKey::Total => a.total.cmp(&b.total),
+      SortKey::Total => match unit {
+        crate::cli::Unit::Cost => a.cost.partial_cmp(&b.cost).unwrap_or(std::cmp::Ordering::Equal),
+        _ => a.total.cmp(&b.total),
+      },
       SortKey::Input => {
-        if use_bytes {
+        if unit == crate::cli::Unit::Cost {
+          shown_input_cost(a)
+            .partial_cmp(&shown_input_cost(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+        } else if unit == crate::cli::Unit::Bytes {
           a.input_bytes.cmp(&b.input_bytes)
         } else {
           a.input.cmp(&b.input)
         }
       }
       SortKey::Output => {
-        if use_bytes {
+        if unit == crate::cli::Unit::Cost {
+          shown_output_cost(a)
+            .partial_cmp(&shown_output_cost(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+        } else if unit == crate::cli::Unit::Bytes {
           a.output_bytes.cmp(&b.output_bytes)
         } else {
           a.output.cmp(&b.output)
@@ -276,4 +303,12 @@ pub fn sort_aggs(aggs: &mut [Aggregate], key: SortKey, descending: bool, use_byt
       ord
     }
   });
+}
+
+fn shown_input_cost(a: &Aggregate) -> f64 {
+  a.prompt_cost + a.cache_read_cost + a.cache_write_cost
+}
+
+fn shown_output_cost(a: &Aggregate) -> f64 {
+  a.completion_cost + a.reasoning_cost
 }

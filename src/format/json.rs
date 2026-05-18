@@ -1,18 +1,19 @@
 use crate::aggregate::{Aggregate, GroupDim};
+use crate::cli::Unit;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
 #[derive(Serialize)]
 struct JsonRow<'a> {
   keys: serde_json::Map<String, serde_json::Value>,
-  input: u64,
-  output: u64,
+  input: serde_json::Value,
+  output: serde_json::Value,
   input_estimated: bool,
   output_estimated: bool,
-  reasoning: u64,
-  cache_read: u64,
-  cache_write: u64,
-  total: u64,
+  reasoning: serde_json::Value,
+  cache_read: serde_json::Value,
+  cache_write: serde_json::Value,
+  total: serde_json::Value,
   calls: u64,
   rounds: u64,
   sessions: u64,
@@ -24,7 +25,7 @@ struct JsonRow<'a> {
   last_ts: Option<&'a chrono::DateTime<chrono::Utc>>,
 }
 
-pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim], use_bytes: bool) -> String {
+pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim], unit: Unit) -> String {
   let rows: Vec<JsonRow> = aggs
     .iter()
     .map(|a| {
@@ -37,22 +38,22 @@ pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim], use_bytes: bool) -> St
       }
       JsonRow {
         keys,
-        input: if use_bytes { a.input_bytes } else { a.input },
-        output: if use_bytes { a.output_bytes } else { a.output },
-        input_estimated: if use_bytes {
+        input: json_input(a, unit),
+        output: json_output(a, unit),
+        input_estimated: if unit == Unit::Bytes {
           a.input_bytes_estimated
         } else {
           a.input_estimated
         },
-        output_estimated: if use_bytes {
+        output_estimated: if unit == Unit::Bytes {
           a.output_bytes_estimated
         } else {
           a.output_estimated
         },
-        reasoning: a.reasoning,
-        cache_read: a.cache_read,
-        cache_write: a.cache_write,
-        total: a.total,
+        reasoning: json_reasoning(a, unit),
+        cache_read: json_cache_read(a, unit),
+        cache_write: json_cache_write(a, unit),
+        total: json_total(a, unit),
         calls: a.calls,
         rounds: a.rounds,
         sessions: a.sessions,
@@ -65,4 +66,48 @@ pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim], use_bytes: bool) -> St
     })
     .collect();
   serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into())
+}
+
+fn json_input(a: &Aggregate, unit: Unit) -> serde_json::Value {
+  match unit {
+    Unit::Tokens => serde_json::Value::from(a.input),
+    Unit::Bytes => serde_json::Value::from(a.input_bytes),
+    Unit::Cost => serde_json::Value::from(a.prompt_cost + a.cache_read_cost + a.cache_write_cost),
+  }
+}
+
+fn json_output(a: &Aggregate, unit: Unit) -> serde_json::Value {
+  match unit {
+    Unit::Tokens => serde_json::Value::from(a.output),
+    Unit::Bytes => serde_json::Value::from(a.output_bytes),
+    Unit::Cost => serde_json::Value::from(a.completion_cost + a.reasoning_cost),
+  }
+}
+
+fn json_reasoning(a: &Aggregate, unit: Unit) -> serde_json::Value {
+  match unit {
+    Unit::Cost => serde_json::Value::from(a.reasoning_cost),
+    _ => serde_json::Value::from(a.reasoning),
+  }
+}
+
+fn json_cache_read(a: &Aggregate, unit: Unit) -> serde_json::Value {
+  match unit {
+    Unit::Cost => serde_json::Value::from(a.cache_read_cost),
+    _ => serde_json::Value::from(a.cache_read),
+  }
+}
+
+fn json_cache_write(a: &Aggregate, unit: Unit) -> serde_json::Value {
+  match unit {
+    Unit::Cost => serde_json::Value::from(a.cache_write_cost),
+    _ => serde_json::Value::from(a.cache_write),
+  }
+}
+
+fn json_total(a: &Aggregate, unit: Unit) -> serde_json::Value {
+  match unit {
+    Unit::Cost => serde_json::Value::from(a.cost),
+    _ => serde_json::Value::from(a.total),
+  }
 }

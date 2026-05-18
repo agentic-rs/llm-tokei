@@ -453,6 +453,46 @@ fn bytes_mode_switches_input_output_units_only() {
 }
 
 #[test]
+fn unit_bytes_matches_legacy_bytes_flag() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot/workspaceStorage");
+  let base_args = [
+    "--source",
+    "copilot",
+    "--copilot-dir",
+    fixtures.to_str().unwrap(),
+    "--format",
+    "json",
+    "--group-by",
+    "source,model,project",
+    "--no-cache",
+  ];
+
+  let legacy = Command::new(bin())
+    .args(base_args)
+    .arg("--bytes")
+    .output()
+    .expect("run llm-tokei legacy bytes mode");
+  assert!(
+    legacy.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&legacy.stderr)
+  );
+
+  let unit = Command::new(bin())
+    .args(base_args)
+    .args(["--unit", "bytes"])
+    .output()
+    .expect("run llm-tokei unit bytes mode");
+  assert!(
+    unit.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&unit.stderr)
+  );
+
+  assert_eq!(legacy.stdout, unit.stdout);
+}
+
+#[test]
 fn bytes_mode_table_header_uses_byte_suffix() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot/workspaceStorage");
   let out = Command::new(bin())
@@ -472,6 +512,42 @@ fn bytes_mode_table_header_uses_byte_suffix() {
   let table = String::from_utf8_lossy(&out.stdout);
   assert!(table.contains("input(B)"), "table output: {table}");
   assert!(table.contains("output(B)"), "table output: {table}");
+}
+
+#[test]
+fn unit_cost_switches_usage_columns_to_costs() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_cli/session-state");
+  let out = Command::new(bin())
+    .args([
+      "--source",
+      "copilot-cli",
+      "--copilot-cli-dir",
+      fixtures.to_str().unwrap(),
+      "--cost",
+      "mixed",
+      "--unit",
+      "cost",
+      "--format",
+      "json",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run llm-tokei cost unit mode");
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+  let row = &v.as_array().unwrap()[0];
+
+  let input = row["input"].as_f64().unwrap();
+  let output = row["output"].as_f64().unwrap();
+  let reasoning = row["reasoning"].as_f64().unwrap();
+  let total = row["total"].as_f64().unwrap();
+  let cost = row["cost"].as_f64().unwrap();
+
+  assert!(input > 0.0, "row: {row}");
+  assert!(output > 0.0, "row: {row}");
+  assert!(reasoning >= 0.0, "row: {row}");
+  assert!((total - cost).abs() < 1e-12, "row: {row}");
 }
 
 #[test]

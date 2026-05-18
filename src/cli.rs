@@ -54,6 +54,13 @@ pub enum AvgBy {
   Session,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum Unit {
+  Tokens,
+  Bytes,
+  Cost,
+}
+
 /// Token usage stats for local LLM agent sessions.
 #[derive(Debug, Parser)]
 #[command(name = "llm-tokei", version, about, disable_help_flag = true)]
@@ -134,8 +141,12 @@ pub struct Args {
   #[arg(long, help_heading = "Table")]
   pub split_input: bool,
 
+  /// Render usage columns as tokens, bytes, or cost.
+  #[arg(long, value_enum, help_heading = "Table")]
+  pub unit: Option<Unit>,
+
   /// Show input/output in bytes instead of tokens.
-  #[arg(long, help_heading = "Table")]
+  #[arg(long, conflicts_with = "unit", help_heading = "Table")]
   pub bytes: bool,
 
   /// Show per-unit averages in table output: turn|round|session.
