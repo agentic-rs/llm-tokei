@@ -1,0 +1,456 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const pageTitle = "llm-tokei | Local token visibility for coding agents";
+const pageDescription =
+  "Track token usage, reasoning, cache, sessions, and cost across Codex, OpenCode, Claude Code, and GitHub Copilot workflows.";
+
+const features = [
+  {
+    title: "One report across agents",
+    body:
+      "Compare Codex CLI, OpenCode, Claude Code, GitHub Copilot Chat, and GitHub Copilot CLI from one local-first reporting surface."
+  },
+  {
+    title: "Cost visibility that respects reality",
+    body:
+      "Use bundled models.dev pricing, local overrides, provider splits, and mixed or official views without leaving the terminal."
+  },
+  {
+    title: "Useful by default",
+    body:
+      "Start with a grouped table by source and model, then drill into sessions, dates, projects, or JSON output when you need automation."
+  },
+  {
+    title: "Replayable session evidence",
+    body:
+      "Dump Codex and Copilot sessions into JSONL message streams so usage analysis and transcript auditing can share the same raw truth."
+  }
+];
+
+const sources = [
+  {
+    name: "Codex CLI",
+    path: "$CODEX_HOME/sessions or ~/.codex/sessions",
+    note: "Reads local Codex session files directly."
+  },
+  {
+    name: "OpenCode",
+    path:
+      "$OPENCODE_DATA_DIR/opencode.db or ~/.local/share/opencode/opencode.db",
+    note: "Opens the SQLite database read-only."
+  },
+  {
+    name: "Claude Code",
+    path: "$CLAUDE_HOME/projects or ~/.claude/projects",
+    note: "Aggregates project-scoped Claude session history."
+  },
+  {
+    name: "GitHub Copilot Chat",
+    path: "workspaceStorage roots in VS Code, Cursor, and compatible editors",
+    note: "Combines chat sessions and transcript artifacts."
+  },
+  {
+    name: "GitHub Copilot CLI",
+    path: "~/.copilot/session-state",
+    note: "Captures CLI session-state JSONL logs."
+  }
+];
+
+const examples = [
+  {
+    label: "Default report",
+    command: "llm-tokei"
+  },
+  {
+    label: "Weekly human-readable summary",
+    command: "llm-tokei --week -h"
+  },
+  {
+    label: "Top expensive sessions",
+    command: "llm-tokei --7d --group-by session,source,model --sort cost --limit 10"
+  },
+  {
+    label: "Project breakdown for the last day",
+    command: "llm-tokei --24h --group-by project,source,model"
+  }
+];
+---
+
+<BaseLayout title={pageTitle} description={pageDescription}>
+  <div class="container hero">
+    <section class="hero__grid">
+      <div class="hero__copy">
+        <span class="eyebrow">Local-first token observability</span>
+        <p class="kicker">codex • opencode • claude • copilot</p>
+        <h1 class="hero__heading">
+          See where your local coding-agent tokens went.
+        </h1>
+        <p class="hero__lede">
+          <code>llm-tokei</code> turns session files already on your machine into fast,
+          grouped usage reports for input, output, reasoning, cache tokens, session
+          counts, and estimated cost.
+        </p>
+        <div class="button-row hero__actions">
+          <a class="button button--primary" href="https://crates.io/crates/llm-tokei">
+            cargo install llm-tokei
+          </a>
+          <a class="button button--secondary" href="https://github.com/agentic-rs/llm-tokei">
+            View on GitHub
+          </a>
+          <a
+            class="button button--ghost"
+            href="https://github.com/agentic-rs/llm-tokei/blob/main/docs/usage.md"
+          >
+            Usage guide
+          </a>
+        </div>
+        <div class="hero__stats">
+          <span class="mono-pill">table + json outputs</span>
+          <span class="mono-pill">source/model/project grouping</span>
+          <span class="mono-pill">cost-per provider splits</span>
+        </div>
+      </div>
+
+      <aside class="hero__aside card">
+        <div class="hero__aside-copy">
+          <span class="hero__aside-label">Current lens</span>
+          <h2>One binary, multiple agent histories.</h2>
+          <p>
+            Build a clean picture of token flow across IDE chats, terminal agents,
+            session dumps, and provider-specific pricing without shipping anything off
+            your machine.
+          </p>
+        </div>
+        <div class="hero__snippet">
+          <div class="hero__snippet-title">Fast paths people actually reach for</div>
+          <pre><code>$ llm-tokei --cost-per provider --cost official --month -h
+$ llm-tokei --24h --group-by project,source,model
+$ llm-tokei dump --copilot --out ./sessions-jsonl</code></pre>
+        </div>
+      </aside>
+    </section>
+
+    <section class="showcase card">
+      <div class="showcase__meta">
+        <span class="showcase__label">Showcase</span>
+        <p>
+          The default surface is a terminal table built for scanning by source, model,
+          session, and cost, then exported cleanly when you need scripts downstream.
+        </p>
+      </div>
+      <img
+        class="showcase__image"
+        src={`${import.meta.env.BASE_URL}showcase.svg`}
+        alt="llm-tokei terminal output grouped by source, model, and cost"
+        loading="eager"
+      />
+    </section>
+
+    <section id="features" class="section-block">
+      <span class="eyebrow">Why teams keep it close</span>
+      <h2 class="section-heading">Purpose-built for the messiness of real agent usage.</h2>
+      <p class="section-copy">
+        The useful part is not just counting tokens. It is reconciling multiple local
+        tools, uneven session artifacts, and pricing nuance into a view you can trust.
+      </p>
+      <div class="feature-grid">
+        {
+          features.map((feature) => (
+            <article class="feature card">
+              <h3>{feature.title}</h3>
+              <p>{feature.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section id="sources" class="section-block sources">
+      <div class="sources__intro">
+        <span class="eyebrow">Coverage</span>
+        <h2 class="section-heading">Agent histories from the places they actually live.</h2>
+        <p class="section-copy">
+          Discovery starts from sensible defaults, then narrows with <code>--source</code>
+          and path flags when you need to isolate one workflow or machine.
+        </p>
+      </div>
+      <div class="sources__grid">
+        {
+          sources.map((source) => (
+            <article class="source-row card">
+              <div class="source-row__heading">
+                <h3>{source.name}</h3>
+                <code>{source.path}</code>
+              </div>
+              <p>{source.note}</p>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section id="examples" class="section-block examples">
+      <div class="examples__lead card">
+        <span class="eyebrow">Quick examples</span>
+        <h2 class="section-heading">From top-line burn to precise session forensics.</h2>
+        <p class="section-copy">
+          Start with the default report, then pivot into time windows, project grouping,
+          cost ranking, and replayable dumps as soon as the question gets sharper.
+        </p>
+      </div>
+      <div class="example-list">
+        {
+          examples.map((example) => (
+            <article class="example card">
+              <p class="example__label">{example.label}</p>
+              <pre><code>{example.command}</code></pre>
+            </article>
+          ))
+        }
+      </div>
+      <div class="resource-strip card">
+        <div>
+          <span class="resource-strip__title">Keep the docs canonical.</span>
+          <p>
+            The site is the front door. Detailed command behavior stays in the repo and
+            in package docs, so the CLI remains easy to discover without drifting into a
+            second documentation system.
+          </p>
+        </div>
+        <div class="button-row">
+          <a class="button button--secondary" href="https://docs.rs/llm-tokei">
+            Read docs.rs
+          </a>
+          <a
+            class="button button--ghost"
+            href="https://github.com/agentic-rs/llm-tokei/blob/main/docs/usage.md"
+          >
+            Open usage.md
+          </a>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .hero {
+      display: grid;
+      gap: 1.75rem;
+    }
+
+    .hero__grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(20rem, 0.9fr);
+      gap: 1.25rem;
+      align-items: stretch;
+    }
+
+    .hero__copy {
+      padding: 2rem 0 0.75rem;
+    }
+
+    .hero__heading {
+      margin: 1rem 0 1.1rem;
+      max-width: 11ch;
+      font-size: clamp(3.2rem, 8vw, 6.3rem);
+      line-height: 0.93;
+      letter-spacing: -0.055em;
+    }
+
+    .hero__lede {
+      max-width: 42rem;
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 1.08rem;
+    }
+
+    .hero__actions {
+      margin-top: 1.6rem;
+    }
+
+    .hero__stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.3rem;
+    }
+
+    .hero__aside {
+      padding: 1.4rem;
+      display: grid;
+      gap: 1.2rem;
+      align-content: space-between;
+    }
+
+    .hero__aside-copy h2 {
+      margin: 0.55rem 0 0.65rem;
+      font-size: clamp(1.65rem, 2.6vw, 2.3rem);
+      line-height: 1.05;
+      letter-spacing: -0.05em;
+    }
+
+    .hero__aside-copy p,
+    .showcase__meta p,
+    .feature p,
+    .source-row p,
+    .resource-strip p {
+      margin: 0;
+      color: var(--text-muted);
+    }
+
+    .hero__aside-label,
+    .showcase__label,
+    .resource-strip__title,
+    .hero__snippet-title {
+      font-family: var(--font-mono);
+      font-size: 0.84rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+    }
+
+    .hero__snippet {
+      padding: 1rem;
+      border-radius: 1.1rem;
+      background: rgba(5, 13, 22, 0.86);
+      border: 1px solid rgba(147, 166, 191, 0.12);
+    }
+
+    .hero__snippet pre,
+    .example pre {
+      margin: 0.75rem 0 0;
+      overflow-x: auto;
+      padding: 0;
+      color: #d2e3f8;
+      font-size: 0.92rem;
+    }
+
+    .showcase {
+      padding: 1rem;
+    }
+
+    .showcase__meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.8rem 1.5rem;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 0.55rem 0.45rem 1rem;
+    }
+
+    .showcase__meta p {
+      max-width: 42rem;
+    }
+
+    .showcase__image {
+      width: 100%;
+      height: auto;
+      border-radius: 1rem;
+      border: 1px solid rgba(147, 166, 191, 0.12);
+      background: rgba(4, 10, 18, 0.95);
+    }
+
+    .section-block {
+      padding-top: 1rem;
+    }
+
+    .feature-grid,
+    .sources__grid,
+    .example-list {
+      display: grid;
+      gap: 1rem;
+      margin-top: 1.4rem;
+    }
+
+    .feature-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .feature,
+    .source-row,
+    .example,
+    .examples__lead,
+    .resource-strip {
+      padding: 1.3rem;
+    }
+
+    .feature h3,
+    .source-row h3 {
+      margin: 0 0 0.75rem;
+      font-size: 1.22rem;
+      letter-spacing: -0.03em;
+    }
+
+    .sources {
+      display: grid;
+      gap: 1.2rem;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      align-items: start;
+    }
+
+    .source-row__heading {
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .source-row__heading code,
+    .example code {
+      color: #c4d6ea;
+      font-size: 0.9rem;
+      word-break: break-word;
+    }
+
+    .example-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .example__label {
+      margin: 0;
+      font-size: 0.94rem;
+      color: var(--text-muted);
+    }
+
+    .resource-strip {
+      margin-top: 1rem;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    @media (max-width: 1024px) {
+      .hero__grid,
+      .sources,
+      .feature-grid,
+      .example-list,
+      .resource-strip {
+        grid-template-columns: 1fr;
+      }
+
+      .hero__copy {
+        padding-top: 1rem;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .hero__heading {
+        max-width: none;
+      }
+
+      .hero__lede {
+        font-size: 1rem;
+      }
+
+      .hero__aside,
+      .feature,
+      .source-row,
+      .example,
+      .examples__lead,
+      .resource-strip,
+      .showcase {
+        padding: 1rem;
+      }
+    }
+  </style>
+</BaseLayout>
