@@ -111,8 +111,11 @@ fn pi_agent_fixture_parses_usage() {
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
   let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
   let arr = v.as_array().unwrap();
-  assert_eq!(arr.len(), 1);
-  let row = &arr[0];
+  assert_eq!(arr.len(), 2);
+  let row = arr
+    .iter()
+    .find(|row| row["keys"]["model"] == "deepseek-v4-pro")
+    .expect("pro row");
   assert_eq!(row["keys"]["source"], "pi-agent");
   assert_eq!(row["keys"]["model"], "deepseek-v4-pro");
   assert_eq!(row["input"], 3210);
@@ -124,6 +127,18 @@ fn pi_agent_fixture_parses_usage() {
   assert_eq!(row["rounds"], 1);
   assert_eq!(row["sessions"], 1);
   assert!((row["cost_embedded"].as_f64().unwrap() - 0.03).abs() < 1e-9);
+
+  let flash = arr
+    .iter()
+    .find(|row| row["keys"]["model"] == "deepseek-v4-flash")
+    .expect("flash row");
+  assert_eq!(flash["keys"]["source"], "pi-agent");
+  assert_eq!(flash["input"], 143);
+  assert_eq!(flash["output"], 4);
+  assert_eq!(flash["input_estimated"], true);
+  assert_eq!(flash["output_estimated"], true);
+  assert_eq!(flash["calls"], 1);
+  assert_eq!(flash["rounds"], 0);
 }
 
 #[test]

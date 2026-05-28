@@ -99,6 +99,8 @@ struct Message {
   #[serde(default)]
   content: Option<Value>,
   #[serde(default)]
+  details: Option<Details>,
+  #[serde(default)]
   provider: Option<String>,
   #[serde(default)]
   model: Option<String>,
@@ -108,6 +110,52 @@ struct Message {
   api: Option<String>,
   #[serde(default, rename = "responseId")]
   response_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct Details {
+  #[serde(default, rename = "curatedQueries")]
+  curated_queries: Vec<CuratedQuery>,
+  #[serde(default)]
+  summary: Option<Summary>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct CuratedQuery {
+  #[serde(default)]
+  query: String,
+  #[serde(default)]
+  provider: Option<String>,
+  #[serde(default)]
+  answer: String,
+  #[serde(default)]
+  sources: Vec<SummarySource>,
+  #[serde(default)]
+  results: Vec<SummarySource>,
+  #[serde(default)]
+  error: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SummarySource {
+  #[serde(default)]
+  title: String,
+  #[serde(default)]
+  url: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct Summary {
+  #[serde(default)]
+  text: String,
+  #[serde(default)]
+  workflow: Option<String>,
+  #[serde(default)]
+  model: Option<String>,
+  #[serde(default, rename = "tokenEstimate")]
+  token_estimate: u64,
+  #[serde(default, rename = "fallbackUsed")]
+  fallback_used: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -143,6 +191,18 @@ struct PendingTurn {
   agent: Option<String>,
 }
 
+struct PluginTurn {
+  ts: DateTime<Utc>,
+  provider: Option<String>,
+  model: Option<String>,
+  prompt: u64,
+  completion: u64,
+  input_bytes: u64,
+  output_bytes: u64,
+  mode: Option<String>,
+  agent: Option<String>,
+}
+
 fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   let mut session_id = file_stem_or(path, "unknown");
   let mut cwd: Option<String> = None;
@@ -151,6 +211,7 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   let mut pending_bytes = BytesSink::default();
   let mut pending_rounds = 0u64;
   let mut pending: Vec<PendingTurn> = Vec::new();
+  let mut plugin_turns: Vec<PluginTurn> = Vec::new();
 
   read_jsonl::<Line, _>(path, |line| {
     let ts = parse_ts(line.timestamp.as_deref());
@@ -177,6 +238,10 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
         }
         visit_message(role, message.content.as_ref(), &mut pending_bytes);
 
+        if let Some(plugin_turn) = plugin_summary_turn(&message, ts, line.parent_id.as_deref()) {
+          plugin_turns.push(plugin_turn);
+        }
+
         let Some(usage) = message.usage else {
           return;
         };
@@ -195,14 +260,14 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     }
   })?;
 
-  if pending.is_empty() {
+  if pending.is_empty() && plugin_turns.is_empty() {
     return Ok(None);
   }
-  if pending.iter().all(|t| t.rounds == 0) {
+  if !pending.is_empty() && pending.iter().all(|t| t.rounds == 0) {
     pending[0].rounds = 1;
   }
 
-  let records = pending
+  let mut records: Vec<UsageRecord> = pending
     .into_iter()
     .map(|turn| UsageRecord {
       source: Source::PiAgent,
@@ -233,7 +298,153 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       cost_embedded: turn.usage.cost.and_then(|c| c.total),
     })
     .collect();
+
+  records.extend(plugin_turns.into_iter().map(|turn| UsageRecord {
+    source: Source::PiAgent,
+    session_id: session_id.clone(),
+    session_title: None,
+    project_cwd: cwd.clone(),
+    project_name: None,
+    provider: turn.provider,
+    model: turn.model,
+    ts: turn.ts,
+    prompt: turn.prompt,
+    completion: turn.completion,
+    input_bytes: turn.input_bytes,
+    output_bytes: turn.output_bytes,
+    input_estimated: true,
+    output_estimated: true,
+    input_bytes_estimated: true,
+    output_bytes_estimated: true,
+    reasoning: 0,
+    cache_read: 0,
+    cache_write: 0,
+    total_direct: None,
+    mode: turn.mode,
+    agent: turn.agent,
+    is_compaction: false,
+    rounds: 0,
+    calls: 1,
+    cost_embedded: None,
+  }));
+
   Ok(Some(records))
+}
+
+fn plugin_summary_turn(message: &Message, ts: DateTime<Utc>, parent_id: Option<&str>) -> Option<PluginTurn> {
+  let details = message.details.as_ref()?;
+  let summary = details.summary.as_ref()?;
+  if summary.fallback_used {
+    return None;
+  }
+  if summary.workflow.as_deref() != Some("summary-review") {
+    return None;
+  }
+  let model_name = summary.model.as_deref()?;
+  let (provider, model) = split_provider_model(model_name);
+  let prompt = build_summary_prompt(&details.curated_queries, None);
+  let prompt = prompt.trim();
+  let completion_text = summary.text.trim();
+  Some(PluginTurn {
+    ts,
+    provider,
+    model,
+    prompt: estimate_text_tokens(prompt),
+    completion: summary.token_estimate,
+    input_bytes: prompt.len() as u64,
+    output_bytes: completion_text.len() as u64,
+    mode: summary.workflow.clone(),
+    agent: parent_id.map(str::to_string),
+  })
+}
+
+fn split_provider_model(model: &str) -> (Option<String>, Option<String>) {
+  if let Some((provider, model)) = model.split_once('/') {
+    (Some(provider.to_string()), Some(model.to_string()))
+  } else {
+    (None, Some(model.to_string()))
+  }
+}
+
+fn estimate_text_tokens(text: &str) -> u64 {
+  let len = text.trim().chars().count() as u64;
+  if len == 0 {
+    0
+  } else {
+    len.div_ceil(4).max(1)
+  }
+}
+
+fn build_summary_prompt(results: &[CuratedQuery], feedback: Option<&str>) -> String {
+  let mut sections = vec![
+    "You are writing the final web search summary for a coding assistant.".to_string(),
+    "Write a concise, factual summary using only the provided search results.".to_string(),
+    "Requirements:".to_string(),
+    "- Keep it readable and skimmable.".to_string(),
+    "- Include key findings and caveats.".to_string(),
+    "- Do not invent sources or claims.".to_string(),
+    "- If evidence is weak or conflicting, say so explicitly.".to_string(),
+    "- End with a short \"Sources\" section listing the most relevant URLs.".to_string(),
+  ];
+
+  if feedback.is_some() {
+    sections.push("- Incorporate the user feedback provided below into the summary.".to_string());
+  }
+
+  sections.push(String::new());
+  sections.push("<search_results>".to_string());
+
+  for (i, result) in results.iter().enumerate() {
+    sections.push(format!("\n[Result {}]", i + 1));
+    sections.push(summarize_query_result(result));
+  }
+
+  sections.push("\n</search_results>".to_string());
+
+  if let Some(feedback) = feedback {
+    sections.push(String::new());
+    sections.push("<user_feedback>".to_string());
+    sections.push(feedback.to_string());
+    sections.push("</user_feedback>".to_string());
+  }
+
+  sections.join("\n")
+}
+
+fn summarize_query_result(result: &CuratedQuery) -> String {
+  if let Some(error) = result.error.as_deref() {
+    return format!("Query: {}\nStatus: Error\nError: {error}", result.query);
+  }
+
+  let mut lines = vec![
+    format!("Query: {}", result.query),
+    format!("Provider: {}", result.provider.as_deref().unwrap_or("unknown")),
+    format!(
+      "Answer: {}",
+      if result.answer.is_empty() {
+        "(no answer text returned)"
+      } else {
+        &result.answer
+      }
+    ),
+  ];
+
+  let sources = if result.results.is_empty() {
+    &result.sources
+  } else {
+    &result.results
+  };
+
+  if sources.is_empty() {
+    lines.push("Sources: none".to_string());
+  } else {
+    lines.push("Sources:".to_string());
+    for (i, source) in sources.iter().enumerate() {
+      lines.push(format!("{}. {} — {}", i + 1, source.title, source.url));
+    }
+  }
+
+  lines.join("\n")
 }
 
 fn visit_message(role: Option<&str>, content: Option<&Value>, sink: &mut BytesSink) {

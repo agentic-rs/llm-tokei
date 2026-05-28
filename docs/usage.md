@@ -404,6 +404,11 @@ Pi Agent sessions are JSONL files. Assistant message `usage` fields provide
 exact token counts, including cache reads/writes and source-reported total
 tokens. Message content is used for byte-mode input/output.
 
+`pi-web-access` `summary-review` tool results are also counted when present.
+The plugin stores the summary model and output token estimate but not the
+provider `usage` object, so these records are reconstructed from the stored
+curated search results and marked as estimated.
+
 ## Cache
 
 By default, parsed records are cached under your OS cache directory as
