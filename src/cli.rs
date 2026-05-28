@@ -206,7 +206,7 @@ pub struct Args {
   #[arg(long, help_heading = "Filters")]
   pub cwd: Option<String>,
 
-  /// Comma-separated source list: codex,opencode,claude,copilot,copilot-cli (default: all).
+  /// Comma-separated source list: codex,opencode,claude,copilot,copilot-cli,pi-agent (default: all).
   #[arg(long, value_delimiter = ',', help_heading = "Sources")]
   pub source: Option<Vec<String>>,
 
@@ -231,6 +231,10 @@ pub struct Args {
   /// Repeatable; if unset, all known defaults are scanned.
   #[arg(long, help_heading = "Sources")]
   pub copilot_cli_dir: Option<Vec<PathBuf>>,
+
+  /// Override Pi Agent sessions root (default: ~/.pi/agent/sessions).
+  #[arg(long, help_heading = "Sources")]
+  pub pi_agent_dir: Option<PathBuf>,
 
   /// Override/extend pricing table (JSON file).
   #[arg(long, help_heading = "Pricing")]

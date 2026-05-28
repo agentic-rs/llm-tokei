@@ -357,6 +357,7 @@ fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> Usa
     "claude" => Source::Claude,
     "copilot" => Source::Copilot,
     "copilot-cli" => Source::CopilotCli,
+    "pi-agent" => Source::PiAgent,
     _ => Source::Codex,
   };
   let ts = DateTime::parse_from_rfc3339(ts_str)

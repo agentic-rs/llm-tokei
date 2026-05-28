@@ -26,7 +26,7 @@ use crate::model::UsageRecord;
 use crate::pricing::{update_cached_prices, PricingTable};
 use crate::sources::{
   claude::ClaudeSource, codex::CodexSource, copilot::CopilotSource, copilot_cli::CopilotCliSource,
-  opencode::OpenCodeSource, UsageSource,
+  opencode::OpenCodeSource, pi_agent::PiAgentSource, UsageSource,
 };
 
 fn main() -> Result<()> {
@@ -64,6 +64,7 @@ fn main() -> Result<()> {
         "claude".into(),
         "copilot".into(),
         "copilot-cli".into(),
+        "pi-agent".into(),
       ]
     });
 
@@ -148,6 +149,32 @@ fn main() -> Result<()> {
           all.append(&mut v);
         }
         Err(e) if args.verbose => eprintln!("opencode: error: {e:#}"),
+        Err(_) => {}
+      }
+    }
+  }
+
+  if want.iter().any(|s| s == "pi-agent") {
+    let path = args.pi_agent_dir.clone().or_else(PiAgentSource::default_path);
+    if let Some(p) = path {
+      let src = PiAgentSource::new(p);
+      let result = if let Some(c) = cache.as_ref() {
+        collect_one_record_source_with_cache(c, "pi-agent", src.discover_files(), PiAgentSource::parse_file)
+      } else {
+        src.collect().map(|records| {
+          let mut stats = CacheStats::new();
+          stats.scanned = src.discover_files().len();
+          (records, stats)
+        })
+      };
+      match result {
+        Ok((mut v, stats)) => {
+          if args.verbose {
+            eprintln!("{}", format_cache_stats("pi-agent", "files", &stats));
+          }
+          all.append(&mut v);
+        }
+        Err(e) if args.verbose => eprintln!("pi-agent: error: {e:#}"),
         Err(_) => {}
       }
     }

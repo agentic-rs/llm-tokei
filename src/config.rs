@@ -151,6 +151,8 @@ struct SourcesConfig {
   copilot_dir: Option<Vec<PathBuf>>,
   #[serde(skip_serializing_if = "Option::is_none")]
   copilot_cli_dir: Option<Vec<PathBuf>>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pi_agent_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -382,6 +384,7 @@ fn flat_config_from_value(value: &Value) -> Result<FlatConfig> {
       "claude-dir" => flat.sources.claude_dir = value.as_str().map(PathBuf::from),
       "copilot-dir" => flat.sources.copilot_dir = path_array(value),
       "copilot-cli-dir" => flat.sources.copilot_cli_dir = path_array(value),
+      "pi-agent-dir" => flat.sources.pi_agent_dir = value.as_str().map(PathBuf::from),
       "pricing" => flat.pricing.pricing = value.as_str().map(PathBuf::from),
       "verbose" => flat.diagnostics.verbose = value.as_bool(),
       _ => {}
@@ -500,6 +503,7 @@ fn args_from_matches(matches: &clap::ArgMatches) -> Result<ConfigFile> {
   out.sources.claude_dir = path_if_set(matches, "claude_dir");
   out.sources.copilot_dir = paths_if_set(matches, "copilot_dir");
   out.sources.copilot_cli_dir = paths_if_set(matches, "copilot_cli_dir");
+  out.sources.pi_agent_dir = path_if_set(matches, "pi_agent_dir");
   out.pricing.pricing = path_if_set(matches, "pricing");
   out.diagnostics.verbose = flag_if_set(matches, "verbose");
   Ok(out)
@@ -622,6 +626,13 @@ fn config_to_args(config: &ConfigFile, current: &clap::ArgMatches) -> Vec<String
     "copilot_cli_dir",
     "--copilot-cli-dir",
     config.sources.copilot_cli_dir.as_deref(),
+  );
+  push_path(
+    &mut out,
+    current,
+    "pi_agent_dir",
+    "--pi-agent-dir",
+    config.sources.pi_agent_dir.as_deref(),
   );
   push_path(
     &mut out,

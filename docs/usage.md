@@ -221,7 +221,7 @@ for one run.
 
 Config keys mirror the main CLI flags using kebab-case names inside sections, for
 example `grouping.date-bucket`, `table.table-width`, `output.cost-per`,
-`sources.codex-dir`, and `sources.copilot-cli-dir`.
+`sources.codex-dir`, `sources.copilot-cli-dir`, and `sources.pi-agent-dir`.
 Subcommand-specific options are not read from config.
 
 ## Pricing
@@ -385,6 +385,24 @@ llm-tokei --source copilot-cli --copilot-cli-dir /path/to/session-state
 
 Shutdown metrics are used when present. Otherwise usage is estimated from event
 content.
+
+### Pi Agent
+
+Default root:
+
+```text
+~/.pi/agent/sessions
+```
+
+Override:
+
+```sh
+llm-tokei --source pi-agent --pi-agent-dir /path/to/sessions
+```
+
+Pi Agent sessions are JSONL files. Assistant message `usage` fields provide
+exact token counts, including cache reads/writes and source-reported total
+tokens. Message content is used for byte-mode input/output.
 
 ## Cache
 

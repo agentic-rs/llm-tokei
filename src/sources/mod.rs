@@ -13,6 +13,7 @@ pub mod copilot_cli;
 pub mod copilot_shutdown;
 pub mod dump;
 pub mod opencode;
+pub mod pi_agent;
 
 #[allow(dead_code)]
 pub trait UsageSource {

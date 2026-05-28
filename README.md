@@ -23,7 +23,7 @@ llm-tokei --cost-per provider --cost official --month -h
 
 ## Why Use It
 
-- **One report across agents**: Codex CLI, OpenCode, Claude Code, GitHub Copilot Chat, and GitHub Copilot CLI.
+- **One report across agents**: Codex CLI, OpenCode, Claude Code, GitHub Copilot Chat, GitHub Copilot CLI, and Pi Agent.
 - **Useful default table**: grouped by source and model, with cost columns included.
 - **Time windows that match how people ask**: `--24h`, `--7d`, `--1m`, `--today`, `--week`, `--month`.
 - **Cost visibility**: bundled prices from models.dev plus local overrides for subscriptions, multipliers, and custom rates.
@@ -82,6 +82,7 @@ llm-tokei dump --copilot --out ./sessions-jsonl
 | Claude Code | `$CLAUDE_HOME/projects` or `~/.claude/projects` |
 | GitHub Copilot Chat | VS Code, Insiders, VSCodium, and Cursor `workspaceStorage` roots |
 | GitHub Copilot CLI | `~/.copilot/session-state` |
+| Pi Agent | `~/.pi/agent/sessions` |
 
 Use `--source` and source path flags to narrow or override discovery.
 
