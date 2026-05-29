@@ -409,6 +409,13 @@ The plugin stores the summary model and output token estimate but not the
 provider `usage` object, so these records are reconstructed from the stored
 curated search results and marked as estimated.
 
+For example, if the plugin uses `deepseek/deepseek-v4-flash` to polish search
+results, those calls appear as estimated `deepseek-v4-flash` Pi Agent rows:
+
+```sh
+llm-tokei --source pi-agent --provider deepseek --group-by model
+```
+
 ## Cache
 
 By default, parsed records are cached under your OS cache directory as

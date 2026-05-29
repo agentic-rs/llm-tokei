@@ -34,7 +34,7 @@ llm-tokei --cost-per provider --cost official --month -h
 ## Install
 
 ```sh
-cargo install --path .
+cargo install llm-tokei
 ```
 
 Or build a local binary:
@@ -85,6 +85,10 @@ llm-tokei dump --copilot --out ./sessions-jsonl
 | Pi Agent | `~/.pi/agent/sessions` |
 
 Use `--source` and source path flags to narrow or override discovery.
+
+Pi Agent support includes exact assistant `usage` records and estimated
+`pi-web-access` `summary-review` tool results when the plugin stores the
+curated search payload and summary metadata.
 
 ## Learn More
 

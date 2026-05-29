@@ -1,8 +1,8 @@
 [package]
 name = "llm-tokei"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
-description = "Token usage stats CLI for Codex and OpenCode sessions"
+description = "Token usage stats CLI for local coding-agent sessions"
 license = "MIT"
 repository = "https://github.com/agentic-rs/llm-tokei"
 homepage = "https://agentic-rs.github.io/llm-tokei/"
