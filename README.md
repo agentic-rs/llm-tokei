@@ -34,7 +34,7 @@ llm-tokei --cost-per provider --cost official --month -h
 ## Install
 
 ```sh
-npm i -g @tokn/llm-tokei
+npm i -g @tokn-ai/llm-tokei
 ```
 
 Or install with Cargo:

@@ -5,9 +5,9 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const packageByPlatform = {
-  "darwin-arm64": "@tokn/llm-tokei-darwin-arm64",
-  "linux-x64": "@tokn/llm-tokei-linux-x64",
-  "win32-x64": "@tokn/llm-tokei-win32-x64"
+  "darwin-arm64": "@tokn-ai/llm-tokei-darwin-arm64",
+  "linux-x64": "@tokn-ai/llm-tokei-linux-x64",
+  "win32-x64": "@tokn-ai/llm-tokei-win32-x64"
 };
 
 const platformKey = `${process.platform}-${process.arch}`;
@@ -29,7 +29,7 @@ try {
 } catch (error) {
   console.error(
     `llm-tokei: failed to find ${packageName}. ` +
-      "Try reinstalling with npm i -g @tokn/llm-tokei."
+      "Try reinstalling with npm i -g @tokn-ai/llm-tokei."
   );
   if (process.env.LLM_TOKEI_DEBUG_INSTALL) {
     console.error(error);

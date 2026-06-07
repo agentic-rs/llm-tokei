@@ -1,5 +1,5 @@
 {
-  "name": "@tokn/llm-tokei-darwin-arm64",
+  "name": "@tokn-ai/llm-tokei-darwin-arm64",
   "version": "0.1.8",
   "description": "macOS arm64 binary for llm-tokei",
   "license": "MIT",

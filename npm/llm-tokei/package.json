@@ -1,5 +1,5 @@
 {
-  "name": "@tokn/llm-tokei",
+  "name": "@tokn-ai/llm-tokei",
   "version": "0.1.8",
   "description": "Token usage stats CLI for local coding-agent sessions",
   "license": "MIT",
@@ -15,8 +15,8 @@
     "bin"
   ],
   "optionalDependencies": {
-    "@tokn/llm-tokei-darwin-arm64": "0.1.8",
-    "@tokn/llm-tokei-linux-x64": "0.1.8",
-    "@tokn/llm-tokei-win32-x64": "0.1.8"
+    "@tokn-ai/llm-tokei-darwin-arm64": "0.1.8",
+    "@tokn-ai/llm-tokei-linux-x64": "0.1.8",
+    "@tokn-ai/llm-tokei-win32-x64": "0.1.8"
   }
 }

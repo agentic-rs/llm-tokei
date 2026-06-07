@@ -1,5 +1,5 @@
 {
-  "name": "@tokn/llm-tokei-win32-x64",
+  "name": "@tokn-ai/llm-tokei-win32-x64",
   "version": "0.1.8",
   "description": "Windows x64 binary for llm-tokei",
   "license": "MIT",
