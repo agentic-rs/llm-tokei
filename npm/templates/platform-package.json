@@ -1,17 +1,17 @@
 {
-  "name": "@tokn-ai/llm-tokei-win32-x64",
-  "version": "0.1.8",
-  "description": "Windows x64 binary for llm-tokei",
+  "name": "{{scope}}/{{package}}",
+  "version": "{{version}}",
+  "description": "{{description}}",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agentic-rs/llm-tokei.git"
   },
   "os": [
-    "win32"
+    "{{os}}"
   ],
   "cpu": [
-    "x64"
+    "{{cpu}}"
   ],
   "files": [
     "bin"
