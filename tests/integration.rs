@@ -92,6 +92,34 @@ fn codex_fixture_parses_last_total() {
 }
 
 #[test]
+fn codex_fixture_renders_svg() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("codex-svg");
+  let out = cmd
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+      "--format",
+      "svg",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run llm-tokei");
+  let _ = std::fs::remove_dir_all(cache_home);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let svg = String::from_utf8_lossy(&out.stdout);
+  assert!(svg.starts_with("<svg "), "svg: {svg}");
+  assert!(svg.contains("llm-tokei output"), "svg: {svg}");
+  assert!(svg.contains("codex"), "svg: {svg}");
+  assert!(svg.contains("gpt-5"), "svg: {svg}");
+  assert!(svg.ends_with("</svg>\n"), "svg: {svg}");
+}
+
+#[test]
 fn pi_agent_fixture_parses_usage() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pi_agent/sessions");
   let (mut cmd, cache_home) = isolated_cmd("pi-agent");

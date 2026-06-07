@@ -137,6 +137,18 @@ llm-tokei --format json --group-by source,model,project
 JSON keeps raw numeric values even when `--human` would affect table output.
 With `--bytes`, only the JSON `input` and `output` fields switch to bytes.
 
+### SVG
+
+SVG output renders the table view as a standalone terminal-style image.
+
+```sh
+llm-tokei --format svg --group-by source,model > usage.svg
+```
+
+SVG uses the same table columns and table-specific flags as `--format table`.
+It does not auto-fit to the terminal width, but `--table-width <N>` can be used
+to create a narrower image.
+
 ## Sorting And Limits
 
 ```sh

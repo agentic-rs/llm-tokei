@@ -28,6 +28,7 @@ fn default_date_bucket() -> DateBucket {
 pub enum Format {
   Table,
   Json,
+  Svg,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
