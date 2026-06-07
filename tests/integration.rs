@@ -113,7 +113,9 @@ fn codex_fixture_renders_svg() {
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
   let svg = String::from_utf8_lossy(&out.stdout);
   assert!(svg.starts_with("<svg "), "svg: {svg}");
-  assert!(svg.contains("llm-tokei output"), "svg: {svg}");
+  assert!(svg.contains("llm-tokei terminal output"), "svg: {svg}");
+  assert!(svg.contains("fill=\"#ff5f56\""), "svg: {svg}");
+  assert!(svg.contains("fill=\"#39c5cf\""), "svg: {svg}");
   assert!(svg.contains("codex"), "svg: {svg}");
   assert!(svg.contains("gpt-5"), "svg: {svg}");
   assert!(svg.ends_with("</svg>\n"), "svg: {svg}");

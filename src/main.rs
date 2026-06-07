@@ -337,14 +337,46 @@ fn main() -> Result<()> {
       let text = if aggs.is_empty() {
         "(no records found)\n".to_string()
       } else {
-        let opts = table_opts(&args, show_cost, false, unit, args.table_width);
+        let opts = table_opts(&args, show_cost, !args.no_color, unit, args.table_width);
         render_table(&aggs, &dims, &opts)
       };
-      print!("{}", render_svg_terminal(&text));
+      print!("{}", render_svg_terminal(&display_command(), &text));
     }
   }
 
   Ok(())
+}
+
+fn display_command() -> String {
+  let mut args = std::env::args().collect::<Vec<_>>();
+  if let Some(bin) = args.first_mut() {
+    *bin = Path::new(bin)
+      .file_name()
+      .and_then(|name| name.to_str())
+      .unwrap_or("llm-tokei")
+      .to_string();
+  }
+  args.iter().map(|arg| shell_quote(arg)).collect::<Vec<_>>().join(" ")
+}
+
+fn shell_quote(arg: &str) -> String {
+  if !arg.is_empty()
+    && arg
+      .chars()
+      .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':' | '=' | ','))
+  {
+    return arg.to_string();
+  }
+  let mut out = String::from("'");
+  for ch in arg.chars() {
+    if ch == '\'' {
+      out.push_str("'\\''");
+    } else {
+      out.push(ch);
+    }
+  }
+  out.push('\'');
+  out
 }
 
 fn output_unit(args: &Args) -> Unit {
