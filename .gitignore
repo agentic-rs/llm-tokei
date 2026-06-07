@@ -3,3 +3,7 @@ Cargo.lock
 .cache/
 
 .DS_Store
+dist/
+npm/**/bin/llm-tokei
+npm/**/bin/llm-tokei.exe
+npm/**/*.tgz

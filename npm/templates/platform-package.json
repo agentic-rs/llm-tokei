@@ -1,0 +1,19 @@
+{
+  "name": "{{scope}}/{{package}}",
+  "version": "{{version}}",
+  "description": "{{description}}",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentic-rs/llm-tokei.git"
+  },
+  "os": [
+    "{{os}}"
+  ],
+  "cpu": [
+    "{{cpu}}"
+  ],
+  "files": [
+    "bin"
+  ]
+}
