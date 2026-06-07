@@ -1,0 +1,19 @@
+{
+  "name": "@tokn/llm-tokei-linux-x64",
+  "version": "0.1.8",
+  "description": "Linux x64 binary for llm-tokei",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentic-rs/llm-tokei.git"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin"
+  ]
+}

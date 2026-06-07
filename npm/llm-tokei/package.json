@@ -1,0 +1,22 @@
+{
+  "name": "@tokn/llm-tokei",
+  "version": "0.1.8",
+  "description": "Token usage stats CLI for local coding-agent sessions",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentic-rs/llm-tokei.git"
+  },
+  "homepage": "https://agentic-rs.github.io/llm-tokei/",
+  "bin": {
+    "llm-tokei": "bin/llm-tokei.mjs"
+  },
+  "files": [
+    "bin"
+  ],
+  "optionalDependencies": {
+    "@tokn/llm-tokei-darwin-arm64": "0.1.8",
+    "@tokn/llm-tokei-linux-x64": "0.1.8",
+    "@tokn/llm-tokei-win32-x64": "0.1.8"
+  }
+}
