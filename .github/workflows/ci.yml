@@ -33,14 +33,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
 
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - run: rustup update stable && rustup default stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release
-
   build-artifacts:
     strategy:
       fail-fast: false
