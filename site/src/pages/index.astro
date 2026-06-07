@@ -22,6 +22,25 @@ const metrics = [
   ["Sessions", "distinct local histories"]
 ];
 
+const installOptions = [
+  {
+    command: "cargo install llm-tokei",
+    id: "cargo",
+    tag: "cargo"
+  },
+  {
+    command: "npm i -g @tokn-ai/llm-tokei",
+    id: "npm",
+    tag: "npm"
+  },
+  {
+    command: "npx @tokn-ai/llm-tokei",
+    id: "npx",
+    note: "# run once",
+    tag: "npx"
+  }
+];
+
 const recipes = [
   {
     label: "Month by provider",
@@ -51,12 +70,44 @@ const recipes = [
         <p class="hero__lede">
           Turn local agent sessions into clear token, cache, and cost reports.
         </p>
-        <div class="install-line" aria-label="Install command">
-          <span class="install-line__prompt">$</span>
-          <code>cargo install llm-tokei</code>
+        <div class="install-box" data-install-box aria-label="Install and run commands">
+          <div class="install-tabs" role="tablist" aria-label="Install method">
+            {
+              installOptions.map((option, index) => (
+                <button
+                  aria-controls={`install-panel-${option.id}`}
+                  aria-selected={index === 0 ? "true" : "false"}
+                  class="install-tab"
+                  data-install-tab={option.id}
+                  id={`install-tab-${option.id}`}
+                  role="tab"
+                  type="button"
+                >
+                  {option.tag}
+                </button>
+              ))
+            }
+          </div>
+          {
+            installOptions.map((option, index) => (
+              <div
+                aria-labelledby={`install-tab-${option.id}`}
+                class:list={["install-panel", index !== 0 && "install-panel--hidden"]}
+                data-install-panel={option.id}
+                id={`install-panel-${option.id}`}
+                role="tabpanel"
+              >
+                {option.note && <code class="install-line__note">{option.note}</code>}
+                <div class="install-line__entry">
+                  <span class="install-line__prompt">$</span>
+                  <code>{option.command}</code>
+                </div>
+              </div>
+            ))
+          }
         </div>
         <div class="button-row">
-          <a class="button button--primary" href="https://crates.io/crates/llm-tokei">
+          <a class="button button--primary" href="https://www.npmjs.com/package/@tokn-ai/llm-tokei">
             Install
           </a>
           <a class="button button--secondary" href="https://github.com/agentic-rs/llm-tokei">
@@ -229,26 +280,78 @@ const recipes = [
       line-height: 1.32;
     }
 
-    .install-line {
-      display: flex;
-      align-items: center;
-      width: min(100%, 28rem);
+    .install-box {
+      display: grid;
+      width: min(100%, 34rem);
       min-width: 0;
-      gap: 0.65rem;
-      padding: 0.85rem 1rem;
       border: 1px solid var(--ink);
       border-radius: 8px;
       color: #f0f6f0;
       background: var(--code);
       box-shadow: 6px 6px 0 var(--line-strong);
+      overflow: hidden;
+    }
+
+    .install-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      min-width: 0;
+    }
+
+    .install-tab {
+      min-width: 0;
+      padding: 0.78rem 0.65rem;
+      border: 0;
+      border-right: 1px solid rgb(255 255 255 / 12%);
+      border-bottom: 1px solid rgb(255 255 255 / 12%);
+      color: #8ecdbb;
+      background: transparent;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 800;
+      line-height: 1;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+
+    .install-tab:last-child {
+      border-right: 0;
+    }
+
+    .install-tab[aria-selected="true"] {
+      color: #f0f6f0;
+      background: rgb(142 205 187 / 18%);
+    }
+
+    .install-panel {
+      min-width: 0;
+      padding: 0.95rem 1rem;
       overflow-x: auto;
       scrollbar-width: thin;
       -webkit-overflow-scrolling: touch;
     }
 
-    .install-line code {
+    .install-panel--hidden {
+      display: none;
+    }
+
+    .install-line__entry {
+      display: flex;
+      min-width: max-content;
+      align-items: center;
+      gap: 0.65rem;
+    }
+
+    .install-line__entry code,
+    .install-line__note {
       flex: 0 0 auto;
       white-space: nowrap;
+    }
+
+    .install-line__note {
+      display: block;
+      margin-bottom: 0.35rem;
+      color: #a6b8b3;
     }
 
     .install-line__prompt {
@@ -534,7 +637,7 @@ const recipes = [
         font-size: 1.08rem;
       }
 
-      .install-line {
+      .install-box {
         width: 100%;
       }
 
@@ -547,4 +650,27 @@ const recipes = [
       }
     }
   </style>
+  <script>
+    const installBox = document.querySelector("[data-install-box]");
+
+    if (installBox) {
+      const tabs = Array.from(installBox.querySelectorAll("[data-install-tab]"));
+      const panels = Array.from(installBox.querySelectorAll("[data-install-panel]"));
+
+      const selectInstallTab = (id) => {
+        for (const tab of tabs) {
+          tab.setAttribute("aria-selected", tab.getAttribute("data-install-tab") === id ? "true" : "false");
+        }
+        for (const panel of panels) {
+          panel.classList.toggle("install-panel--hidden", panel.getAttribute("data-install-panel") !== id);
+        }
+      };
+
+      for (const tab of tabs) {
+        tab.addEventListener("click", () => {
+          selectInstallTab(tab.getAttribute("data-install-tab"));
+        });
+      }
+    }
+  </script>
 </BaseLayout>
