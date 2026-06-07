@@ -21,7 +21,11 @@ use tracing_subscriber::EnvFilter;
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
 use crate::cli::{Args, Cmd, ConfigCmd, Format, Unit};
-use crate::format::{json::render_json, table::render_table};
+use crate::format::{
+  json::render_json,
+  svg::render_svg_terminal,
+  table::{render_table, TableOpts},
+};
 use crate::model::UsageRecord;
 use crate::pricing::{update_cached_prices, PricingTable};
 use crate::sources::{
@@ -322,30 +326,57 @@ fn main() -> Result<()> {
       if aggs.is_empty() {
         println!("(no records found)");
       } else {
-        println!(
-          "{}",
-          render_table(
-            &aggs,
-            &dims,
-            &crate::format::table::TableOpts {
-              show_cost,
-              use_color,
-              split_input: args.split_input,
-              avg: args.avg,
-              unit,
-              human: args.human,
-              fit_width: table_fit_width(&args),
-            },
-          )
-        );
+        let opts = table_opts(&args, show_cost, use_color, unit, table_fit_width(&args));
+        println!("{}", render_table(&aggs, &dims, &opts));
       }
     }
     Format::Json => {
       println!("{}", render_json(&aggs, &dims, unit));
     }
+    Format::Svg => {
+      let text = if aggs.is_empty() {
+        "(no records found)\n".to_string()
+      } else {
+        let opts = table_opts(&args, show_cost, !args.no_color, unit, args.table_width);
+        render_table(&aggs, &dims, &opts)
+      };
+      print!("{}", render_svg_terminal(&display_command(), &text));
+    }
   }
 
   Ok(())
+}
+
+fn display_command() -> String {
+  let mut args = std::env::args().collect::<Vec<_>>();
+  if let Some(bin) = args.first_mut() {
+    *bin = Path::new(bin)
+      .file_name()
+      .and_then(|name| name.to_str())
+      .unwrap_or("llm-tokei")
+      .to_string();
+  }
+  args.iter().map(|arg| shell_quote(arg)).collect::<Vec<_>>().join(" ")
+}
+
+fn shell_quote(arg: &str) -> String {
+  if !arg.is_empty()
+    && arg
+      .chars()
+      .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':' | '=' | ','))
+  {
+    return arg.to_string();
+  }
+  let mut out = String::from("'");
+  for ch in arg.chars() {
+    if ch == '\'' {
+      out.push_str("'\\''");
+    } else {
+      out.push(ch);
+    }
+  }
+  out.push('\'');
+  out
 }
 
 fn output_unit(args: &Args) -> Unit {
@@ -353,6 +384,18 @@ fn output_unit(args: &Args) -> Unit {
     Unit::Bytes
   } else {
     args.unit.unwrap_or(Unit::Tokens)
+  }
+}
+
+fn table_opts(args: &Args, show_cost: bool, use_color: bool, unit: Unit, fit_width: Option<usize>) -> TableOpts {
+  TableOpts {
+    show_cost,
+    use_color,
+    split_input: args.split_input,
+    avg: args.avg,
+    unit,
+    human: args.human,
+    fit_width,
   }
 }
 
