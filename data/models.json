@@ -17,6 +17,9 @@
   "claude-3.7-sonnet": {
     "provider": "anthropic"
   },
+  "claude-fable-5": {
+    "provider": "anthropic"
+  },
   "claude-haiku-4.5": {
     "provider": "anthropic"
   },
@@ -51,6 +54,9 @@
     "provider": "anthropic"
   },
   "claude-sonnet-4.6": {
+    "provider": "anthropic"
+  },
+  "claude-sonnet-5": {
     "provider": "anthropic"
   },
   "deepseek-chat": {
@@ -98,6 +104,9 @@
   "gemini-3-pro": {
     "provider": "google"
   },
+  "gemini-3-pro-image-preview": {
+    "provider": "google"
+  },
   "gemini-3.1-flash-image": {
     "provider": "google"
   },
@@ -109,6 +118,9 @@
     "aliases": [
       "gemini-3.1-pro-preview-customtools"
     ]
+  },
+  "gemini-3.5-flash": {
+    "provider": "google"
   },
   "gemini-embedding-001": {
     "provider": "google"
@@ -124,6 +136,9 @@
     "aliases": [
       "gemini-live-2.5-flash-preview-native-audio"
     ]
+  },
+  "gemini-omni-flash-preview": {
+    "provider": "google"
   },
   "gemma-3-12b-it": {
     "provider": "google"
@@ -177,6 +192,9 @@
     ]
   },
   "glm-5.1": {
+    "provider": "zai"
+  },
+  "glm-5.2": {
     "provider": "zai"
   },
   "gpt-3.5-turbo": {
@@ -269,6 +287,21 @@
   "gpt-5.5-pro": {
     "provider": "openai"
   },
+  "gpt-5.6-luna": {
+    "provider": "openai"
+  },
+  "gpt-5.6-sol": {
+    "provider": "openai",
+    "aliases": [
+      "gpt-5.6"
+    ]
+  },
+  "gpt-5.6-terra": {
+    "provider": "openai"
+  },
+  "gpt-image-2": {
+    "provider": "openai"
+  },
   "minimax-m2": {
     "provider": "minimax"
   },
@@ -285,6 +318,9 @@
     "provider": "minimax"
   },
   "minimax-m2.7-highspeed": {
+    "provider": "minimax"
+  },
+  "minimax-m3": {
     "provider": "minimax"
   },
   "openai-o1": {
@@ -464,10 +500,19 @@
   "qwen3.6-35b-a3b": {
     "provider": "alibaba"
   },
+  "qwen3.6-flash": {
+    "provider": "alibaba"
+  },
   "qwen3.6-max-preview": {
     "provider": "alibaba"
   },
   "qwen3.6-plus": {
+    "provider": "alibaba"
+  },
+  "qwen3.7-max": {
+    "provider": "alibaba"
+  },
+  "qwen3.7-plus": {
     "provider": "alibaba"
   },
   "qwq-plus": {

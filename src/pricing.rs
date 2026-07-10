@@ -850,10 +850,32 @@ mod tests {
     assert_eq!(t.canonical_model(None, Some("gpt-5-4")), "gpt-5.4");
     assert_eq!(t.canonical_model(None, Some("gpt-5-4-mini")), "gpt-5.4-mini");
     assert_eq!(t.canonical_model(None, Some("gpt-5-5")), "gpt-5.5");
+    assert_eq!(t.canonical_model(None, Some("gpt-5-6")), "gpt-5.6-sol");
     assert_eq!(t.canonical_model(None, Some("glm-4-7")), "glm-4.7");
     assert_eq!(t.canonical_model(None, Some("glm-4-6")), "glm-4.6");
     assert_eq!(t.canonical_model(None, Some("glm-4-5")), "glm-4.5");
     assert_eq!(t.canonical_model(None, Some("glm-5-1")), "glm-5.1");
+  }
+
+  #[test]
+  fn gpt_5_6_alias_and_prices() {
+    let t = table();
+    assert_eq!(t.canonical_model(None, Some("gpt-5.6")), "gpt-5.6-sol");
+
+    let cases = [
+      ("gpt-5.6-sol", 5.0, 30.0, 0.5, 6.25),
+      ("gpt-5.6-terra", 2.5, 15.0, 0.25, 3.125),
+      ("gpt-5.6-luna", 1.0, 6.0, 0.1, 1.25),
+    ];
+    for (model, input, output, cache_read, cache_write) in cases {
+      let price = t
+        .lookup_official_base(Some("openai"), Some(model))
+        .unwrap_or_else(|| panic!("missing bundled price for {model}"));
+      assert_eq!(price.input, input, "input price for {model}");
+      assert_eq!(price.output, output, "output price for {model}");
+      assert_eq!(price.cache_read, cache_read, "cache-read price for {model}");
+      assert_eq!(price.cache_write, Some(cache_write), "cache-write price for {model}");
+    }
   }
 
   #[test]
