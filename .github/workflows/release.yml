@@ -77,9 +77,9 @@ jobs:
           merge-multiple: true
       - name: Upload release assets
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Release $GITHUB_REF_NAME"
-          gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip --clobber
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "Release $GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip --repo "$GITHUB_REPOSITORY" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
