@@ -48,6 +48,54 @@ fn bin() -> std::path::PathBuf {
 }
 
 #[test]
+fn table_output_shows_current_processing_entry() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("processing-table");
+  let out = cmd
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+    ])
+    .output()
+    .expect("run llm-tokei table");
+  let _ = std::fs::remove_dir_all(cache_home);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(stderr.contains("processing codex:"), "stderr: {stderr}");
+  assert!(
+    stderr.contains("rollout-2025-01-02T10-00-00-test.jsonl"),
+    "stderr: {stderr}"
+  );
+}
+
+#[test]
+fn json_output_hides_current_processing_entry() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("processing-json");
+  let out = cmd
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--format",
+      "json",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run llm-tokei json");
+  let _ = std::fs::remove_dir_all(cache_home);
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(!stderr.contains("processing codex:"), "stderr: {stderr}");
+  let stdout = String::from_utf8_lossy(&out.stdout);
+  serde_json::from_str::<serde_json::Value>(&stdout).expect("valid json");
+}
+
+#[test]
 fn codex_fixture_parses_last_total() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
   let (mut cmd, cache_home) = isolated_cmd("codex-total");

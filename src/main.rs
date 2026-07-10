@@ -78,14 +78,11 @@ fn main() -> Result<()> {
     let path = args.codex_dir.clone().or_else(CodexSource::default_path);
     if let Some(p) = path {
       let src = CodexSource::new(p);
+      let progress = ProcessingProgress::new(args.format);
       let result = if let Some(c) = cache.as_ref() {
-        collect_one_record_source_with_cache(c, "codex", src.discover_files(), CodexSource::parse_file)
+        collect_one_record_source_with_cache(c, "codex", src.discover_files(), CodexSource::parse_file, progress)
       } else {
-        src.collect().map(|records| {
-          let mut stats = CacheStats::new();
-          stats.scanned = src.discover_files().len();
-          (records, stats)
-        })
+        collect_one_record_source_direct("codex", src.discover_files(), CodexSource::parse_file, progress)
       };
       match result {
         Ok((mut v, stats)) => {
@@ -107,14 +104,22 @@ fn main() -> Result<()> {
       .unwrap_or_else(CopilotCliSource::default_paths);
     if !roots.is_empty() {
       let src = CopilotCliSource::new(roots);
+      let progress = ProcessingProgress::new(args.format);
       let result = if let Some(c) = cache.as_ref() {
-        collect_one_record_source_with_cache(c, "copilot-cli", src.discover_files(), CopilotCliSource::parse_file)
+        collect_one_record_source_with_cache(
+          c,
+          "copilot-cli",
+          src.discover_files(),
+          CopilotCliSource::parse_file,
+          progress,
+        )
       } else {
-        src.collect().map(|records| {
-          let mut stats = CacheStats::new();
-          stats.scanned = src.discover_files().len();
-          (records, stats)
-        })
+        collect_one_record_source_direct(
+          "copilot-cli",
+          src.discover_files(),
+          CopilotCliSource::parse_file,
+          progress,
+        )
       };
       match result {
         Ok((mut v, stats)) => {
@@ -136,9 +141,13 @@ fn main() -> Result<()> {
     let path = args.opencode_db.clone().or_else(OpenCodeSource::default_path);
     if let Some(p) = path {
       let src = OpenCodeSource::new(p);
+      let progress = ProcessingProgress::new(args.format);
       let result = if let Some(c) = cache.as_ref() {
-        collect_opencode_with_cache(c, &src)
+        collect_opencode_with_cache(c, &src, progress)
       } else {
+        if src.db_path.exists() {
+          progress.show("opencode", &src.db_path);
+        }
         src.collect().map(|records| {
           let mut stats = CacheStats::new();
           stats.scanned = usize::from(src.db_path.exists());
@@ -162,14 +171,11 @@ fn main() -> Result<()> {
     let path = args.pi_agent_dir.clone().or_else(PiAgentSource::default_path);
     if let Some(p) = path {
       let src = PiAgentSource::new(p);
+      let progress = ProcessingProgress::new(args.format);
       let result = if let Some(c) = cache.as_ref() {
-        collect_one_record_source_with_cache(c, "pi-agent", src.discover_files(), PiAgentSource::parse_file)
+        collect_one_record_source_with_cache(c, "pi-agent", src.discover_files(), PiAgentSource::parse_file, progress)
       } else {
-        src.collect().map(|records| {
-          let mut stats = CacheStats::new();
-          stats.scanned = src.discover_files().len();
-          (records, stats)
-        })
+        collect_one_record_source_direct("pi-agent", src.discover_files(), PiAgentSource::parse_file, progress)
       };
       match result {
         Ok((mut v, stats)) => {
@@ -188,14 +194,11 @@ fn main() -> Result<()> {
     let path = args.claude_dir.clone().or_else(ClaudeSource::default_path);
     if let Some(p) = path {
       let src = ClaudeSource::new(p);
+      let progress = ProcessingProgress::new(args.format);
       let result = if let Some(c) = cache.as_ref() {
-        collect_one_record_source_with_cache(c, "claude", src.discover_files(), ClaudeSource::parse_file)
+        collect_one_record_source_with_cache(c, "claude", src.discover_files(), ClaudeSource::parse_file, progress)
       } else {
-        src.collect().map(|records| {
-          let mut stats = CacheStats::new();
-          stats.scanned = src.discover_files().len();
-          (records, stats)
-        })
+        collect_one_record_source_direct("claude", src.discover_files(), ClaudeSource::parse_file, progress)
       };
       match result {
         Ok((mut v, stats)) => {
@@ -214,14 +217,11 @@ fn main() -> Result<()> {
     let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
     if !roots.is_empty() {
       let src = CopilotSource::new(roots);
+      let progress = ProcessingProgress::new(args.format);
       let result = if let Some(c) = cache.as_ref() {
-        collect_one_record_source_with_cache(c, "copilot", src.discover_files(), CopilotSource::parse_file)
+        collect_one_record_source_with_cache(c, "copilot", src.discover_files(), CopilotSource::parse_file, progress)
       } else {
-        src.collect().map(|records| {
-          let mut stats = CacheStats::new();
-          stats.scanned = src.discover_files().len();
-          (records, stats)
-        })
+        collect_one_record_source_direct("copilot", src.discover_files(), CopilotSource::parse_file, progress)
       };
       match result {
         Ok((mut v, stats)) => {
@@ -423,11 +423,31 @@ fn terminal_width() -> Option<usize> {
   terminal_size::terminal_size().map(|(terminal_size::Width(width), _)| width as usize)
 }
 
+#[derive(Clone, Copy)]
+struct ProcessingProgress {
+  enabled: bool,
+}
+
+impl ProcessingProgress {
+  fn new(format: Format) -> Self {
+    Self {
+      enabled: format != Format::Json,
+    }
+  }
+
+  fn show(self, source: &str, file: &Path) {
+    if self.enabled {
+      eprintln!("processing {source}: {}", file.display());
+    }
+  }
+}
+
 fn collect_one_record_source_with_cache<F>(
   cache: &CacheDb,
   source: &str,
   files: Vec<PathBuf>,
   parse_file: F,
+  progress: ProcessingProgress,
 ) -> Result<(Vec<UsageRecord>, CacheStats)>
 where
   F: Fn(&Path) -> Result<Option<Vec<UsageRecord>>>,
@@ -441,6 +461,7 @@ where
 
   for file in files {
     debug!(source, file = %file.display(), "processing file");
+    progress.show(source, &file);
     seen.insert(file.clone());
     let mtime = file_mtime_secs(&file).unwrap_or(0);
     let was_known = known.get(&file).copied();
@@ -489,6 +510,32 @@ where
   Ok((out, stats))
 }
 
+fn collect_one_record_source_direct<F>(
+  source: &str,
+  files: Vec<PathBuf>,
+  parse_file: F,
+  progress: ProcessingProgress,
+) -> Result<(Vec<UsageRecord>, CacheStats)>
+where
+  F: Fn(&Path) -> Result<Option<Vec<UsageRecord>>>,
+{
+  let mut out = Vec::new();
+  let mut stats = CacheStats::new();
+  stats.scanned = files.len();
+
+  for file in files {
+    debug!(source, file = %file.display(), "processing file");
+    progress.show(source, &file);
+    let Ok(Some(records)) = parse_file(&file) else {
+      continue;
+    };
+    debug!(source, file = %file.display(), summary = %file_summary(&records), "file summary");
+    out.extend(records);
+  }
+
+  Ok((out, stats))
+}
+
 fn period_since(args: &Args) -> Option<anyhow::Result<chrono::DateTime<chrono::Utc>>> {
   let period = args
     .period
@@ -503,7 +550,11 @@ fn period_since(args: &Args) -> Option<anyhow::Result<chrono::DateTime<chrono::U
   period.map(time::parse_period)
 }
 
-fn collect_opencode_with_cache(cache: &CacheDb, src: &OpenCodeSource) -> Result<(Vec<UsageRecord>, CacheStats)> {
+fn collect_opencode_with_cache(
+  cache: &CacheDb,
+  src: &OpenCodeSource,
+  progress: ProcessingProgress,
+) -> Result<(Vec<UsageRecord>, CacheStats)> {
   let mut stats = CacheStats::new();
   let mut out = Vec::new();
   let file = src.db_path.clone();
@@ -519,6 +570,7 @@ fn collect_opencode_with_cache(cache: &CacheDb, src: &OpenCodeSource) -> Result<
 
   stats.scanned = 1;
   debug!(source = "opencode", file = %file.display(), "processing file");
+  progress.show("opencode", &file);
   let mtime = file_mtime_secs(&file).unwrap_or(0);
   let known = cache.file_mtimes_for("opencode")?;
   let was_known = known.get(&file).copied();
