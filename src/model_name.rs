@@ -8,7 +8,7 @@ pub fn norm(s: &str) -> String {
 pub fn resolve_alias(aliases: &BTreeMap<String, String>, provider: &str, model: &str) -> Option<String> {
   let model = norm(model);
   aliases
-    .get(&format!("{}/{}", norm(provider), &model))
+    .get(&format!("{}/{}", norm(provider), model))
     .or_else(|| aliases.get(&model))
     .cloned()
     .or_else(|| fuzzy_resolve(aliases, &model))
