@@ -19,13 +19,11 @@ use std::time::UNIX_EPOCH;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
-use crate::activity::{ActivitySeries, HourlyActivitySeries};
+use crate::activity::{render_activity, ActivityRenderOptions};
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
 use crate::cli::{Args, Cmd, ConfigCmd, Format, GraphChart, Unit};
 use crate::format::{
-  activity_svg::{render_activity_svg, render_hourly_activity_svg},
-  activity_terminal::{render_activity_terminal, render_hourly_activity_terminal, ActivityTerminalOpts},
   json::render_json,
   svg::render_svg_terminal,
   table::{render_table, TableOpts},
@@ -375,8 +373,6 @@ fn render_activity_graph(
   args: &Args,
   opts: GraphOpts,
 ) -> Result<()> {
-  use chrono::{Duration, Utc};
-
   let unit = output_unit(args);
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
   let width = opts.width.or_else(|| {
@@ -386,62 +382,21 @@ fn render_activity_graph(
       None
     }
   });
-  let terminal_opts = ActivityTerminalOpts { use_color, width };
-  let now = Utc::now();
-  let time_range = activity_time_range(filters, now)?;
-
-  if opts.chart != GraphChart::Heatmap {
-    if let Some((start, end)) = time_range.filter(|(start, end)| *end - *start < Duration::hours(30)) {
-      let series = HourlyActivitySeries::from_records(records, filters, pricing, args.cost, unit, start, end);
-      match args.format {
-        Format::Table => print!("{}", render_hourly_activity_terminal(&series, &terminal_opts)),
-        Format::Svg => print!("{}", render_hourly_activity_svg(&series)),
-        Format::Json => unreachable!("graph JSON output is rejected before collecting records"),
-      }
-      return Ok(());
-    }
-  }
-
-  let (start, end) = activity_date_range(filters, now)?;
-  let series = ActivitySeries::from_records(records, filters, pricing, args.cost, unit, start, end);
-
-  match args.format {
-    Format::Table => print!("{}", render_activity_terminal(&series, opts.chart, &terminal_opts)),
-    Format::Svg => print!("{}", render_activity_svg(&series, opts.chart)),
-    Format::Json => unreachable!("graph JSON output is rejected before collecting records"),
-  }
+  let rendered = render_activity(
+    records,
+    filters,
+    pricing,
+    ActivityRenderOptions {
+      chart: opts.chart,
+      format: args.format,
+      unit,
+      cost_mode: args.cost,
+      use_color,
+      width,
+    },
+  )?;
+  print!("{rendered}");
   Ok(())
-}
-
-fn activity_time_range(
-  filters: &Filters,
-  now: chrono::DateTime<chrono::Utc>,
-) -> Result<Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>> {
-  let Some(start) = filters.since else {
-    return Ok(None);
-  };
-  let end = filters.until.unwrap_or(now);
-  if start > end {
-    anyhow::bail!("graph: start time {start} is after end time {end}");
-  }
-  Ok(Some((start, end)))
-}
-
-fn activity_date_range(
-  filters: &Filters,
-  now: chrono::DateTime<chrono::Utc>,
-) -> Result<(chrono::NaiveDate, chrono::NaiveDate)> {
-  use chrono::{Duration, Local};
-
-  let end = filters.until.unwrap_or(now).with_timezone(&Local).date_naive();
-  let start = filters
-    .since
-    .map(|since| since.with_timezone(&Local).date_naive())
-    .unwrap_or_else(|| end - Duration::days(364));
-  if start > end {
-    anyhow::bail!("graph: start date {start} is after end date {end}");
-  }
-  Ok((start, end))
 }
 
 fn display_command() -> String {

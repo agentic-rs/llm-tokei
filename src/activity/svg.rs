@@ -1,7 +1,7 @@
-use super::activity_common::{format_value, month_labels, summary, title, ActivityPlot, CalendarGrid};
-use super::svg::escape_xml;
-use crate::activity::{ActivityDay, ActivitySeries, HourlyActivitySeries};
+use super::plot::{format_value, month_labels, summary, title, ActivityPlot, CalendarGrid};
+use super::series::{ActivityDay, ActivitySeries, HourlyActivitySeries};
 use crate::cli::GraphChart;
+use crate::format::svg::escape_xml;
 use std::fmt::Write;
 
 const FONT_FAMILY: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
@@ -11,7 +11,7 @@ const TEXT: &str = "#f0f6fc";
 const MUTED: &str = "#8b949e";
 const GRID: &str = "#21262d";
 
-pub fn render_activity_svg(series: &ActivitySeries, chart: GraphChart) -> String {
+pub(super) fn render_activity_svg(series: &ActivitySeries, chart: GraphChart) -> String {
   match chart.resolve(series.len()) {
     GraphChart::Plot => render_plot(&ActivityPlot::from_daily(series), "day"),
     GraphChart::Heatmap => render_heatmap(series),
@@ -19,7 +19,7 @@ pub fn render_activity_svg(series: &ActivitySeries, chart: GraphChart) -> String
   }
 }
 
-pub fn render_hourly_activity_svg(series: &HourlyActivitySeries) -> String {
+pub(super) fn render_hourly_activity_svg(series: &HourlyActivitySeries) -> String {
   render_plot(&ActivityPlot::from_hourly(series), "hour")
 }
 
@@ -149,7 +149,7 @@ fn render_heatmap(series: &ActivitySeries) -> String {
   let week_count = grid.as_ref().map(|grid| grid.week_count).unwrap_or_default();
   let width = ((GRID_LEFT + week_count as f64 * PITCH + 30.0).ceil() as usize).max(680);
   let height = 280;
-  let chart_title = format!("{} activity graph", super::activity_common::unit_name(series.unit));
+  let chart_title = format!("{} activity graph", super::plot::unit_name(series.unit));
   let chart_desc = format!("{}. {}", title(series), summary(series));
   let mut out = svg_start(&chart_title, &chart_desc, "heatmap", "day", width, height);
   text_element(

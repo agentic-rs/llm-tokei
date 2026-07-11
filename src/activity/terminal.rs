@@ -1,7 +1,5 @@
-use super::activity_common::{
-  format_value, month_labels as calendar_month_labels, summary, title, ActivityPlot, CalendarGrid,
-};
-use crate::activity::{ActivityDay, ActivitySeries, HourlyActivitySeries};
+use super::plot::{format_value, month_labels as calendar_month_labels, summary, title, ActivityPlot, CalendarGrid};
+use super::series::{ActivityDay, ActivitySeries, HourlyActivitySeries};
 use crate::cli::GraphChart;
 #[cfg(test)]
 use crate::cli::Unit;
@@ -10,12 +8,16 @@ use chrono::NaiveDate;
 
 const PLOT_HEIGHT: usize = 6;
 
-pub struct ActivityTerminalOpts {
+pub(super) struct ActivityTerminalOptions {
   pub use_color: bool,
   pub width: Option<usize>,
 }
 
-pub fn render_activity_terminal(series: &ActivitySeries, chart: GraphChart, opts: &ActivityTerminalOpts) -> String {
+pub(super) fn render_activity_terminal(
+  series: &ActivitySeries,
+  chart: GraphChart,
+  opts: &ActivityTerminalOptions,
+) -> String {
   let chart = chart.resolve(series.len());
   match chart {
     GraphChart::Plot => render_plot(&ActivityPlot::from_daily(series), opts),
@@ -24,11 +26,11 @@ pub fn render_activity_terminal(series: &ActivitySeries, chart: GraphChart, opts
   }
 }
 
-pub fn render_hourly_activity_terminal(series: &HourlyActivitySeries, opts: &ActivityTerminalOpts) -> String {
+pub(super) fn render_hourly_activity_terminal(series: &HourlyActivitySeries, opts: &ActivityTerminalOptions) -> String {
   render_plot(&ActivityPlot::from_hourly(series), opts)
 }
 
-fn render_plot(plot: &ActivityPlot, opts: &ActivityTerminalOpts) -> String {
+fn render_plot(plot: &ActivityPlot, opts: &ActivityTerminalOptions) -> String {
   let mut out = String::new();
   out.push_str(&plot.title);
   out.push_str("\n\n");
@@ -96,7 +98,7 @@ fn render_plot(plot: &ActivityPlot, opts: &ActivityTerminalOpts) -> String {
   out
 }
 
-fn render_heatmap(series: &ActivitySeries, opts: &ActivityTerminalOpts) -> String {
+fn render_heatmap(series: &ActivitySeries, opts: &ActivityTerminalOptions) -> String {
   let mut out = String::new();
   out.push_str(&title(series));
   out.push_str("\n\n");
@@ -238,7 +240,7 @@ mod tests {
     let rendered = render_activity_terminal(
       &series,
       GraphChart::Auto,
-      &ActivityTerminalOpts {
+      &ActivityTerminalOptions {
         use_color: false,
         width: Some(80),
       },
@@ -256,7 +258,7 @@ mod tests {
     let rendered = render_activity_terminal(
       &series,
       GraphChart::Auto,
-      &ActivityTerminalOpts {
+      &ActivityTerminalOptions {
         use_color: false,
         width: None,
       },
@@ -273,7 +275,7 @@ mod tests {
     let rendered = render_activity_terminal(
       &series,
       GraphChart::Plot,
-      &ActivityTerminalOpts {
+      &ActivityTerminalOptions {
         use_color: false,
         width: Some(15),
       },
@@ -288,7 +290,7 @@ mod tests {
     let rendered = render_activity_terminal(
       &series,
       GraphChart::Heatmap,
-      &ActivityTerminalOpts {
+      &ActivityTerminalOptions {
         use_color: true,
         width: None,
       },
@@ -306,7 +308,7 @@ mod tests {
     let series = HourlyActivitySeries::from_values(start, vec![0.0, 10.0, 20.0], Unit::Tokens);
     let rendered = render_hourly_activity_terminal(
       &series,
-      &ActivityTerminalOpts {
+      &ActivityTerminalOptions {
         use_color: false,
         width: Some(80),
       },

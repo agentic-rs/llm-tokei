@@ -1,4 +1,4 @@
-use crate::activity::{ActivitySeries, HourlyActivitySeries};
+use super::series::{ActivitySeries, HourlyActivitySeries};
 use crate::cli::Unit;
 use chrono::{Datelike, Duration, Local, NaiveDate};
 
@@ -304,7 +304,6 @@ fn pluralize<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::activity::ActivitySeries;
   use chrono::{DateTime, Utc};
 
   fn date(year: i32, month: u32, day: u32) -> NaiveDate {
