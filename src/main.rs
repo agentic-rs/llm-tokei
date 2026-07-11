@@ -37,12 +37,21 @@ use crate::sources::{
   opencode::OpenCodeSource, pi_agent::PiAgentSource, UsageSource,
 };
 
+#[derive(Clone, Copy)]
+struct GraphOpts {
+  chart: GraphChart,
+  width: Option<usize>,
+}
+
 fn main() -> Result<()> {
   let args = config::parse_args()?;
   init_tracing(args.verbose);
 
   let graph_opts = match args.cmd.as_ref() {
-    Some(Cmd::Graph { chart, width, .. }) => Some((*chart, *width)),
+    Some(Cmd::Graph { chart, width, .. }) => Some(GraphOpts {
+      chart: *chart,
+      width: *width,
+    }),
     Some(cmd) => return run_subcommand(cmd, &args),
     None => None,
   };
@@ -292,10 +301,10 @@ fn main() -> Result<()> {
     PricingTable::load_default()?
   };
 
-  let unit = output_unit(&args);
-  if let Some((chart, width)) = graph_opts {
-    return render_activity_graph(&all, &filters, &pricing, &args, chart, width, unit, use_color);
+  if let Some(opts) = graph_opts {
+    return render_activity_graph(&all, &filters, &pricing, &args, opts);
   }
+  let unit = output_unit(&args);
 
   // Group dims.
   let dims: Vec<GroupDim> = args.group_by.iter().filter_map(|s| GroupDim::parse(s)).collect();
@@ -361,17 +370,16 @@ fn render_activity_graph(
   filters: &Filters,
   pricing: &PricingTable,
   args: &Args,
-  chart: GraphChart,
-  width: Option<usize>,
-  unit: Unit,
-  use_color: bool,
+  opts: GraphOpts,
 ) -> Result<()> {
+  let unit = output_unit(args);
+  let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
   let (start, end) = activity_date_range(filters)?;
   let series = ActivitySeries::from_records(records, filters, pricing, args.cost, unit, start, end);
 
   match args.format {
     Format::Table => {
-      let width = width.or_else(|| {
+      let width = opts.width.or_else(|| {
         if std::io::stdout().is_terminal() {
           terminal_width().or_else(columns_env_width)
         } else {
@@ -380,10 +388,10 @@ fn render_activity_graph(
       });
       print!(
         "{}",
-        render_activity_terminal(&series, chart, &ActivityTerminalOpts { use_color, width })
+        render_activity_terminal(&series, opts.chart, &ActivityTerminalOpts { use_color, width })
       );
     }
-    Format::Svg => print!("{}", render_activity_svg(&series, chart)),
+    Format::Svg => print!("{}", render_activity_svg(&series, opts.chart)),
     Format::Json => anyhow::bail!("graph: --format json is not supported; use table or svg"),
   }
   Ok(())

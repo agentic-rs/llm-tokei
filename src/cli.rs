@@ -145,7 +145,7 @@ pub struct Args {
   pub month: bool,
 
   /// Disable ANSI colors.
-  #[arg(long, help_heading = "Table", global = true)]
+  #[arg(long, help_heading = "Display", global = true)]
   pub no_color: bool,
 
   /// Show human-readable usage values in table output.
@@ -165,11 +165,11 @@ pub struct Args {
   pub split_input: bool,
 
   /// Render usage columns as tokens, bytes, or cost.
-  #[arg(long, value_enum, help_heading = "Table", global = true)]
+  #[arg(long, value_enum, help_heading = "Display", global = true)]
   pub unit: Option<Unit>,
 
   /// Show input/output in bytes instead of tokens.
-  #[arg(long, conflicts_with = "unit", help_heading = "Table", global = true)]
+  #[arg(long, conflicts_with = "unit", help_heading = "Display", global = true)]
   pub bytes: bool,
 
   /// Show per-unit averages in table output: turn|round|session.
@@ -194,19 +194,19 @@ pub struct Args {
   pub date_bucket: DateBucket,
 
   /// Config file path (default: $XDG_CONFIG_HOME/llm-tokei.toml).
-  #[arg(long, help_heading = CONFIG_HELP)]
+  #[arg(long, help_heading = CONFIG_HELP, global = true)]
   pub config: Option<PathBuf>,
 
   /// Disable loading the config file.
-  #[arg(long, help_heading = CONFIG_HELP)]
+  #[arg(long, help_heading = CONFIG_HELP, global = true)]
   pub no_config: bool,
 
   /// Save current main CLI flags as config defaults, then run.
-  #[arg(long, help_heading = CONFIG_HELP)]
+  #[arg(long, help_heading = CONFIG_HELP, global = true)]
   pub save_default: bool,
 
   /// Do not apply saved config defaults for this run.
-  #[arg(long, help_heading = CONFIG_HELP)]
+  #[arg(long, help_heading = CONFIG_HELP, global = true)]
   pub no_default: bool,
 
   /// Filter: include records on/after this time (e.g. 7d, 24h, 2025-04-01, RFC3339).

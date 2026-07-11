@@ -7,6 +7,7 @@ It does not call provider APIs for your session history.
 
 ```sh
 llm-tokei [OPTIONS]
+llm-tokei graph [OPTIONS]
 llm-tokei dump [OPTIONS] [FILES]...
 ```
 
@@ -47,6 +48,55 @@ llm-tokei --since 12h --model 'gpt-*'
 ```
 
 If both `--period` and `--since` are supplied, `--since` wins.
+
+## Activity Graph
+
+`graph` visualizes daily activity across the selected sources and filters.
+Without an explicit period it shows the trailing 365 calendar days, ending
+today in the local timezone.
+
+```sh
+llm-tokei graph
+llm-tokei graph --7d
+llm-tokei graph --since 2026-01-01 --until 2026-06-30
+```
+
+The default `auto` layout depends on the number of calendar dates shown:
+
+- Up to 30 dates: a daily bar plot with value-axis and date labels.
+- More than 30 dates: a Sunday-aligned calendar heatmap with month and weekday labels.
+
+Override the layout when needed:
+
+```sh
+llm-tokei graph --chart plot --month
+llm-tokei graph --chart heatmap --7d
+```
+
+Activity is measured in total tokens by default. `--unit bytes` measures
+recorded input plus output bytes, while `--unit cost` uses the selected
+`--cost actual|mixed|official` pricing mode.
+
+```sh
+llm-tokei graph --unit bytes --month
+llm-tokei graph --unit cost --cost official
+```
+
+Heatmap intensities are quantiles of the nonzero days in the requested range,
+so the four levels remain useful when usage has large spikes. Both layouts end
+with total activity, active-day count, best day, and longest streak.
+
+Terminal output is the default. `--width <N>` controls whether daily bars use
+one or two character cells; it never removes dates. `--no-color` keeps the
+graph readable with distinct Unicode intensity glyphs.
+
+Use `--format svg` for a native standalone chart with accessible labels and
+per-day SVG tooltips:
+
+```sh
+llm-tokei graph --format svg > activity.svg
+llm-tokei graph --7d --format svg > recent-activity.svg
+```
 
 ## Grouping
 
@@ -139,7 +189,8 @@ With `--bytes`, only the JSON `input` and `output` fields switch to bytes.
 
 ### SVG
 
-SVG output renders the table view as a standalone terminal-style image.
+For normal reports, SVG output renders the table view as a standalone
+terminal-style image.
 
 ```sh
 llm-tokei --format svg --group-by source,model > usage.svg
@@ -147,7 +198,8 @@ llm-tokei --format svg --group-by source,model > usage.svg
 
 SVG uses the same table columns and table-specific flags as `--format table`.
 It does not auto-fit to the terminal width, but `--table-width <N>` can be used
-to create a narrower image.
+to create a narrower image. `llm-tokei graph --format svg` instead produces a
+native plot or heatmap as described in [Activity Graph](#activity-graph).
 
 ## Sorting And Limits
 

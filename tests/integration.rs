@@ -170,6 +170,187 @@ fn codex_fixture_renders_svg() {
 }
 
 #[test]
+fn graph_renders_a_daily_terminal_plot_for_short_ranges() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-terminal-plot");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-01-30",
+      "--no-color",
+      "--width",
+      "80",
+    ])
+    .output()
+    .expect("run terminal activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Token activity · Jan 1–30, 2025"), "graph: {graph}");
+  assert!(graph.contains("┼"), "graph: {graph}");
+  assert!(graph.contains("Total 720 · Active 1/30 days"), "graph: {graph}");
+  assert!(
+    graph.contains("Best Jan 2: 720 · Longest streak 1 day"),
+    "graph: {graph}"
+  );
+  assert!(!graph.contains("Less"), "graph: {graph}");
+  assert!(!graph.contains("\x1b["), "graph: {graph}");
+}
+
+#[test]
+fn graph_renders_a_terminal_heatmap_for_long_ranges() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-terminal-heatmap");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-12-31",
+      "--no-color",
+    ])
+    .output()
+    .expect("run terminal activity heatmap");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Token activity · Jan 1–Dec 31, 2025"), "graph: {graph}");
+  assert!(graph.contains("Mon"), "graph: {graph}");
+  assert!(graph.contains("Less ·░▒▓█ More"), "graph: {graph}");
+  assert!(graph.contains("Active 1/365 days"), "graph: {graph}");
+}
+
+#[test]
+fn graph_renders_native_svg_for_short_ranges() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-svg-plot");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-01-30",
+      "--format",
+      "svg",
+    ])
+    .output()
+    .expect("run SVG activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let svg = String::from_utf8_lossy(&out.stdout);
+  assert!(svg.starts_with("<svg "), "svg: {svg}");
+  assert!(svg.contains("data-chart=\"plot\""), "svg: {svg}");
+  assert!(svg.contains("class=\"activity-bar\""), "svg: {svg}");
+  assert!(svg.contains("<title>Jan 2, 2025: 720</title>"), "svg: {svg}");
+  assert!(!svg.contains("terminal-content"), "svg: {svg}");
+}
+
+#[test]
+fn graph_bytes_unit_uses_daily_input_and_output_bytes() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-bytes");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-01-07",
+      "--unit",
+      "bytes",
+      "--no-color",
+    ])
+    .output()
+    .expect("run byte activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Byte activity · Jan 1–7, 2025"), "graph: {graph}");
+  assert!(graph.contains("Total ~71"), "graph: {graph}");
+}
+
+#[test]
+fn graph_rejects_json_output() {
+  let (mut cmd, cache_home) = isolated_cmd("graph-json");
+  let out = cmd
+    .args(["graph", "--source", "codex", "--no-cache", "--format", "json"])
+    .output()
+    .expect("run unsupported JSON activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(!out.status.success());
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(stderr.contains("--format json is not supported"), "stderr: {stderr}");
+}
+
+#[test]
+fn graph_applies_config_defaults_with_options_after_subcommand() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (config, config_dir) = temp_config_file(
+    "graph-config",
+    r#"
+[table]
+unit = "bytes"
+no-color = true
+"#,
+  );
+  let (mut cmd, cache_home) = isolated_cmd("graph-config");
+  let out = cmd
+    .args([
+      "graph",
+      "--config",
+      config.to_str().unwrap(),
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-01-07",
+    ])
+    .output()
+    .expect("run activity graph with config defaults");
+  let _ = std::fs::remove_dir_all(cache_home);
+  let _ = std::fs::remove_dir_all(config_dir);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Byte activity · Jan 1–7, 2025"), "graph: {graph}");
+  assert!(!graph.contains("\x1b["), "graph: {graph}");
+}
+
+#[test]
 fn pi_agent_fixture_parses_usage() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pi_agent/sessions");
   let (mut cmd, cache_home) = isolated_cmd("pi-agent");
