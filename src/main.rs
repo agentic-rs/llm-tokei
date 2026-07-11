@@ -13,7 +13,7 @@ mod time;
 
 use anyhow::{Context, Result};
 use std::collections::HashSet;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tracing::debug;
@@ -94,7 +94,7 @@ fn main() -> Result<()> {
     let path = args.codex_dir.clone().or_else(CodexSource::default_path);
     if let Some(p) = path {
       let src = CodexSource::new(p);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(c, "codex", src.discover_files(), CodexSource::parse_file, progress)
       } else {
@@ -120,7 +120,7 @@ fn main() -> Result<()> {
       .unwrap_or_else(CopilotCliSource::default_paths);
     if !roots.is_empty() {
       let src = CopilotCliSource::new(roots);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(
           c,
@@ -157,14 +157,16 @@ fn main() -> Result<()> {
     let path = args.opencode_db.clone().or_else(OpenCodeSource::default_path);
     if let Some(p) = path {
       let src = OpenCodeSource::new(p);
-      let progress = ProcessingProgress::new(args.format);
+      let mut progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_opencode_with_cache(c, &src, progress)
       } else {
         if src.db_path.exists() {
           progress.show("opencode", &src.db_path);
         }
-        src.collect().map(|records| {
+        let collected = src.collect();
+        progress.clear();
+        collected.map(|records| {
           let mut stats = CacheStats::new();
           stats.scanned = usize::from(src.db_path.exists());
           (records, stats)
@@ -187,7 +189,7 @@ fn main() -> Result<()> {
     let path = args.pi_agent_dir.clone().or_else(PiAgentSource::default_path);
     if let Some(p) = path {
       let src = PiAgentSource::new(p);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(c, "pi-agent", src.discover_files(), PiAgentSource::parse_file, progress)
       } else {
@@ -210,7 +212,7 @@ fn main() -> Result<()> {
     let path = args.claude_dir.clone().or_else(ClaudeSource::default_path);
     if let Some(p) = path {
       let src = ClaudeSource::new(p);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(c, "claude", src.discover_files(), ClaudeSource::parse_file, progress)
       } else {
@@ -233,7 +235,7 @@ fn main() -> Result<()> {
     let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
     if !roots.is_empty() {
       let src = CopilotSource::new(roots);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(c, "copilot", src.discover_files(), CopilotSource::parse_file, progress)
       } else {
@@ -475,22 +477,80 @@ fn terminal_width() -> Option<usize> {
   terminal_size::terminal_size().map(|(terminal_size::Width(width), _)| width as usize)
 }
 
-#[derive(Clone, Copy)]
 struct ProcessingProgress {
   enabled: bool,
+  visible: bool,
 }
 
 impl ProcessingProgress {
-  fn new(format: Format) -> Self {
+  fn new(format: Format, verbose: bool) -> Self {
+    Self::with_terminal(format, std::io::stderr().is_terminal(), verbose)
+  }
+
+  fn with_terminal(format: Format, is_terminal: bool, verbose: bool) -> Self {
     Self {
-      enabled: format != Format::Json,
+      enabled: format != Format::Json && is_terminal && !verbose,
+      visible: false,
     }
   }
 
-  fn show(self, source: &str, file: &Path) {
+  fn show(&mut self, source: &str, file: &Path) {
     if self.enabled {
-      eprintln!("processing {source}: {}", file.display());
+      let mut stderr = std::io::stderr().lock();
+      let _ = Self::write_update(&mut stderr, source, file);
+      self.visible = true;
     }
+  }
+
+  fn clear(&mut self) {
+    if self.enabled && self.visible {
+      let mut stderr = std::io::stderr().lock();
+      let _ = Self::write_clear(&mut stderr);
+      self.visible = false;
+    }
+  }
+
+  fn write_update(writer: &mut impl Write, source: &str, file: &Path) -> std::io::Result<()> {
+    write!(writer, "\r\x1b[2Kprocessing {source}: {}", file.display())?;
+    writer.flush()
+  }
+
+  fn write_clear(writer: &mut impl Write) -> std::io::Result<()> {
+    write!(writer, "\r\x1b[2K")?;
+    writer.flush()
+  }
+}
+
+impl Drop for ProcessingProgress {
+  fn drop(&mut self) {
+    self.clear();
+  }
+}
+
+#[cfg(test)]
+mod processing_progress_tests {
+  use super::*;
+
+  #[test]
+  fn progress_is_only_enabled_for_interactive_non_json_output() {
+    assert!(ProcessingProgress::with_terminal(Format::Table, true, false).enabled);
+    assert!(ProcessingProgress::with_terminal(Format::Svg, true, false).enabled);
+    assert!(!ProcessingProgress::with_terminal(Format::Json, true, false).enabled);
+    assert!(!ProcessingProgress::with_terminal(Format::Table, false, false).enabled);
+    assert!(!ProcessingProgress::with_terminal(Format::Table, true, true).enabled);
+  }
+
+  #[test]
+  fn progress_updates_replace_and_then_clear_one_terminal_line() {
+    let mut output = Vec::new();
+    ProcessingProgress::write_update(&mut output, "copilot", Path::new("first.jsonl")).unwrap();
+    ProcessingProgress::write_update(&mut output, "copilot", Path::new("second.jsonl")).unwrap();
+    ProcessingProgress::write_clear(&mut output).unwrap();
+
+    assert_eq!(
+      String::from_utf8(output).unwrap(),
+      "\r\x1b[2Kprocessing copilot: first.jsonl\r\x1b[2Kprocessing copilot: second.jsonl\r\x1b[2K"
+    );
   }
 }
 
@@ -499,7 +559,7 @@ fn collect_one_record_source_with_cache<F>(
   source: &str,
   files: Vec<PathBuf>,
   parse_file: F,
-  progress: ProcessingProgress,
+  mut progress: ProcessingProgress,
 ) -> Result<(Vec<UsageRecord>, CacheStats)>
 where
   F: Fn(&Path) -> Result<Option<Vec<UsageRecord>>>,
@@ -512,8 +572,6 @@ where
   let mut seen: HashSet<PathBuf> = HashSet::new();
 
   for file in files {
-    debug!(source, file = %file.display(), "processing file");
-    progress.show(source, &file);
     seen.insert(file.clone());
     let mtime = file_mtime_secs(&file).unwrap_or(0);
     let was_known = known.get(&file).copied();
@@ -521,7 +579,11 @@ where
     if was_known == Some(mtime) {
       let mut cached = cache.load_active_for_file(source, &file)?;
       if cached.is_empty() {
-        let parsed = parse_file(&file)?.unwrap_or_default();
+        debug!(source, file = %file.display(), "processing file");
+        progress.show(source, &file);
+        let parsed = parse_file(&file);
+        progress.clear();
+        let parsed = parsed?.unwrap_or_default();
         debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
         if let Some(prev) = was_known {
           if prev == mtime {
@@ -538,7 +600,11 @@ where
       continue;
     }
 
-    let parsed = parse_file(&file)?.unwrap_or_default();
+    debug!(source, file = %file.display(), "processing file");
+    progress.show(source, &file);
+    let parsed = parse_file(&file);
+    progress.clear();
+    let parsed = parsed?.unwrap_or_default();
     debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
     if was_known.is_some() {
       stats.updated += 1;
@@ -566,7 +632,7 @@ fn collect_one_record_source_direct<F>(
   source: &str,
   files: Vec<PathBuf>,
   parse_file: F,
-  progress: ProcessingProgress,
+  mut progress: ProcessingProgress,
 ) -> Result<(Vec<UsageRecord>, CacheStats)>
 where
   F: Fn(&Path) -> Result<Option<Vec<UsageRecord>>>,
@@ -578,7 +644,9 @@ where
   for file in files {
     debug!(source, file = %file.display(), "processing file");
     progress.show(source, &file);
-    let Ok(Some(records)) = parse_file(&file) else {
+    let parsed = parse_file(&file);
+    progress.clear();
+    let Ok(Some(records)) = parsed else {
       continue;
     };
     debug!(source, file = %file.display(), summary = %file_summary(&records), "file summary");
@@ -605,7 +673,7 @@ fn period_since(args: &Args) -> Option<anyhow::Result<chrono::DateTime<chrono::U
 fn collect_opencode_with_cache(
   cache: &CacheDb,
   src: &OpenCodeSource,
-  progress: ProcessingProgress,
+  mut progress: ProcessingProgress,
 ) -> Result<(Vec<UsageRecord>, CacheStats)> {
   let mut stats = CacheStats::new();
   let mut out = Vec::new();
@@ -621,8 +689,6 @@ fn collect_opencode_with_cache(
   }
 
   stats.scanned = 1;
-  debug!(source = "opencode", file = %file.display(), "processing file");
-  progress.show("opencode", &file);
   let mtime = file_mtime_secs(&file).unwrap_or(0);
   let known = cache.file_mtimes_for("opencode")?;
   let was_known = known.get(&file).copied();
@@ -635,7 +701,11 @@ fn collect_opencode_with_cache(
     }
   }
 
-  out = src.collect()?;
+  debug!(source = "opencode", file = %file.display(), "processing file");
+  progress.show("opencode", &file);
+  let collected = src.collect();
+  progress.clear();
+  out = collected?;
   debug!(source = "opencode", file = %file.display(), summary = %file_summary(&out), "file summary");
   if was_known.is_some() {
     stats.updated = 1;
