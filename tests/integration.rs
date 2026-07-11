@@ -207,7 +207,7 @@ fn graph_renders_a_daily_terminal_plot_for_short_ranges() {
 }
 
 #[test]
-fn graph_renders_an_hourly_terminal_plot_for_sub_24_hour_ranges() {
+fn graph_renders_an_hourly_terminal_plot_for_sub_30_hour_ranges() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
   let (mut cmd, cache_home) = isolated_cmd("graph-terminal-hourly");
   let out = cmd
@@ -239,7 +239,7 @@ fn graph_renders_an_hourly_terminal_plot_for_sub_24_hour_ranges() {
 }
 
 #[test]
-fn graph_keeps_exactly_24_hours_on_daily_resolution() {
+fn graph_renders_exactly_24_hours_on_hourly_resolution() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
   let (mut cmd, cache_home) = isolated_cmd("graph-exactly-24h");
   let out = cmd
@@ -262,9 +262,68 @@ fn graph_keeps_exactly_24_hours_on_daily_resolution() {
 
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
   let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Hourly token activity · "), "graph: {graph}");
+  assert!(graph.contains("Total 720 · Active 1/25 hours"), "graph: {graph}");
+}
+
+#[test]
+fn graph_keeps_exactly_30_hours_on_daily_resolution() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-exactly-30h");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01T12:00:00Z",
+      "--until",
+      "2025-01-02T18:00:00Z",
+      "--no-color",
+    ])
+    .output()
+    .expect("run exactly 30-hour activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
   assert!(graph.contains("Token activity · "), "graph: {graph}");
   assert!(!graph.contains("Hourly token activity"), "graph: {graph}");
-  assert!(graph.contains("Total 720 · Active 1/2 days"), "graph: {graph}");
+  assert!(graph.contains("Total 720 · Active 1/"), "graph: {graph}");
+  assert!(graph.contains("Longest streak 1 day"), "graph: {graph}");
+}
+
+#[test]
+fn graph_heatmap_override_forces_daily_resolution_below_30_hours() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-short-heatmap");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-02T00:00:00Z",
+      "--until",
+      "2025-01-02T12:00:00Z",
+      "--chart",
+      "heatmap",
+      "--no-color",
+    ])
+    .output()
+    .expect("run forced daily heatmap for a short range");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(!graph.contains("Hourly token activity"), "graph: {graph}");
+  assert!(graph.contains("Less ·░▒▓█ More"), "graph: {graph}");
 }
 
 #[test]
@@ -330,7 +389,7 @@ fn graph_renders_native_svg_for_short_ranges() {
 }
 
 #[test]
-fn graph_renders_native_hourly_svg_for_sub_24_hour_ranges() {
+fn graph_renders_native_hourly_svg_for_sub_30_hour_ranges() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
   let (mut cmd, cache_home) = isolated_cmd("graph-svg-hourly");
   let out = cmd
@@ -552,7 +611,11 @@ fn graph_date_only_resolution_follows_dst_day_length() {
       "Hourly token activity · Mar 9, 00:00 -08:00–23:59 -07:00, 2025",
       "Active 0/23 hours",
     ),
-    ("2025-11-02", "Token activity · Nov 2, 2025", "Active 0/1 day"),
+    (
+      "2025-11-02",
+      "Hourly token activity · Nov 2, 00:00 -07:00–23:59 -08:00, 2025",
+      "Active 0/25 hours",
+    ),
   ] {
     let (mut cmd, cache_home) = isolated_cmd(&format!("graph-date-dst-{date}"));
     let out = cmd

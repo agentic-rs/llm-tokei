@@ -75,8 +75,8 @@ llm-tokei graph
 # Daily activity plot for a short range
 llm-tokei graph --7d
 
-# Hourly activity plot for a sub-24-hour range
-llm-tokei graph --period 12h
+# Hourly activity plot for a sub-30-hour range
+llm-tokei graph --24h
 
 # Native SVG activity graph
 llm-tokei graph --format svg > activity.svg

@@ -59,20 +59,20 @@ today in the local timezone.
 
 ```sh
 llm-tokei graph
-llm-tokei graph --period 12h
+llm-tokei graph --24h
 llm-tokei graph --7d
 llm-tokei graph --since 2026-01-01 --until 2026-06-30
 ```
 
 The default `auto` layout depends on the requested time span:
 
-- Less than 24 hours: an hourly bar plot with local-time labels.
-- At least 24 hours and up to 30 dates: a daily bar plot with date labels.
+- Less than 30 hours: an hourly bar plot with local-time labels.
+- At least 30 hours and up to 30 dates: a daily bar plot with date labels.
 - More than 30 dates: a Sunday-aligned calendar heatmap with month and weekday labels.
 
-Exactly `--24h` stays on daily resolution. Date-only bounds cover complete local
-days: a single ordinary day renders 24 hourly buckets, a spring-forward day has
-23 hourly buckets, and a nearly 25-hour fall-back day stays on daily resolution.
+Exactly `--24h` uses hourly resolution; exactly 30 hours stays daily. Date-only
+bounds cover complete local days, so ordinary, spring-forward, and fall-back
+days render 24, 23, and 25 hourly buckets respectively.
 
 Override the layout when needed:
 
@@ -80,8 +80,8 @@ Override the layout when needed:
 # Plot keeps automatic hourly/daily resolution while forcing the plot layout.
 llm-tokei graph --chart plot --month
 
-# Heatmap forces daily resolution, even for a sub-24-hour range.
-llm-tokei graph --chart heatmap --period 12h
+# Heatmap forces daily resolution, even for a sub-30-hour range.
+llm-tokei graph --chart heatmap --24h
 ```
 
 Activity is measured in total tokens by default. `--unit bytes` measures

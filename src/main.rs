@@ -391,7 +391,7 @@ fn render_activity_graph(
   let time_range = activity_time_range(filters, now)?;
 
   if opts.chart != GraphChart::Heatmap {
-    if let Some((start, end)) = time_range.filter(|(start, end)| *end - *start < Duration::hours(24)) {
+    if let Some((start, end)) = time_range.filter(|(start, end)| *end - *start < Duration::hours(30)) {
       let series = HourlyActivitySeries::from_records(records, filters, pricing, args.cost, unit, start, end);
       match args.format {
         Format::Table => print!("{}", render_hourly_activity_terminal(&series, &terminal_opts)),
