@@ -51,7 +51,8 @@ impl ActivitySeries {
     Self::from_values_with_estimates(start, values, estimated, unit)
   }
 
-  pub fn from_values(start: NaiveDate, values: Vec<f64>, unit: Unit) -> Self {
+  #[cfg(test)]
+  pub(crate) fn from_values(start: NaiveDate, values: Vec<f64>, unit: Unit) -> Self {
     let estimated = vec![false; values.len()];
     Self::from_values_with_estimates(start, values, estimated, unit)
   }

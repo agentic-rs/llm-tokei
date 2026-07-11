@@ -19,10 +19,12 @@ use std::time::UNIX_EPOCH;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
+use crate::activity::ActivitySeries;
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
-use crate::cli::{Args, Cmd, ConfigCmd, Format, Unit};
+use crate::cli::{Args, Cmd, ConfigCmd, Format, GraphChart, Unit};
 use crate::format::{
+  activity_terminal::{render_activity_terminal, ActivityTerminalOpts},
   json::render_json,
   svg::render_svg_terminal,
   table::{render_table, TableOpts},
@@ -38,9 +40,11 @@ fn main() -> Result<()> {
   let args = config::parse_args()?;
   init_tracing(args.verbose);
 
-  if let Some(cmd) = args.cmd.as_ref() {
-    return run_subcommand(cmd, &args);
-  }
+  let graph_opts = match args.cmd.as_ref() {
+    Some(Cmd::Graph { chart, width, .. }) => Some((*chart, *width)),
+    Some(cmd) => return run_subcommand(cmd, &args),
+    None => None,
+  };
 
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
   let cache = if args.no_cache {
@@ -287,6 +291,11 @@ fn main() -> Result<()> {
     PricingTable::load_default()?
   };
 
+  let unit = output_unit(&args);
+  if let Some((chart, width)) = graph_opts {
+    return render_activity_graph(&all, &filters, &pricing, &args, chart, width, unit, use_color);
+  }
+
   // Group dims.
   let dims: Vec<GroupDim> = args.group_by.iter().filter_map(|s| GroupDim::parse(s)).collect();
   let dims = if dims.is_empty() {
@@ -310,8 +319,6 @@ fn main() -> Result<()> {
     cost_per,
     args.cost,
   );
-
-  let unit = output_unit(&args);
 
   let sort_key = SortKey::parse(&args.sort).unwrap_or(SortKey::Total);
   sort_aggs(&mut aggs, sort_key, !args.asc, unit);
@@ -346,6 +353,57 @@ fn main() -> Result<()> {
   }
 
   Ok(())
+}
+
+fn render_activity_graph(
+  records: &[UsageRecord],
+  filters: &Filters,
+  pricing: &PricingTable,
+  args: &Args,
+  chart: GraphChart,
+  width: Option<usize>,
+  unit: Unit,
+  use_color: bool,
+) -> Result<()> {
+  let (start, end) = activity_date_range(filters)?;
+  let series = ActivitySeries::from_records(records, filters, pricing, args.cost, unit, start, end);
+
+  match args.format {
+    Format::Table => {
+      let width = width.or_else(|| {
+        if std::io::stdout().is_terminal() {
+          terminal_width().or_else(columns_env_width)
+        } else {
+          None
+        }
+      });
+      print!(
+        "{}",
+        render_activity_terminal(&series, chart, &ActivityTerminalOpts { use_color, width })
+      );
+    }
+    Format::Svg => anyhow::bail!("graph: SVG output is not implemented yet"),
+    Format::Json => anyhow::bail!("graph: --format json is not supported; use table or svg"),
+  }
+  Ok(())
+}
+
+fn activity_date_range(filters: &Filters) -> Result<(chrono::NaiveDate, chrono::NaiveDate)> {
+  use chrono::{Duration, Local, Utc};
+
+  let end = filters
+    .until
+    .unwrap_or_else(Utc::now)
+    .with_timezone(&Local)
+    .date_naive();
+  let start = filters
+    .since
+    .map(|since| since.with_timezone(&Local).date_naive())
+    .unwrap_or_else(|| end - Duration::days(364));
+  if start > end {
+    anyhow::bail!("graph: start date {start} is after end date {end}");
+  }
+  Ok((start, end))
 }
 
 fn display_command() -> String {
@@ -664,6 +722,7 @@ fn init_tracing(verbose: bool) {
 
 fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
   match cmd {
+    Cmd::Graph { .. } => unreachable!("graph is rendered after collecting usage records"),
     Cmd::Dump {
       copilot,
       copilot_cli,
