@@ -1,15 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="917" height="376" viewBox="0 0 917 376" role="img" aria-labelledby="title desc" data-chart="heatmap" data-resolution="day">
+<svg xmlns="http://www.w3.org/2000/svg" width="917" height="352" viewBox="0 0 917 352" role="img" aria-labelledby="title desc" data-chart="heatmap" data-resolution="day">
   <title id="title">Token activity graph</title>
-  <desc id="desc">Token activity · Jul 13, 2025–Jul 12, 2026. Total ~4.3B · Active 85/365 days · Best Jul 12: 350.7M · Longest streak 25 days</desc>
-  <rect x="0.5" y="0.5" width="916" height="375" rx="16" fill="#0d1117" stroke="#30363d"/>
+  <desc id="desc">Token activity · Jul 13, 2025–Jul 12, 2026. Total ~4.3B · Active 85/365 days · Best Jul 12: 357.0M · Longest streak 25 days</desc>
+  <rect x="0.5" y="0.5" width="916" height="351" rx="16" fill="#0d1117" stroke="#30363d"/>
   <rect x="0.5" y="0.5" width="916" height="48" rx="16" fill="#161b22"/>
   <rect x="0.5" y="32" width="916" height="17" fill="#161b22"/>
   <circle cx="24" cy="24" r="6" fill="#ff5f56"/>
   <circle cx="44" cy="24" r="6" fill="#ffbd2e"/>
   <circle cx="64" cy="24" r="6" fill="#27c93f"/>
   <text x="458.5" y="29.0" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" text-anchor="middle">llm-tokei</text>
-  <text x="22.0" y="75.0" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" text-anchor="start">$ llm-tokei graph --format svg</text>
-  <g transform="translate(0 96)">
+  <text x="22.0" y="75.0" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" text-anchor="start">$ llm-tokei graph</text>
+  <g transform="translate(0 72)">
   <text x="28.0" y="39.0" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" text-anchor="start" font-weight="600">Token activity · Jul 13, 2025–Jul 12, 2026</text>
   <text x="64.0" y="77.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="start" >Jul</text>
   <text x="92.0" y="77.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="start" >Aug</text>
@@ -391,7 +391,7 @@
   <rect class="activity-cell" x="778.0" y="148.0" width="11.0" height="11.0" rx="2" fill="#39d353" stroke="#39d353"><title>Jul 9, 2026: ~229.6M</title></rect>
   <rect class="activity-cell" x="778.0" y="162.0" width="11.0" height="11.0" rx="2" fill="#26a641" stroke="#26a641"><title>Jul 10, 2026: 36.0M</title></rect>
   <rect class="activity-cell" x="778.0" y="176.0" width="11.0" height="11.0" rx="2" fill="#39d353" stroke="#39d353"><title>Jul 11, 2026: ~163.5M</title></rect>
-  <rect class="activity-cell" x="792.0" y="92.0" width="11.0" height="11.0" rx="2" fill="#39d353" stroke="#39d353"><title>Jul 12, 2026: 350.7M</title></rect>
+  <rect class="activity-cell" x="792.0" y="92.0" width="11.0" height="11.0" rx="2" fill="#39d353" stroke="#39d353"><title>Jul 12, 2026: 357.0M</title></rect>
   <text x="28.0" y="221.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="start" >Less</text>
   <rect x="61.0" y="211.0" width="11.0" height="11.0" rx="2" fill="#161b22" stroke="#30363d"/>
   <rect x="75.0" y="211.0" width="11.0" height="11.0" rx="2" fill="#0e4429" stroke="#0e4429"/>
@@ -399,6 +399,6 @@
   <rect x="103.0" y="211.0" width="11.0" height="11.0" rx="2" fill="#26a641" stroke="#26a641"/>
   <rect x="117.0" y="211.0" width="11.0" height="11.0" rx="2" fill="#39d353" stroke="#39d353"/>
   <text x="136.0" y="221.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="start" >More</text>
-  <text x="28.0" y="254.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" text-anchor="start" >Total ~4.3B · Active 85/365 days · Best Jul 12: 350.7M · Longest streak 25 days</text>
+  <text x="28.0" y="254.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" text-anchor="start" >Total ~4.3B · Active 85/365 days · Best Jul 12: 357.0M · Longest streak 25 days</text>
   </g>
 </svg>

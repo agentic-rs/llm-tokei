@@ -12,7 +12,7 @@ const TEXT: &str = "#f0f6fc";
 const MUTED: &str = "#8b949e";
 const GRID: &str = "#21262d";
 const HEADER_HEIGHT: usize = 48;
-const CONTENT_TOP: usize = 96;
+const CONTENT_TOP: usize = 72;
 const MIN_WIDTH: usize = 360;
 const MAX_WIDTH: usize = 1_400;
 
