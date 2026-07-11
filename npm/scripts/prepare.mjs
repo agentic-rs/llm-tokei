@@ -98,12 +98,14 @@ function renderTemplate(templateName, values) {
   return rendered;
 }
 
-function npmReadme() {
+function npmReadme(version) {
+  const sourceRoot = `https://github.com/agentic-rs/llm-tokei/blob/v${version}`;
+  const rawRoot = `https://raw.githubusercontent.com/agentic-rs/llm-tokei/v${version}`;
   return readFileSync(path.join(repoRoot, "README.md"), "utf8")
-    .replaceAll("](LICENSE)", "](https://github.com/agentic-rs/llm-tokei/blob/main/LICENSE)")
-    .replaceAll("](Cargo.toml)", "](https://github.com/agentic-rs/llm-tokei/blob/main/Cargo.toml)")
-    .replaceAll("](docs/usage.md)", "](https://github.com/agentic-rs/llm-tokei/blob/main/docs/usage.md)")
-    .replaceAll("![llm-tokei terminal table output](docs/assets/showcase.svg)", "![llm-tokei terminal table output](https://raw.githubusercontent.com/agentic-rs/llm-tokei/main/docs/assets/showcase.svg)");
+    .replaceAll("](LICENSE)", `](${sourceRoot}/LICENSE)`)
+    .replaceAll("](Cargo.toml)", `](${sourceRoot}/Cargo.toml)`)
+    .replaceAll("](docs/usage.md)", `](${sourceRoot}/docs/usage.md)`)
+    .replaceAll(/\]\(docs\/assets\/([^)]+)\)/g, `](${rawRoot}/docs/assets/$1)`);
 }
 
 function prepareRootPackage(options) {
@@ -116,7 +118,7 @@ function prepareRootPackage(options) {
       version: options.version
     })
   );
-  writeFileSync(path.join(packageDir, "README.md"), npmReadme());
+  writeFileSync(path.join(packageDir, "README.md"), npmReadme(options.version));
   copyFileSync(path.join(repoRoot, "npm", "bin", "llm-tokei.mjs"), path.join(packageDir, "bin", "llm-tokei.mjs"));
   chmodSync(path.join(packageDir, "bin", "llm-tokei.mjs"), 0o755);
 }

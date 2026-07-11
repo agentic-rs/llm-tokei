@@ -69,3 +69,31 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
           if-no-files-found: error
+
+  npm-package:
+    needs: build-artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: llm-tokei-*
+          path: npm
+          merge-multiple: false
+      - name: Prepare npm packages
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "llm-tokei") | .version')
+          node npm/scripts/prepare.mjs --version "$version"
+      - name: Check npm package contents
+        run: |
+          for package in dist/npm/*; do
+            npm pack --dry-run --json "$package" >/dev/null
+          done
+          if grep -Fq '](docs/' dist/npm/llm-tokei/README.md; then
+            echo "generated npm README contains relative docs links" >&2
+            exit 1
+          fi

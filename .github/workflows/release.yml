@@ -83,7 +83,79 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  publish:
+  publish-npm:
+    needs: build-artifacts
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: llm-tokei-*
+          path: npm
+          merge-multiple: false
+      - name: Prepare npm packages
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cargo_version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "llm-tokei") | .version')
+          if [[ "$version" != "$cargo_version" ]]; then
+            echo "tag version $version does not match Cargo.toml version $cargo_version" >&2
+            exit 1
+          fi
+          if [[ "$version" == *-* ]]; then
+            echo "NPM_DIST_TAG=next" >> "$GITHUB_ENV"
+          else
+            echo "NPM_DIST_TAG=latest" >> "$GITHUB_ENV"
+          fi
+          node npm/scripts/prepare.mjs --version "$version"
+      - name: Check npm package contents
+        run: |
+          for package in dist/npm/*; do
+            npm pack --dry-run --json "$package" >/dev/null
+          done
+      - name: Publish platform packages
+        run: |
+          publish_if_missing() {
+            package_dir="$1"
+            package_name=$(node -p "require('./' + process.argv[1] + '/package.json').name" "$package_dir")
+            package_version=$(node -p "require('./' + process.argv[1] + '/package.json').version" "$package_dir")
+            if npm view "$package_name@$package_version" version --prefer-online >/dev/null 2>&1; then
+              echo "$package_name@$package_version is already published"
+            else
+              npm publish --access public --tag "$NPM_DIST_TAG" "$package_dir"
+            fi
+          }
+          publish_if_missing dist/npm/llm-tokei-darwin-arm64
+          publish_if_missing dist/npm/llm-tokei-linux-x64
+          publish_if_missing dist/npm/llm-tokei-win32-x64
+      - name: Publish wrapper package
+        run: |
+          package_dir=dist/npm/llm-tokei
+          package_name=$(node -p "require('./' + process.argv[1] + '/package.json').name" "$package_dir")
+          package_version=$(node -p "require('./' + process.argv[1] + '/package.json').version" "$package_dir")
+          if npm view "$package_name@$package_version" version --prefer-online >/dev/null 2>&1; then
+            echo "$package_name@$package_version is already published"
+          else
+            npm publish --access public --tag "$NPM_DIST_TAG" "$package_dir"
+          fi
+      - name: Verify published packages
+        run: |
+          for package_dir in dist/npm/*; do
+            package_name=$(node -p "require('./' + process.argv[1] + '/package.json').name" "$package_dir")
+            package_version=$(node -p "require('./' + process.argv[1] + '/package.json').version" "$package_dir")
+            published_version=$(npm view "$package_name@$package_version" version --prefer-online)
+            test "$published_version" = "$package_version"
+          done
+
+  publish-crate:
     needs: build-artifacts
     runs-on: ubuntu-latest
     permissions:
