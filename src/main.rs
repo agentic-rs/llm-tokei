@@ -16,7 +16,9 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, UNIX_EPOCH};
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
@@ -480,8 +482,11 @@ fn terminal_width() -> Option<usize> {
 struct ProcessingProgress {
   bar: ProgressBar,
   enabled: bool,
-  started: bool,
+  gate: Option<DelayedProgressGate>,
 }
+
+const PROGRESS_DELAY: Duration = Duration::from_secs(1);
+const PROGRESS_TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 impl ProcessingProgress {
   fn new(format: Format, verbose: bool) -> Self {
@@ -491,29 +496,26 @@ impl ProcessingProgress {
   fn with_terminal(format: Format, is_terminal: bool, verbose: bool) -> Self {
     let enabled = format != Format::Json && is_terminal && !verbose;
     let bar = ProgressBar::new_spinner();
-    bar.set_draw_target(if enabled {
-      ProgressDrawTarget::stderr()
-    } else {
-      ProgressDrawTarget::hidden()
-    });
+    bar.set_draw_target(ProgressDrawTarget::hidden());
     bar.set_style(
       ProgressStyle::with_template("{spinner} processing {msg}").expect("processing progress template is valid"),
     );
     Self {
       bar,
       enabled,
-      started: false,
+      gate: None,
     }
   }
 
   fn show(&mut self, source: &str, file: &Path) {
     if self.enabled {
       self.bar.set_message(format!("{source}: {}", file.display()));
-      if !self.started {
-        self.bar.enable_steady_tick(std::time::Duration::from_millis(100));
-        self.started = true;
-      } else {
-        self.bar.tick();
+      if self.gate.is_none() {
+        let bar = self.bar.clone();
+        self.gate = Some(DelayedProgressGate::start(PROGRESS_DELAY, move || {
+          bar.set_draw_target(ProgressDrawTarget::stderr());
+          bar.enable_steady_tick(PROGRESS_TICK_INTERVAL);
+        }));
       }
     }
   }
@@ -521,9 +523,52 @@ impl ProcessingProgress {
 
 impl Drop for ProcessingProgress {
   fn drop(&mut self) {
-    if self.started {
-      self.bar.finish_and_clear();
+    if let Some(mut gate) = self.gate.take() {
+      gate.cancel();
     }
+    self.bar.finish_and_clear();
+  }
+}
+
+struct DelayedProgressGate {
+  cancelled: Arc<(Mutex<bool>, Condvar)>,
+  handle: Option<JoinHandle<()>>,
+}
+
+impl DelayedProgressGate {
+  fn start(delay: Duration, reveal: impl FnOnce() + Send + 'static) -> Self {
+    let cancelled = Arc::new((Mutex::new(false), Condvar::new()));
+    let worker_cancelled = Arc::clone(&cancelled);
+    let handle = std::thread::spawn(move || {
+      let (lock, wake) = &*worker_cancelled;
+      let cancelled = lock.lock().expect("progress gate lock is not poisoned");
+      let (cancelled, timeout) = wake
+        .wait_timeout_while(cancelled, delay, |cancelled| !*cancelled)
+        .expect("progress gate lock is not poisoned");
+      if !*cancelled && timeout.timed_out() {
+        drop(cancelled);
+        reveal();
+      }
+    });
+    Self {
+      cancelled,
+      handle: Some(handle),
+    }
+  }
+
+  fn cancel(&mut self) {
+    let (lock, wake) = &*self.cancelled;
+    *lock.lock().expect("progress gate lock is not poisoned") = true;
+    wake.notify_all();
+    if let Some(handle) = self.handle.take() {
+      let _ = handle.join();
+    }
+  }
+}
+
+impl Drop for DelayedProgressGate {
+  fn drop(&mut self) {
+    self.cancel();
   }
 }
 
@@ -538,6 +583,19 @@ mod processing_progress_tests {
     assert!(!ProcessingProgress::with_terminal(Format::Json, true, false).enabled);
     assert!(!ProcessingProgress::with_terminal(Format::Table, false, false).enabled);
     assert!(!ProcessingProgress::with_terminal(Format::Table, true, true).enabled);
+  }
+
+  #[test]
+  fn delayed_progress_gate_can_cancel_before_reveal() {
+    let revealed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let worker_revealed = Arc::clone(&revealed);
+    let mut gate = DelayedProgressGate::start(Duration::from_secs(1), move || {
+      worker_revealed.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+
+    gate.cancel();
+
+    assert!(!revealed.load(std::sync::atomic::Ordering::SeqCst));
   }
 }
 
