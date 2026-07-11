@@ -12,8 +12,9 @@ mod text_count;
 mod time;
 
 use anyhow::{Context, Result};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::collections::HashSet;
-use std::io::{IsTerminal, Write};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tracing::debug;
@@ -165,7 +166,6 @@ fn main() -> Result<()> {
           progress.show("opencode", &src.db_path);
         }
         let collected = src.collect();
-        progress.clear();
         collected.map(|records| {
           let mut stats = CacheStats::new();
           stats.scanned = usize::from(src.db_path.exists());
@@ -478,8 +478,9 @@ fn terminal_width() -> Option<usize> {
 }
 
 struct ProcessingProgress {
+  bar: ProgressBar,
   enabled: bool,
-  visible: bool,
+  started: bool,
 }
 
 impl ProcessingProgress {
@@ -488,42 +489,41 @@ impl ProcessingProgress {
   }
 
   fn with_terminal(format: Format, is_terminal: bool, verbose: bool) -> Self {
+    let enabled = format != Format::Json && is_terminal && !verbose;
+    let bar = ProgressBar::new_spinner();
+    bar.set_draw_target(if enabled {
+      ProgressDrawTarget::stderr()
+    } else {
+      ProgressDrawTarget::hidden()
+    });
+    bar.set_style(
+      ProgressStyle::with_template("{spinner} processing {msg}").expect("processing progress template is valid"),
+    );
     Self {
-      enabled: format != Format::Json && is_terminal && !verbose,
-      visible: false,
+      bar,
+      enabled,
+      started: false,
     }
   }
 
   fn show(&mut self, source: &str, file: &Path) {
     if self.enabled {
-      let mut stderr = std::io::stderr().lock();
-      let _ = Self::write_update(&mut stderr, source, file);
-      self.visible = true;
+      self.bar.set_message(format!("{source}: {}", file.display()));
+      if !self.started {
+        self.bar.enable_steady_tick(std::time::Duration::from_millis(100));
+        self.started = true;
+      } else {
+        self.bar.tick();
+      }
     }
-  }
-
-  fn clear(&mut self) {
-    if self.enabled && self.visible {
-      let mut stderr = std::io::stderr().lock();
-      let _ = Self::write_clear(&mut stderr);
-      self.visible = false;
-    }
-  }
-
-  fn write_update(writer: &mut impl Write, source: &str, file: &Path) -> std::io::Result<()> {
-    write!(writer, "\r\x1b[2Kprocessing {source}: {}", file.display())?;
-    writer.flush()
-  }
-
-  fn write_clear(writer: &mut impl Write) -> std::io::Result<()> {
-    write!(writer, "\r\x1b[2K")?;
-    writer.flush()
   }
 }
 
 impl Drop for ProcessingProgress {
   fn drop(&mut self) {
-    self.clear();
+    if self.started {
+      self.bar.finish_and_clear();
+    }
   }
 }
 
@@ -538,19 +538,6 @@ mod processing_progress_tests {
     assert!(!ProcessingProgress::with_terminal(Format::Json, true, false).enabled);
     assert!(!ProcessingProgress::with_terminal(Format::Table, false, false).enabled);
     assert!(!ProcessingProgress::with_terminal(Format::Table, true, true).enabled);
-  }
-
-  #[test]
-  fn progress_updates_replace_and_then_clear_one_terminal_line() {
-    let mut output = Vec::new();
-    ProcessingProgress::write_update(&mut output, "copilot", Path::new("first.jsonl")).unwrap();
-    ProcessingProgress::write_update(&mut output, "copilot", Path::new("second.jsonl")).unwrap();
-    ProcessingProgress::write_clear(&mut output).unwrap();
-
-    assert_eq!(
-      String::from_utf8(output).unwrap(),
-      "\r\x1b[2Kprocessing copilot: first.jsonl\r\x1b[2Kprocessing copilot: second.jsonl\r\x1b[2K"
-    );
   }
 }
 
@@ -582,7 +569,6 @@ where
         debug!(source, file = %file.display(), "processing file");
         progress.show(source, &file);
         let parsed = parse_file(&file);
-        progress.clear();
         let parsed = parsed?.unwrap_or_default();
         debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
         if let Some(prev) = was_known {
@@ -603,7 +589,6 @@ where
     debug!(source, file = %file.display(), "processing file");
     progress.show(source, &file);
     let parsed = parse_file(&file);
-    progress.clear();
     let parsed = parsed?.unwrap_or_default();
     debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
     if was_known.is_some() {
@@ -645,7 +630,6 @@ where
     debug!(source, file = %file.display(), "processing file");
     progress.show(source, &file);
     let parsed = parse_file(&file);
-    progress.clear();
     let Ok(Some(records)) = parsed else {
       continue;
     };
@@ -704,7 +688,6 @@ fn collect_opencode_with_cache(
   debug!(source = "opencode", file = %file.display(), "processing file");
   progress.show("opencode", &file);
   let collected = src.collect();
-  progress.clear();
   out = collected?;
   debug!(source = "opencode", file = %file.display(), summary = %file_summary(&out), "file summary");
   if was_known.is_some() {
