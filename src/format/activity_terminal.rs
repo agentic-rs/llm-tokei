@@ -1,7 +1,7 @@
 use super::activity_common::{
-  format_date_short, format_value, month_labels as calendar_month_labels, summary, title, CalendarGrid,
+  format_value, month_labels as calendar_month_labels, summary, title, ActivityPlot, CalendarGrid,
 };
-use crate::activity::{ActivityDay, ActivitySeries};
+use crate::activity::{ActivityDay, ActivitySeries, HourlyActivitySeries};
 use crate::cli::GraphChart;
 #[cfg(test)]
 use crate::cli::Unit;
@@ -18,28 +18,47 @@ pub struct ActivityTerminalOpts {
 pub fn render_activity_terminal(series: &ActivitySeries, chart: GraphChart, opts: &ActivityTerminalOpts) -> String {
   let chart = chart.resolve(series.len());
   match chart {
-    GraphChart::Plot => render_plot(series, opts),
+    GraphChart::Plot => render_plot(&ActivityPlot::from_daily(series), opts),
     GraphChart::Heatmap => render_heatmap(series, opts),
     GraphChart::Auto => unreachable!("auto chart is resolved before rendering"),
   }
 }
 
-fn render_plot(series: &ActivitySeries, opts: &ActivityTerminalOpts) -> String {
+pub fn render_hourly_activity_terminal(series: &HourlyActivitySeries, opts: &ActivityTerminalOpts) -> String {
+  render_plot(&ActivityPlot::from_hourly(series), opts)
+}
+
+fn render_plot(plot: &ActivityPlot, opts: &ActivityTerminalOpts) -> String {
   let mut out = String::new();
-  out.push_str(&title(series));
+  out.push_str(&plot.title);
   out.push_str("\n\n");
 
-  let max = series
-    .days
+  let max = plot
+    .points
     .iter()
-    .map(|day| day.value)
+    .map(|point| point.value)
     .filter(|value| value.is_finite())
     .fold(0.0, f64::max);
-  let top_label = format_value(max, series.unit, false);
+  let top_label = format_value(max, plot.unit, false);
   let label_width = top_label.chars().count().max(1);
   let available = opts.width.unwrap_or(usize::MAX).saturating_sub(label_width + 2);
-  let cell_width = usize::from(available >= series.len().saturating_mul(2)) + 1;
-  let plot_width = series.len().saturating_mul(cell_width);
+  let preferred_cell_width = if plot.len() <= 3 {
+    plot
+      .points
+      .iter()
+      .map(|point| point.axis_label.chars().count())
+      .max()
+      .unwrap_or(2)
+      .clamp(2, 12)
+  } else {
+    2
+  };
+  let cell_width = if plot.is_empty() {
+    1
+  } else {
+    (available / plot.len()).clamp(1, preferred_cell_width)
+  };
+  let plot_width = plot.len().saturating_mul(cell_width);
 
   for row in (1..=PLOT_HEIGHT).rev() {
     let tick = if row == PLOT_HEIGHT {
@@ -51,15 +70,15 @@ fn render_plot(series: &ActivitySeries, opts: &ActivityTerminalOpts) -> String {
       ""
     };
     let tick = if tick == "mid" {
-      format_value(max / 2.0, series.unit, false)
+      format_value(max / 2.0, plot.unit, false)
     } else {
       tick.to_string()
     };
     out.push_str(&format!("{tick:>label_width$} ┤"));
-    for day in &series.days {
-      let height = bar_height(day.value, max);
+    for point in &plot.points {
+      let height = bar_height(point.value, max);
       if height >= row {
-        out.push_str(&colorize(&"█".repeat(cell_width), day.level, opts.use_color));
+        out.push_str(&colorize(&"█".repeat(cell_width), point.level, opts.use_color));
       } else {
         out.push_str(&" ".repeat(cell_width));
       }
@@ -69,10 +88,10 @@ fn render_plot(series: &ActivitySeries, opts: &ActivityTerminalOpts) -> String {
 
   out.push_str(&format!("{:>label_width$} ┼{}\n", "0", "─".repeat(plot_width)));
   out.push_str(&" ".repeat(label_width + 2));
-  out.push_str(&plot_date_labels(series, plot_width, cell_width));
+  out.push_str(&plot_axis_labels(plot, plot_width, cell_width));
   out.push('\n');
   out.push('\n');
-  out.push_str(&summary(series));
+  out.push_str(&plot.summary);
   out.push('\n');
   out
 }
@@ -129,16 +148,15 @@ fn bar_height(value: f64, max: f64) -> usize {
   ((value / max * PLOT_HEIGHT as f64).ceil() as usize).clamp(1, PLOT_HEIGHT)
 }
 
-fn plot_date_labels(series: &ActivitySeries, plot_width: usize, cell_width: usize) -> String {
-  if series.is_empty() || plot_width == 0 {
+fn plot_axis_labels(plot: &ActivityPlot, plot_width: usize, cell_width: usize) -> String {
+  if plot.is_empty() || plot_width == 0 {
     return String::new();
   }
   let mut canvas = vec![' '; plot_width];
-  let indices = [0, series.len() / 2, series.len() - 1];
+  let indices = [0, plot.len() / 2, plot.len() - 1];
   for index in indices {
-    let label = format_date_short(series.days[index].date);
     let center = index * cell_width + cell_width / 2;
-    place_centered(&mut canvas, center, &label);
+    place_centered(&mut canvas, center, &plot.points[index].axis_label);
   }
   canvas.into_iter().collect::<String>().trim_end().to_string()
 }
@@ -276,5 +294,26 @@ mod tests {
       },
     );
     assert!(rendered.contains("\x1b[38;2;57;211;83m"));
+  }
+
+  #[test]
+  fn hourly_plot_uses_hourly_title_labels_and_summary() {
+    use chrono::{DateTime, Utc};
+
+    let start = DateTime::parse_from_rfc3339("2026-07-11T01:00:00Z")
+      .unwrap()
+      .with_timezone(&Utc);
+    let series = HourlyActivitySeries::from_values(start, vec![0.0, 10.0, 20.0], Unit::Tokens);
+    let rendered = render_hourly_activity_terminal(
+      &series,
+      &ActivityTerminalOpts {
+        use_color: false,
+        width: Some(80),
+      },
+    );
+
+    assert!(rendered.contains("Hourly token activity · "));
+    assert!(rendered.contains("Active 2/3 hours"));
+    assert!(rendered.contains("Longest streak 2 hours"));
   }
 }

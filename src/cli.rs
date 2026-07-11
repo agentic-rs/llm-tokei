@@ -277,10 +277,10 @@ pub struct Args {
 
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
-  /// Show daily activity as a plot or calendar heatmap.
+  /// Show hourly or daily activity as a plot or calendar heatmap.
   #[command(after_help = "Graph output formats: table (terminal; alias: terminal) and svg. JSON is not supported.")]
   Graph {
-    /// Chart layout. Auto uses a plot for up to 30 days and a heatmap otherwise.
+    /// Chart layout. Auto uses hourly plots below 24h, daily plots up to 30 dates, then a heatmap.
     #[arg(long, value_enum, default_value_t = default_graph_chart(), help_heading = "Graph")]
     chart: GraphChart,
     /// Target terminal width. The requested date range is never truncated.

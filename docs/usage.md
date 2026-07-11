@@ -53,26 +53,35 @@ If both `--period` and `--since` are supplied, `--since` wins.
 
 ## Activity Graph
 
-`graph` visualizes daily activity across the selected sources and filters.
+`graph` visualizes hourly or daily activity across the selected sources and filters.
 Without an explicit period it shows the trailing 365 calendar days, ending
 today in the local timezone.
 
 ```sh
 llm-tokei graph
+llm-tokei graph --period 12h
 llm-tokei graph --7d
 llm-tokei graph --since 2026-01-01 --until 2026-06-30
 ```
 
-The default `auto` layout depends on the number of calendar dates shown:
+The default `auto` layout depends on the requested time span:
 
-- Up to 30 dates: a daily bar plot with value-axis and date labels.
+- Less than 24 hours: an hourly bar plot with local-time labels.
+- At least 24 hours and up to 30 dates: a daily bar plot with date labels.
 - More than 30 dates: a Sunday-aligned calendar heatmap with month and weekday labels.
+
+Exactly `--24h` stays on daily resolution. Date-only bounds cover complete local
+days: a single ordinary day renders 24 hourly buckets, a spring-forward day has
+23 hourly buckets, and a nearly 25-hour fall-back day stays on daily resolution.
 
 Override the layout when needed:
 
 ```sh
+# Plot keeps automatic hourly/daily resolution while forcing the plot layout.
 llm-tokei graph --chart plot --month
-llm-tokei graph --chart heatmap --7d
+
+# Heatmap forces daily resolution, even for a sub-24-hour range.
+llm-tokei graph --chart heatmap --period 12h
 ```
 
 Activity is measured in total tokens by default. `--unit bytes` measures
@@ -84,18 +93,19 @@ llm-tokei graph --unit bytes --month
 llm-tokei graph --unit cost --cost official
 ```
 
-Heatmap intensities are quantiles of the nonzero days in the requested range,
-so the four levels remain useful when usage has large spikes. Both layouts end
-with total activity, active-day count, best day, and longest streak.
+Heatmap and bar colors use quantiles of the nonzero buckets in the requested
+range, so the four levels remain useful when usage has large spikes. Every
+layout ends with total activity, active bucket count, best bucket, and longest
+streak in hours or days.
 
 Terminal output is the default (`--format table`, with `terminal` accepted as
-an alias). `--width <N>` controls whether daily bars use one or two character
-cells; it never removes dates. `--no-color` keeps the graph readable with
+an alias). `--width <N>` controls plot spacing without removing any buckets.
+`--no-color` keeps the graph readable with
 distinct Unicode intensity glyphs. Graph output currently supports terminal
 and SVG; `--format json` is rejected before scanning session files.
 
 Use `--format svg` for a native standalone chart with accessible labels and
-per-day SVG tooltips:
+per-hour or per-day SVG tooltips:
 
 ```sh
 llm-tokei graph --format svg > activity.svg

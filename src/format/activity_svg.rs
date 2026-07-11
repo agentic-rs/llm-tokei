@@ -1,6 +1,6 @@
-use super::activity_common::{format_date_short, format_value, month_labels, summary, title, CalendarGrid};
+use super::activity_common::{format_value, month_labels, summary, title, ActivityPlot, CalendarGrid};
 use super::svg::escape_xml;
-use crate::activity::{ActivityDay, ActivitySeries};
+use crate::activity::{ActivityDay, ActivitySeries, HourlyActivitySeries};
 use crate::cli::GraphChart;
 use std::fmt::Write;
 
@@ -13,14 +13,21 @@ const GRID: &str = "#21262d";
 
 pub fn render_activity_svg(series: &ActivitySeries, chart: GraphChart) -> String {
   match chart.resolve(series.len()) {
-    GraphChart::Plot => render_plot(series),
+    GraphChart::Plot => render_plot(&ActivityPlot::from_daily(series), "day"),
     GraphChart::Heatmap => render_heatmap(series),
     GraphChart::Auto => unreachable!("auto chart is resolved before rendering"),
   }
 }
 
-fn render_plot(series: &ActivitySeries) -> String {
-  let width = (series.len().saturating_mul(18) + 110).clamp(680, 1_400);
+pub fn render_hourly_activity_svg(series: &HourlyActivitySeries) -> String {
+  render_plot(&ActivityPlot::from_hourly(series), "hour")
+}
+
+fn render_plot(plot: &ActivityPlot, resolution: &str) -> String {
+  let data_width = plot.len().saturating_mul(18) + 110;
+  let title_width = plot.title.chars().count().saturating_mul(11) + 56;
+  let summary_width = plot.summary.chars().count().saturating_mul(7) + 56;
+  let width = data_width.max(title_width).max(summary_width).clamp(680, 1_400);
   let height = 360;
   let chart_left = 78.0;
   let chart_right = width as f64 - 30.0;
@@ -28,14 +35,21 @@ fn render_plot(series: &ActivitySeries) -> String {
   let chart_bottom = 260.0;
   let chart_width = chart_right - chart_left;
   let chart_height = chart_bottom - chart_top;
-  let max = series
-    .days
+  let max = plot
+    .points
     .iter()
-    .map(|day| day.value)
+    .map(|point| point.value)
     .filter(|value| value.is_finite())
     .fold(0.0, f64::max);
 
-  let mut out = svg_start(series, "plot", width, height);
+  let mut out = svg_start(
+    &plot.accessible_title,
+    &format!("{}. {}", plot.title, plot.summary),
+    "plot",
+    resolution,
+    width,
+    height,
+  );
   text_element(
     &mut out,
     28.0,
@@ -43,7 +57,7 @@ fn render_plot(series: &ActivitySeries) -> String {
     20,
     TEXT,
     "start",
-    &title(series),
+    &plot.title,
     "font-weight=\"600\"",
   );
 
@@ -63,43 +77,49 @@ fn render_plot(series: &ActivitySeries) -> String {
       12,
       MUTED,
       "end",
-      &format_value(value, series.unit, false),
+      &format_value(value, plot.unit, false),
       "",
     );
   }
 
-  let slot = if series.is_empty() {
+  let slot = if plot.is_empty() {
     chart_width
   } else {
-    chart_width / series.len() as f64
+    chart_width / plot.len() as f64
   };
   let bar_width = (slot * 0.72).max(1.0);
-  for (index, day) in series.days.iter().enumerate() {
+  for (index, point) in plot.points.iter().enumerate() {
     let slot_x = chart_left + index as f64 * slot;
-    if day.value > 0.0 && day.value.is_finite() && max > 0.0 {
-      let bar_height = (day.value / max * chart_height).max(1.0);
+    if point.value > 0.0 && point.value.is_finite() && max > 0.0 {
+      let bar_height = (point.value / max * chart_height).max(1.0);
       let x = slot_x + (slot - bar_width) / 2.0;
       let y = chart_bottom - bar_height;
       writeln!(
         out,
         "  <rect class=\"activity-bar\" x=\"{x:.1}\" y=\"{y:.1}\" width=\"{bar_width:.1}\" height=\"{bar_height:.1}\" rx=\"2\" fill=\"{}\"/>",
-        level_color(day.level)
+        level_color(point.level)
       )
       .unwrap();
     }
     writeln!(
       out,
       "  <rect class=\"activity-hit-target\" x=\"{slot_x:.1}\" y=\"{chart_top:.1}\" width=\"{slot:.1}\" height=\"{chart_height:.1}\" fill=\"#000000\" fill-opacity=\"0\"><title>{}</title></rect>",
-      escape_xml(&day_tooltip(day, series))
+      escape_xml(&point.tooltip)
     )
     .unwrap();
   }
 
-  if !series.is_empty() {
-    let indices = [0, series.len() / 2, series.len() - 1];
-    let anchors = ["start", "middle", "end"];
-    let positions = [chart_left, chart_left + chart_width / 2.0, chart_right];
-    for ((index, anchor), x) in indices.into_iter().zip(anchors).zip(positions) {
+  if !plot.is_empty() {
+    let labels = match plot.len() {
+      1 => vec![(0, "middle", chart_left + chart_width / 2.0)],
+      2 => vec![(0, "start", chart_left), (1, "end", chart_right)],
+      _ => vec![
+        (0, "start", chart_left),
+        (plot.len() / 2, "middle", chart_left + chart_width / 2.0),
+        (plot.len() - 1, "end", chart_right),
+      ],
+    };
+    for (index, anchor, x) in labels {
       text_element(
         &mut out,
         x,
@@ -107,13 +127,13 @@ fn render_plot(series: &ActivitySeries) -> String {
         12,
         MUTED,
         anchor,
-        &format_date_short(series.days[index].date),
-        "",
+        &plot.points[index].axis_label,
+        "class=\"activity-axis-label\"",
       );
     }
   }
 
-  text_element(&mut out, 28.0, 329.0, 13, MUTED, "start", &summary(series), "");
+  text_element(&mut out, 28.0, 329.0, 13, MUTED, "start", &plot.summary, "");
   out.push_str("</svg>\n");
   out
 }
@@ -129,7 +149,9 @@ fn render_heatmap(series: &ActivitySeries) -> String {
   let week_count = grid.as_ref().map(|grid| grid.week_count).unwrap_or_default();
   let width = ((GRID_LEFT + week_count as f64 * PITCH + 30.0).ceil() as usize).max(680);
   let height = 280;
-  let mut out = svg_start(series, "heatmap", width, height);
+  let chart_title = format!("{} activity graph", super::activity_common::unit_name(series.unit));
+  let chart_desc = format!("{}. {}", title(series), summary(series));
+  let mut out = svg_start(&chart_title, &chart_desc, "heatmap", "day", width, height);
   text_element(
     &mut out,
     28.0,
@@ -190,17 +212,22 @@ fn render_heatmap(series: &ActivitySeries) -> String {
   out
 }
 
-fn svg_start(series: &ActivitySeries, chart: &str, width: usize, height: usize) -> String {
-  let chart_title = format!("{} activity graph", super::activity_common::unit_name(series.unit));
-  let chart_desc = format!("{}. {}", title(series), summary(series));
+fn svg_start(
+  chart_title: &str,
+  chart_desc: &str,
+  chart: &str,
+  resolution: &str,
+  width: usize,
+  height: usize,
+) -> String {
   let mut out = String::new();
   writeln!(
     out,
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" aria-labelledby=\"title desc\" data-chart=\"{chart}\">"
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" aria-labelledby=\"title desc\" data-chart=\"{chart}\" data-resolution=\"{resolution}\">"
   )
   .unwrap();
-  writeln!(out, "  <title id=\"title\">{}</title>", escape_xml(&chart_title)).unwrap();
-  writeln!(out, "  <desc id=\"desc\">{}</desc>", escape_xml(&chart_desc)).unwrap();
+  writeln!(out, "  <title id=\"title\">{}</title>", escape_xml(chart_title)).unwrap();
+  writeln!(out, "  <desc id=\"desc\">{}</desc>", escape_xml(chart_desc)).unwrap();
   writeln!(
     out,
     "  <rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"12\" fill=\"{BACKGROUND}\" stroke=\"{BORDER}\"/>",
@@ -256,6 +283,7 @@ mod tests {
 
     assert!(svg.starts_with("<svg "));
     assert!(svg.contains("data-chart=\"plot\""));
+    assert!(svg.contains("data-resolution=\"day\""));
     assert!(svg.contains("class=\"activity-bar\""));
     assert_eq!(svg.matches("class=\"activity-hit-target\"").count(), 30);
     assert!(!svg.contains("terminal-content"));
@@ -281,5 +309,40 @@ mod tests {
     assert!(svg.contains("$0.00"));
     assert!(svg.contains("Active 0/7 days"));
     assert!(!svg.contains("class=\"activity-bar\""));
+  }
+
+  #[test]
+  fn hourly_svg_uses_hour_resolution_and_tooltips() {
+    use chrono::{DateTime, Utc};
+
+    let start = DateTime::parse_from_rfc3339("2026-07-11T01:00:00Z")
+      .unwrap()
+      .with_timezone(&Utc);
+    let series = HourlyActivitySeries::from_values(start, vec![0.0, 10.0, 20.0], Unit::Tokens);
+    let svg = render_hourly_activity_svg(&series);
+
+    assert!(svg.contains("data-chart=\"plot\""));
+    assert!(svg.contains("data-resolution=\"hour\""));
+    assert!(svg.contains("Hourly token activity"));
+    assert_eq!(svg.matches("class=\"activity-hit-target\"").count(), 3);
+    assert_eq!(svg.matches("class=\"activity-axis-label\"").count(), 3);
+  }
+
+  #[test]
+  fn short_hourly_svg_does_not_repeat_axis_labels() {
+    use chrono::{DateTime, Utc};
+
+    let start = DateTime::parse_from_rfc3339("2026-07-11T01:00:00Z")
+      .unwrap()
+      .with_timezone(&Utc);
+    let one_hour = render_hourly_activity_svg(&HourlyActivitySeries::from_values(start, vec![10.0], Unit::Tokens));
+    let two_hours = render_hourly_activity_svg(&HourlyActivitySeries::from_values(
+      start,
+      vec![10.0, 20.0],
+      Unit::Tokens,
+    ));
+
+    assert_eq!(one_hour.matches("class=\"activity-axis-label\"").count(), 1);
+    assert_eq!(two_hours.matches("class=\"activity-axis-label\"").count(), 2);
   }
 }
