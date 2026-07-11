@@ -377,6 +377,7 @@ fn render_activity_graph(
   args: &Args,
   opts: GraphOpts,
 ) -> Result<()> {
+  let command = display_command();
   let unit = output_unit(args);
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
   let width = opts.width.or_else(|| {
@@ -397,6 +398,7 @@ fn render_activity_graph(
       cost_mode: args.cost,
       use_color,
       width,
+      command: &command,
     },
   )?;
   print!("{rendered}");
@@ -404,7 +406,10 @@ fn render_activity_graph(
 }
 
 fn display_command() -> String {
-  let mut args = std::env::args().collect::<Vec<_>>();
+  display_command_from(std::env::args().collect())
+}
+
+fn display_command_from(mut args: Vec<String>) -> String {
   if let Some(bin) = args.first_mut() {
     *bin = Path::new(bin)
       .file_name()
@@ -412,7 +417,16 @@ fn display_command() -> String {
       .unwrap_or("llm-tokei")
       .to_string();
   }
-  args.iter().map(|arg| shell_quote(arg)).collect::<Vec<_>>().join(" ")
+  let mut visible = Vec::with_capacity(args.len());
+  let mut args = args.into_iter().peekable();
+  while let Some(arg) = args.next() {
+    if arg == "--format" && args.peek().is_some_and(|format| format == "svg") {
+      args.next();
+    } else if arg != "--format=svg" {
+      visible.push(arg);
+    }
+  }
+  visible.iter().map(|arg| shell_quote(arg)).collect::<Vec<_>>().join(" ")
 }
 
 fn shell_quote(arg: &str) -> String {
@@ -473,6 +487,24 @@ fn columns_env_width() -> Option<usize> {
     .ok()
     .and_then(|v| v.parse::<usize>().ok())
     .filter(|w| *w > 0)
+}
+
+#[cfg(test)]
+mod display_command_tests {
+  use super::*;
+
+  #[test]
+  fn svg_format_is_omitted_from_the_decorated_command() {
+    let command = display_command_from(
+      ["/tmp/llm-tokei", "graph", "--24h", "--format", "svg"]
+        .map(str::to_string)
+        .to_vec(),
+    );
+    let equals_command = display_command_from(["/tmp/llm-tokei", "graph", "--format=svg"].map(str::to_string).to_vec());
+
+    assert_eq!(command, "llm-tokei graph --24h");
+    assert_eq!(equals_command, "llm-tokei graph");
+  }
 }
 
 fn terminal_width() -> Option<usize> {
