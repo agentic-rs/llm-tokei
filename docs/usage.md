@@ -7,6 +7,7 @@ It does not call provider APIs for your session history.
 
 ```sh
 llm-tokei [OPTIONS]
+llm-tokei graph [OPTIONS]
 llm-tokei dump [OPTIONS] [FILES]...
 ```
 
@@ -40,6 +41,8 @@ llm-tokei --period 1m --sort cost --limit 20
 
 `--since` and `--until` provide explicit filters. They accept RFC3339 datetimes,
 `YYYY-MM-DD`, and relative expressions such as `24h`, `7d`, `2w`, and `1mo`.
+Date-only values use the local timezone, and a date-only `--until` includes that
+complete calendar day.
 
 ```sh
 llm-tokei --since 2026-05-01 --until 2026-05-12
@@ -47,6 +50,67 @@ llm-tokei --since 12h --model 'gpt-*'
 ```
 
 If both `--period` and `--since` are supplied, `--since` wins.
+
+## Activity Graph
+
+`graph` visualizes hourly or daily activity across the selected sources and filters.
+Without an explicit period it shows the trailing 365 calendar days, ending
+today in the local timezone.
+
+```sh
+llm-tokei graph
+llm-tokei graph --24h
+llm-tokei graph --7d
+llm-tokei graph --since 2026-01-01 --until 2026-06-30
+```
+
+The default `auto` layout depends on the requested time span:
+
+- Less than 30 hours: an hourly bar plot with local-time labels.
+- At least 30 hours and up to 30 dates: a daily bar plot with date labels.
+- More than 30 dates: a Sunday-aligned calendar heatmap with month and weekday labels.
+
+Exactly `--24h` uses hourly resolution; exactly 30 hours stays daily. Date-only
+bounds cover complete local days, so ordinary, spring-forward, and fall-back
+days render 24, 23, and 25 hourly buckets respectively.
+
+Override the layout when needed:
+
+```sh
+# Plot keeps automatic hourly/daily resolution while forcing the plot layout.
+llm-tokei graph --chart plot --month
+
+# Heatmap forces daily resolution, even for a sub-30-hour range.
+llm-tokei graph --chart heatmap --24h
+```
+
+Activity is measured in total tokens by default. `--unit bytes` measures
+recorded input plus output bytes, while `--unit cost` uses the selected
+`--cost actual|mixed|official` pricing mode.
+
+```sh
+llm-tokei graph --unit bytes --month
+llm-tokei graph --unit cost --cost official
+```
+
+Heatmap and bar colors use quantiles of the nonzero buckets in the requested
+range, so the four levels remain useful when usage has large spikes. Every
+layout ends with total activity, active bucket count, best bucket, and longest
+streak in hours or days.
+
+Terminal output is the default (`--format table`, with `terminal` accepted as
+an alias). `--width <N>` controls plot spacing without removing any buckets.
+`--no-color` keeps the graph readable with
+distinct Unicode intensity glyphs. Graph output currently supports terminal
+and SVG; `--format json` is rejected before scanning session files.
+
+Use `--format svg` for a native standalone chart with accessible labels and
+per-hour or per-day SVG tooltips:
+
+```sh
+llm-tokei graph --format svg > activity.svg
+llm-tokei graph --7d --format svg > recent-activity.svg
+```
 
 ## Grouping
 
@@ -139,7 +203,8 @@ With `--bytes`, only the JSON `input` and `output` fields switch to bytes.
 
 ### SVG
 
-SVG output renders the table view as a standalone terminal-style image.
+For normal reports, SVG output renders the table view as a standalone
+terminal-style image.
 
 ```sh
 llm-tokei --format svg --group-by source,model > usage.svg
@@ -147,7 +212,8 @@ llm-tokei --format svg --group-by source,model > usage.svg
 
 SVG uses the same table columns and table-specific flags as `--format table`.
 It does not auto-fit to the terminal width, but `--table-width <N>` can be used
-to create a narrower image.
+to create a narrower image. `llm-tokei graph --format svg` instead produces a
+native plot or heatmap as described in [Activity Graph](#activity-graph).
 
 ## Sorting And Limits
 

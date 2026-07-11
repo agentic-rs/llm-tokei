@@ -170,6 +170,548 @@ fn codex_fixture_renders_svg() {
 }
 
 #[test]
+fn graph_renders_a_daily_terminal_plot_for_short_ranges() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-terminal-plot");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-01-30",
+      "--no-color",
+      "--width",
+      "80",
+    ])
+    .output()
+    .expect("run terminal activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Token activity · Jan 1–30, 2025"), "graph: {graph}");
+  assert!(graph.contains("┼"), "graph: {graph}");
+  assert!(graph.contains("Total 720 · Active 1/30 days"), "graph: {graph}");
+  assert!(
+    graph.contains("Best Jan 2: 720 · Longest streak 1 day"),
+    "graph: {graph}"
+  );
+  assert!(!graph.contains("Less"), "graph: {graph}");
+  assert!(!graph.contains("\x1b["), "graph: {graph}");
+}
+
+#[test]
+fn graph_renders_an_hourly_terminal_plot_for_sub_30_hour_ranges() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-terminal-hourly");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-02T00:00:00Z",
+      "--until",
+      "2025-01-02T12:00:00Z",
+      "--no-color",
+      "--width",
+      "80",
+    ])
+    .output()
+    .expect("run hourly terminal activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Hourly token activity · "), "graph: {graph}");
+  assert!(graph.contains("Total 720 · Active 1/13 hours"), "graph: {graph}");
+  assert!(graph.contains("Longest streak 1 hour"), "graph: {graph}");
+  assert!(!graph.contains("Less"), "graph: {graph}");
+}
+
+#[test]
+fn graph_renders_exactly_24_hours_on_hourly_resolution() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-exactly-24h");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01T12:00:00Z",
+      "--until",
+      "2025-01-02T12:00:00Z",
+      "--no-color",
+    ])
+    .output()
+    .expect("run exactly 24-hour activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Hourly token activity · "), "graph: {graph}");
+  assert!(graph.contains("Total 720 · Active 1/25 hours"), "graph: {graph}");
+}
+
+#[test]
+fn graph_keeps_exactly_30_hours_on_daily_resolution() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-exactly-30h");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01T12:00:00Z",
+      "--until",
+      "2025-01-02T18:00:00Z",
+      "--no-color",
+    ])
+    .output()
+    .expect("run exactly 30-hour activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Token activity · "), "graph: {graph}");
+  assert!(!graph.contains("Hourly token activity"), "graph: {graph}");
+  assert!(graph.contains("Total 720 · Active 1/"), "graph: {graph}");
+  assert!(graph.contains("Longest streak 1 day"), "graph: {graph}");
+}
+
+#[test]
+fn graph_heatmap_override_forces_daily_resolution_below_30_hours() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-short-heatmap");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-02T00:00:00Z",
+      "--until",
+      "2025-01-02T12:00:00Z",
+      "--chart",
+      "heatmap",
+      "--no-color",
+    ])
+    .output()
+    .expect("run forced daily heatmap for a short range");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(!graph.contains("Hourly token activity"), "graph: {graph}");
+  assert!(graph.contains("Less ·░▒▓█ More"), "graph: {graph}");
+}
+
+#[test]
+fn graph_renders_a_terminal_heatmap_for_long_ranges() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-terminal-heatmap");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-12-31",
+      "--no-color",
+    ])
+    .output()
+    .expect("run terminal activity heatmap");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Token activity · Jan 1–Dec 31, 2025"), "graph: {graph}");
+  assert!(graph.contains("Mon"), "graph: {graph}");
+  assert!(graph.contains("Less ·░▒▓█ More"), "graph: {graph}");
+  assert!(graph.contains("Active 1/365 days"), "graph: {graph}");
+}
+
+#[test]
+fn graph_renders_native_svg_for_short_ranges() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-svg-plot");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-01-30",
+      "--format",
+      "svg",
+    ])
+    .output()
+    .expect("run SVG activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let svg = String::from_utf8_lossy(&out.stdout);
+  assert!(svg.starts_with("<svg "), "svg: {svg}");
+  assert!(svg.contains("data-chart=\"plot\""), "svg: {svg}");
+  assert!(svg.contains("class=\"activity-bar\""), "svg: {svg}");
+  assert!(svg.contains("<title>Jan 2, 2025: 720</title>"), "svg: {svg}");
+  assert!(!svg.contains("terminal-content"), "svg: {svg}");
+}
+
+#[test]
+fn graph_renders_native_hourly_svg_for_sub_30_hour_ranges() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-svg-hourly");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-02T00:00:00Z",
+      "--until",
+      "2025-01-02T12:00:00Z",
+      "--format",
+      "svg",
+    ])
+    .output()
+    .expect("run hourly SVG activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let svg = String::from_utf8_lossy(&out.stdout);
+  assert!(svg.contains("data-chart=\"plot\""), "svg: {svg}");
+  assert!(svg.contains("data-resolution=\"hour\""), "svg: {svg}");
+  assert!(svg.contains("Hourly token activity graph"), "svg: {svg}");
+  assert_eq!(svg.matches("class=\"activity-hit-target\"").count(), 13);
+}
+
+#[cfg(unix)]
+#[test]
+fn graph_hour_buckets_align_to_local_hours_in_fractional_offset_timezones() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-hourly-fractional-timezone");
+  let out = cmd
+    .env("TZ", "Asia/Kolkata")
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-02T00:00:00Z",
+      "--until",
+      "2025-01-02T12:00:00Z",
+      "--format",
+      "svg",
+    ])
+    .output()
+    .expect("run hourly graph in a fractional-offset timezone");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let svg = String::from_utf8_lossy(&out.stdout);
+  assert!(
+    svg.contains("Hourly token activity · Jan 2, 05:30–17:30, 2025"),
+    "svg: {svg}"
+  );
+  assert!(svg.contains("Jan 2, 2025 05:00 +05:30: 0"), "svg: {svg}");
+}
+
+#[cfg(unix)]
+#[test]
+fn graph_hour_buckets_keep_repeated_dst_hours_distinct() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-hourly-dst-repeat");
+  let out = cmd
+    .env("TZ", "America/Los_Angeles")
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-11-02T08:00:00Z",
+      "--until",
+      "2025-11-02T10:00:00Z",
+      "--format",
+      "svg",
+    ])
+    .output()
+    .expect("run hourly graph across a repeated DST hour");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let svg = String::from_utf8_lossy(&out.stdout);
+  assert_eq!(svg.matches("class=\"activity-hit-target\"").count(), 3);
+  assert!(
+    svg.contains("Hourly token activity · Nov 2, 01:00 -07:00–02:00 -08:00, 2025"),
+    "svg: {svg}"
+  );
+  assert!(svg.contains("Nov 2, 2025 01:00 -07:00: 0"), "svg: {svg}");
+  assert!(svg.contains("Nov 2, 2025 01:00 -08:00: 0"), "svg: {svg}");
+}
+
+#[cfg(unix)]
+#[test]
+fn graph_hour_buckets_survive_half_hour_dst_shifts() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-hourly-half-hour-dst");
+  let out = cmd
+    .env("TZ", "Australia/Lord_Howe")
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-04-05T14:15:00Z",
+      "--until",
+      "2025-04-05T16:15:00Z",
+      "--format",
+      "svg",
+    ])
+    .output()
+    .expect("run hourly graph across a half-hour DST shift");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let svg = String::from_utf8_lossy(&out.stdout);
+  assert_eq!(svg.matches("class=\"activity-hit-target\"").count(), 3);
+  assert!(svg.contains("Apr 6, 2025 01:00 +11:00: 0"), "svg: {svg}");
+  assert!(svg.contains("Apr 6, 2025 01:30 +10:30: 0"), "svg: {svg}");
+  assert!(svg.contains("Apr 6, 2025 02:30 +10:30: 0"), "svg: {svg}");
+}
+
+#[test]
+fn graph_bytes_unit_uses_daily_input_and_output_bytes() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-bytes");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-01-07",
+      "--unit",
+      "bytes",
+      "--no-color",
+    ])
+    .output()
+    .expect("run byte activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Byte activity · Jan 1–7, 2025"), "graph: {graph}");
+  assert!(graph.contains("Total ~71"), "graph: {graph}");
+}
+
+#[test]
+fn graph_rejects_json_output() {
+  let (mut cmd, cache_home) = isolated_cmd("graph-json");
+  let out = cmd
+    .args(["graph", "--source", "codex", "--no-cache", "--format", "json"])
+    .output()
+    .expect("run unsupported JSON activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(!out.status.success());
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(stderr.contains("--format json is not supported"), "stderr: {stderr}");
+  assert!(!stderr.contains("processing "), "stderr: {stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn graph_date_only_bounds_include_the_complete_day() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-date-bound");
+  let out = cmd
+    .env("TZ", "America/Los_Angeles")
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-02",
+      "--until",
+      "2025-01-02",
+      "--no-color",
+    ])
+    .output()
+    .expect("run activity graph with local date bounds");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(
+    graph.contains("Hourly token activity · Jan 2, 00:00–23:59, 2025"),
+    "graph: {graph}"
+  );
+  assert!(graph.contains("Total 720 · Active 1/24 hours"), "graph: {graph}");
+}
+
+#[cfg(unix)]
+#[test]
+fn graph_date_only_resolution_follows_dst_day_length() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+
+  for (date, expected_title, expected_summary) in [
+    (
+      "2025-03-09",
+      "Hourly token activity · Mar 9, 00:00 -08:00–23:59 -07:00, 2025",
+      "Active 0/23 hours",
+    ),
+    (
+      "2025-11-02",
+      "Hourly token activity · Nov 2, 00:00 -07:00–23:59 -08:00, 2025",
+      "Active 0/25 hours",
+    ),
+  ] {
+    let (mut cmd, cache_home) = isolated_cmd(&format!("graph-date-dst-{date}"));
+    let out = cmd
+      .env("TZ", "America/Los_Angeles")
+      .args([
+        "graph",
+        "--source",
+        "codex",
+        "--codex-dir",
+        fixtures.to_str().unwrap(),
+        "--no-cache",
+        "--since",
+        date,
+        "--until",
+        date,
+        "--no-color",
+      ])
+      .output()
+      .expect("run activity graph across a DST date");
+    let _ = std::fs::remove_dir_all(cache_home);
+
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let graph = String::from_utf8_lossy(&out.stdout);
+    assert!(graph.contains(expected_title), "graph: {graph}");
+    assert!(graph.contains(expected_summary), "graph: {graph}");
+  }
+}
+
+#[test]
+fn graph_marks_cost_from_estimated_tokens_as_estimated() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot/workspaceStorage");
+  let (mut cmd, cache_home) = isolated_cmd("graph-estimated-cost");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "copilot",
+      "--copilot-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2026-04-17",
+      "--until",
+      "2026-04-18",
+      "--unit",
+      "cost",
+      "--no-color",
+    ])
+    .output()
+    .expect("run estimated cost activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Total ~$"), "graph: {graph}");
+}
+
+#[test]
+fn graph_applies_config_defaults_with_options_after_subcommand() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (config, config_dir) = temp_config_file(
+    "graph-config",
+    r#"
+[table]
+unit = "bytes"
+no-color = true
+"#,
+  );
+  let (mut cmd, cache_home) = isolated_cmd("graph-config");
+  let out = cmd
+    .args([
+      "graph",
+      "--config",
+      config.to_str().unwrap(),
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-01",
+      "--until",
+      "2025-01-07",
+    ])
+    .output()
+    .expect("run activity graph with config defaults");
+  let _ = std::fs::remove_dir_all(cache_home);
+  let _ = std::fs::remove_dir_all(config_dir);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Byte activity · Jan 1–7, 2025"), "graph: {graph}");
+  assert!(!graph.contains("\x1b["), "graph: {graph}");
+}
+
+#[test]
 fn pi_agent_fixture_parses_usage() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pi_agent/sessions");
   let (mut cmd, cache_home) = isolated_cmd("pi-agent");

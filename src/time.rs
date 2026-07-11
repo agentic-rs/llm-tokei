@@ -12,10 +12,9 @@ pub fn parse_when(s: &str) -> Result<DateTime<Utc>> {
   if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
     return Ok(dt.with_timezone(&Utc));
   }
-  // Date only
+  // Date-only values are local calendar dates, consistent with named periods.
   if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-    let nd = d.and_hms_opt(0, 0, 0).unwrap();
-    return Ok(Utc.from_utc_datetime(&nd));
+    return Ok(local_midnight(d));
   }
   // Relative: <num><unit>
   if let Some(dt) = parse_relative(s) {
@@ -26,6 +25,17 @@ pub fn parse_when(s: &str) -> Result<DateTime<Utc>> {
   ))
 }
 
+/// Parse an upper time bound. A date-only value includes the complete local
+/// calendar day; timestamps and relative expressions remain exact instants.
+pub fn parse_until(s: &str) -> Result<DateTime<Utc>> {
+  let s = s.trim();
+  if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+    let next = date.succ_opt().ok_or_else(|| anyhow!("date '{s}' is out of range"))?;
+    return Ok(local_midnight(next) - Duration::nanoseconds(1));
+  }
+  parse_when(s)
+}
+
 /// Parse a period expression: named calendar periods (today, week, month)
 /// or any expression accepted by `parse_when` (relative like 3d/12h/2w, absolute dates).
 pub fn parse_period(s: &str) -> Result<DateTime<Utc>> {
@@ -33,6 +43,9 @@ pub fn parse_period(s: &str) -> Result<DateTime<Utc>> {
     "today" => Ok(start_of_today()),
     "week" => Ok(start_of_week()),
     "month" => Ok(start_of_month()),
+    // `--1m` is the documented rolling one-month shortcut. Keep `m` as
+    // minutes for general relative expressions such as `--since 30m`.
+    "1m" => Ok(Utc::now() - Duration::days(30)),
     _ => parse_when(s),
   }
 }
@@ -165,6 +178,13 @@ mod tests {
   }
 
   #[test]
+  fn parse_period_one_month_shortcut_is_thirty_days() {
+    let dt = parse_period("1m").unwrap();
+    let diff = Utc::now() - dt;
+    assert!(diff.num_days() >= 29 && diff.num_days() <= 31);
+  }
+
+  #[test]
   fn parse_period_relative_years() {
     let dt = parse_period("1y").unwrap();
     let diff = Utc::now() - dt;
@@ -174,7 +194,7 @@ mod tests {
   #[test]
   fn parse_period_absolute_date() {
     let dt = parse_period("2025-01-15").unwrap();
-    assert_eq!(dt.format("%Y-%m-%d").to_string(), "2025-01-15");
+    assert_eq!(to_local_date(dt), NaiveDate::from_ymd_opt(2025, 1, 15).unwrap());
   }
 
   #[test]
@@ -213,5 +233,14 @@ mod tests {
   fn parse_when_empty_error() {
     assert!(parse_when("").is_err());
     assert!(parse_when("  ").is_err());
+  }
+
+  #[test]
+  fn parse_until_date_includes_the_complete_local_day() {
+    let date = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+    let until = parse_until("2025-01-15").unwrap();
+    let next_midnight = local_midnight(date.succ_opt().unwrap());
+    assert_eq!(to_local_date(until), date);
+    assert_eq!(next_midnight - until, Duration::nanoseconds(1));
   }
 }

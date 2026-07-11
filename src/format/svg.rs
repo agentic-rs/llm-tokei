@@ -140,7 +140,7 @@ fn font_family() -> &'static str {
   "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace"
 }
 
-fn escape_xml(text: &str) -> String {
+pub(crate) fn escape_xml(text: &str) -> String {
   let mut out = String::with_capacity(text.len());
   for ch in text.chars() {
     match ch {

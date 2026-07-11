@@ -26,6 +26,7 @@ llm-tokei --cost-per provider --cost official --month -h
 - **One report across agents**: Codex CLI, OpenCode, Claude Code, GitHub Copilot Chat, GitHub Copilot CLI, and Pi Agent.
 - **Useful default table**: grouped by source and model, with cost columns included.
 - **Time windows that match how people ask**: `--24h`, `--7d`, `--1m`, `--today`, `--week`, `--month`.
+- **Activity at a glance**: hourly and daily plots for short windows, plus GitHub-style heatmaps for longer ones.
 - **Cost visibility**: bundled prices from models.dev plus local overrides for subscriptions, multipliers, and custom rates.
 - **Table and automation output**: readable terminal tables or stable JSON for scripts.
 - **Replayable transcripts**: dump Codex and Copilot sessions into JSONL message streams.
@@ -67,6 +68,18 @@ llm-tokei --7d --group-by session,source,model --sort cost --limit 10
 
 # Daily trend for the current month
 llm-tokei --month --group-by date,source --date-bucket day
+
+# GitHub-style activity graph for the trailing year
+llm-tokei graph
+
+# Daily activity plot for a short range
+llm-tokei graph --7d
+
+# Hourly activity plot for a sub-30-hour range
+llm-tokei graph --24h
+
+# Native SVG activity graph
+llm-tokei graph --format svg > activity.svg
 
 # JSON for scripts
 llm-tokei --7d --format json --group-by source,model,project

@@ -1,3 +1,4 @@
+mod activity;
 mod aggregate;
 mod cache;
 mod cli;
@@ -18,9 +19,10 @@ use std::time::UNIX_EPOCH;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
+use crate::activity::{render_activity, ActivityRenderOptions};
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
-use crate::cli::{Args, Cmd, ConfigCmd, Format, Unit};
+use crate::cli::{Args, Cmd, ConfigCmd, Format, GraphChart, Unit};
 use crate::format::{
   json::render_json,
   svg::render_svg_terminal,
@@ -33,12 +35,26 @@ use crate::sources::{
   opencode::OpenCodeSource, pi_agent::PiAgentSource, UsageSource,
 };
 
+#[derive(Clone, Copy)]
+struct GraphOpts {
+  chart: GraphChart,
+  width: Option<usize>,
+}
+
 fn main() -> Result<()> {
   let args = config::parse_args()?;
   init_tracing(args.verbose);
 
-  if let Some(cmd) = args.cmd.as_ref() {
-    return run_subcommand(cmd, &args);
+  let graph_opts = match args.cmd.as_ref() {
+    Some(Cmd::Graph { chart, width, .. }) => Some(GraphOpts {
+      chart: *chart,
+      width: *width,
+    }),
+    Some(cmd) => return run_subcommand(cmd, &args),
+    None => None,
+  };
+  if graph_opts.is_some() && args.format == Format::Json {
+    anyhow::bail!("graph: --format json is not supported; use table or svg");
   }
 
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
@@ -253,7 +269,7 @@ fn main() -> Result<()> {
   let until = args
     .until
     .as_deref()
-    .map(time::parse_when)
+    .map(time::parse_until)
     .transpose()
     .context("parsing --until")?;
   let filters = Filters {
@@ -286,6 +302,11 @@ fn main() -> Result<()> {
     PricingTable::load_default()?
   };
 
+  if let Some(opts) = graph_opts {
+    return render_activity_graph(&all, &filters, &pricing, &args, opts);
+  }
+  let unit = output_unit(&args);
+
   // Group dims.
   let dims: Vec<GroupDim> = args.group_by.iter().filter_map(|s| GroupDim::parse(s)).collect();
   let dims = if dims.is_empty() {
@@ -309,8 +330,6 @@ fn main() -> Result<()> {
     cost_per,
     args.cost,
   );
-
-  let unit = output_unit(&args);
 
   let sort_key = SortKey::parse(&args.sort).unwrap_or(SortKey::Total);
   sort_aggs(&mut aggs, sort_key, !args.asc, unit);
@@ -344,6 +363,39 @@ fn main() -> Result<()> {
     }
   }
 
+  Ok(())
+}
+
+fn render_activity_graph(
+  records: &[UsageRecord],
+  filters: &Filters,
+  pricing: &PricingTable,
+  args: &Args,
+  opts: GraphOpts,
+) -> Result<()> {
+  let unit = output_unit(args);
+  let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
+  let width = opts.width.or_else(|| {
+    if std::io::stdout().is_terminal() {
+      terminal_width().or_else(columns_env_width)
+    } else {
+      None
+    }
+  });
+  let rendered = render_activity(
+    records,
+    filters,
+    pricing,
+    ActivityRenderOptions {
+      chart: opts.chart,
+      format: args.format,
+      unit,
+      cost_mode: args.cost,
+      use_color,
+      width,
+    },
+  )?;
+  print!("{rendered}");
   Ok(())
 }
 
@@ -663,6 +715,7 @@ fn init_tracing(verbose: bool) {
 
 fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
   match cmd {
+    Cmd::Graph { .. } => unreachable!("graph is rendered after collecting usage records"),
     Cmd::Dump {
       copilot,
       copilot_cli,

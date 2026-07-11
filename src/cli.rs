@@ -24,8 +24,13 @@ fn default_date_bucket() -> DateBucket {
   DateBucket::Day
 }
 
+fn default_graph_chart() -> GraphChart {
+  GraphChart::Auto
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum Format {
+  #[value(alias = "terminal")]
   Table,
   Json,
   Svg,
@@ -62,12 +67,29 @@ pub enum Unit {
   Cost,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum GraphChart {
+  Auto,
+  Plot,
+  Heatmap,
+}
+
+impl GraphChart {
+  pub fn resolve(self, day_count: usize) -> Self {
+    match self {
+      GraphChart::Auto if day_count <= 30 => GraphChart::Plot,
+      GraphChart::Auto => GraphChart::Heatmap,
+      chart => chart,
+    }
+  }
+}
+
 /// Token usage stats for local LLM agent sessions.
 #[derive(Debug, Parser)]
 #[command(name = "llm-tokei", version, about, disable_help_flag = true)]
 pub struct Args {
   /// Output format.
-  #[arg(long, value_enum, default_value_t = default_format(), help_heading = "Output")]
+  #[arg(long, value_enum, default_value_t = default_format(), help_heading = "Output", global = true)]
   pub format: Format,
 
   /// Sort key: total|input|output|cost|date|calls.
@@ -87,7 +109,7 @@ pub struct Args {
   pub no_cost: bool,
 
   /// Cost mode: actual, mixed, or official.
-  #[arg(long, value_enum, default_value_t = default_cost(), help_heading = "Output")]
+  #[arg(long, value_enum, default_value_t = default_cost(), help_heading = "Output", global = true)]
   pub cost: CostMode,
 
   /// Add top cost split columns for a grouping dimension.
@@ -95,35 +117,35 @@ pub struct Args {
   pub cost_per: Option<String>,
 
   /// Filter to a recent or calendar time window (e.g. 3d, 12h, 2w, today, week, month).
-  #[arg(long, help_heading = "Period", conflicts_with_all = ["period_24h", "period_7d", "period_1m", "today", "week", "month"])]
+  #[arg(long, help_heading = "Period", conflicts_with_all = ["period_24h", "period_7d", "period_1m", "today", "week", "month"], global = true)]
   pub period: Option<String>,
 
   /// Shortcut for `--period 24h`.
-  #[arg(long = "24h", help_heading = "Period")]
+  #[arg(long = "24h", help_heading = "Period", global = true)]
   pub period_24h: bool,
 
   /// Shortcut for `--period 7d`.
-  #[arg(long = "7d", help_heading = "Period")]
+  #[arg(long = "7d", help_heading = "Period", global = true)]
   pub period_7d: bool,
 
   /// Shortcut for `--period 1m`.
-  #[arg(long = "1m", help_heading = "Period")]
+  #[arg(long = "1m", help_heading = "Period", global = true)]
   pub period_1m: bool,
 
   /// Shortcut for `--period today`.
-  #[arg(long, help_heading = "Period")]
+  #[arg(long, help_heading = "Period", global = true)]
   pub today: bool,
 
   /// Shortcut for `--period week`.
-  #[arg(long, help_heading = "Period")]
+  #[arg(long, help_heading = "Period", global = true)]
   pub week: bool,
 
   /// Shortcut for `--period month`.
-  #[arg(long, help_heading = "Period")]
+  #[arg(long, help_heading = "Period", global = true)]
   pub month: bool,
 
   /// Disable ANSI colors.
-  #[arg(long, help_heading = "Table")]
+  #[arg(long, help_heading = "Display", global = true)]
   pub no_color: bool,
 
   /// Show human-readable usage values in table output.
@@ -143,11 +165,11 @@ pub struct Args {
   pub split_input: bool,
 
   /// Render usage columns as tokens, bytes, or cost.
-  #[arg(long, value_enum, help_heading = "Table")]
+  #[arg(long, value_enum, help_heading = "Display", global = true)]
   pub unit: Option<Unit>,
 
   /// Show input/output in bytes instead of tokens.
-  #[arg(long, conflicts_with = "unit", help_heading = "Table")]
+  #[arg(long, conflicts_with = "unit", help_heading = "Display", global = true)]
   pub bytes: bool,
 
   /// Show per-unit averages in table output: turn|round|session.
@@ -155,7 +177,7 @@ pub struct Args {
   pub avg: Option<AvgBy>,
 
   /// Disable the usage cache (re-parse all source files).
-  #[arg(long, help_heading = "Cache")]
+  #[arg(long, help_heading = "Cache", global = true)]
   pub no_cache: bool,
 
   /// Grouping dimensions, comma-separated: source,model,provider,project,date,session.
@@ -172,73 +194,73 @@ pub struct Args {
   pub date_bucket: DateBucket,
 
   /// Config file path (default: $XDG_CONFIG_HOME/llm-tokei.toml).
-  #[arg(long, help_heading = CONFIG_HELP)]
+  #[arg(long, help_heading = CONFIG_HELP, global = true)]
   pub config: Option<PathBuf>,
 
   /// Disable loading the config file.
-  #[arg(long, help_heading = CONFIG_HELP)]
+  #[arg(long, help_heading = CONFIG_HELP, global = true)]
   pub no_config: bool,
 
   /// Save current main CLI flags as config defaults, then run.
-  #[arg(long, help_heading = CONFIG_HELP)]
+  #[arg(long, help_heading = CONFIG_HELP, global = true)]
   pub save_default: bool,
 
   /// Do not apply saved config defaults for this run.
-  #[arg(long, help_heading = CONFIG_HELP)]
+  #[arg(long, help_heading = CONFIG_HELP, global = true)]
   pub no_default: bool,
 
   /// Filter: include records on/after this time (e.g. 7d, 24h, 2025-04-01, RFC3339).
-  #[arg(long, help_heading = "Filters")]
+  #[arg(long, help_heading = "Filters", global = true)]
   pub since: Option<String>,
 
   /// Filter: include records on/before this time.
-  #[arg(long, help_heading = "Filters")]
+  #[arg(long, help_heading = "Filters", global = true)]
   pub until: Option<String>,
 
   /// Filter: model name glob (e.g. "claude-*").
-  #[arg(long, help_heading = "Filters")]
+  #[arg(long, help_heading = "Filters", global = true)]
   pub model: Option<String>,
 
   /// Filter: provider glob.
-  #[arg(long, help_heading = "Filters")]
+  #[arg(long, help_heading = "Filters", global = true)]
   pub provider: Option<String>,
 
   /// Filter: cwd glob.
-  #[arg(long, help_heading = "Filters")]
+  #[arg(long, help_heading = "Filters", global = true)]
   pub cwd: Option<String>,
 
   /// Comma-separated source list: codex,opencode,claude,copilot,copilot-cli,pi-agent (default: all).
-  #[arg(long, value_delimiter = ',', help_heading = "Sources")]
+  #[arg(long, value_delimiter = ',', help_heading = "Sources", global = true)]
   pub source: Option<Vec<String>>,
 
   /// Override Codex sessions root (default: $CODEX_HOME/sessions or ~/.codex/sessions).
-  #[arg(long, help_heading = "Sources")]
+  #[arg(long, help_heading = "Sources", global = true)]
   pub codex_dir: Option<PathBuf>,
 
   /// Override OpenCode database path (default: ~/.local/share/opencode/opencode.db).
-  #[arg(long, help_heading = "Sources")]
+  #[arg(long, help_heading = "Sources", global = true)]
   pub opencode_db: Option<PathBuf>,
 
   /// Override Claude Code projects root (default: $CLAUDE_HOME/projects or ~/.claude/projects).
-  #[arg(long, help_heading = "Sources")]
+  #[arg(long, help_heading = "Sources", global = true)]
   pub claude_dir: Option<PathBuf>,
 
   /// Override Copilot Chat workspaceStorage root (default: VS Code / Insiders / VSCodium / Cursor user dirs).
   /// Repeatable; if unset, all known defaults are scanned.
-  #[arg(long, help_heading = "Sources")]
+  #[arg(long, help_heading = "Sources", global = true)]
   pub copilot_dir: Option<Vec<PathBuf>>,
 
   /// Override GitHub Copilot CLI state root (default: ~/.copilot/session-state).
   /// Repeatable; if unset, all known defaults are scanned.
-  #[arg(long, help_heading = "Sources")]
+  #[arg(long, help_heading = "Sources", global = true)]
   pub copilot_cli_dir: Option<Vec<PathBuf>>,
 
   /// Override Pi Agent sessions root (default: ~/.pi/agent/sessions).
-  #[arg(long, help_heading = "Sources")]
+  #[arg(long, help_heading = "Sources", global = true)]
   pub pi_agent_dir: Option<PathBuf>,
 
   /// Override/extend pricing table (JSON file).
-  #[arg(long, help_heading = "Pricing")]
+  #[arg(long, help_heading = "Pricing", global = true)]
   pub pricing: Option<PathBuf>,
 
   /// Print help.
@@ -246,7 +268,7 @@ pub struct Args {
   pub help: Option<bool>,
 
   /// Print parsing warnings.
-  #[arg(short, long, help_heading = "Diagnostics")]
+  #[arg(short, long, help_heading = "Diagnostics", global = true)]
   pub verbose: bool,
 
   #[command(subcommand)]
@@ -255,6 +277,20 @@ pub struct Args {
 
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
+  /// Show hourly or daily activity as a plot or calendar heatmap.
+  #[command(after_help = "Graph output formats: table (terminal; alias: terminal) and svg. JSON is not supported.")]
+  Graph {
+    /// Chart layout. Auto uses hourly plots below 30h, daily plots up to 30 dates, then a heatmap.
+    #[arg(long, value_enum, default_value_t = default_graph_chart(), help_heading = "Graph")]
+    chart: GraphChart,
+    /// Target terminal width. The requested date range is never truncated.
+    #[arg(long, help_heading = "Graph")]
+    width: Option<usize>,
+    /// Print help.
+    #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics")]
+    help: Option<bool>,
+  },
+
   /// Manage llm-tokei config defaults.
   Config {
     #[command(subcommand)]
