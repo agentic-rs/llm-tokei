@@ -5,29 +5,34 @@ use crate::format::svg::escape_xml;
 use std::fmt::Write;
 
 const FONT_FAMILY: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+const MONO_FONT_FAMILY: &str = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace";
 const BACKGROUND: &str = "#0d1117";
 const BORDER: &str = "#30363d";
 const TEXT: &str = "#f0f6fc";
 const MUTED: &str = "#8b949e";
 const GRID: &str = "#21262d";
+const HEADER_HEIGHT: usize = 48;
+const CONTENT_TOP: usize = 96;
+const MIN_WIDTH: usize = 360;
+const MAX_WIDTH: usize = 1_400;
 
-pub(super) fn render_activity_svg(series: &ActivitySeries, chart: GraphChart) -> String {
+pub(super) fn render_activity_svg(series: &ActivitySeries, chart: GraphChart, command: &str) -> String {
   match chart.resolve(series.len()) {
-    GraphChart::Plot => render_plot(&ActivityPlot::from_daily(series), "day"),
-    GraphChart::Heatmap => render_heatmap(series),
+    GraphChart::Plot => render_plot(&ActivityPlot::from_daily(series), "day", command),
+    GraphChart::Heatmap => render_heatmap(series, command),
     GraphChart::Auto => unreachable!("auto chart is resolved before rendering"),
   }
 }
 
-pub(super) fn render_hourly_activity_svg(series: &HourlyActivitySeries) -> String {
-  render_plot(&ActivityPlot::from_hourly(series), "hour")
+pub(super) fn render_hourly_activity_svg(series: &HourlyActivitySeries, command: &str) -> String {
+  render_plot(&ActivityPlot::from_hourly(series), "hour", command)
 }
 
-fn render_plot(plot: &ActivityPlot, resolution: &str) -> String {
+fn render_plot(plot: &ActivityPlot, resolution: &str, command: &str) -> String {
   let data_width = plot.len().saturating_mul(18) + 110;
   let title_width = plot.title.chars().count().saturating_mul(11) + 56;
   let summary_width = plot.summary.chars().count().saturating_mul(7) + 56;
-  let width = data_width.max(title_width).max(summary_width).clamp(680, 1_400);
+  let width = content_width(data_width.max(title_width).max(summary_width), command);
   let height = 360;
   let chart_left = 78.0;
   let chart_right = width as f64 - 30.0;
@@ -49,6 +54,7 @@ fn render_plot(plot: &ActivityPlot, resolution: &str) -> String {
     resolution,
     width,
     height,
+    command,
   );
   text_element(
     &mut out,
@@ -134,11 +140,11 @@ fn render_plot(plot: &ActivityPlot, resolution: &str) -> String {
   }
 
   text_element(&mut out, 28.0, 329.0, 13, MUTED, "start", &plot.summary, "");
-  out.push_str("</svg>\n");
+  out.push_str("  </g>\n</svg>\n");
   out
 }
 
-fn render_heatmap(series: &ActivitySeries) -> String {
+fn render_heatmap(series: &ActivitySeries, command: &str) -> String {
   const CELL: f64 = 11.0;
   const GAP: f64 = 3.0;
   const PITCH: f64 = CELL + GAP;
@@ -147,11 +153,13 @@ fn render_heatmap(series: &ActivitySeries) -> String {
 
   let grid = CalendarGrid::new(series);
   let week_count = grid.as_ref().map(|grid| grid.week_count).unwrap_or_default();
-  let width = ((GRID_LEFT + week_count as f64 * PITCH + 30.0).ceil() as usize).max(680);
+  let data_width = (GRID_LEFT + week_count as f64 * PITCH + 30.0).ceil() as usize;
   let height = 280;
   let chart_title = format!("{} activity graph", super::plot::unit_name(series.unit));
   let chart_desc = format!("{}. {}", title(series), summary(series));
-  let mut out = svg_start(&chart_title, &chart_desc, "heatmap", "day", width, height);
+  let text_width = chart_desc.chars().count().saturating_mul(7) + 56;
+  let width = content_width(data_width.max(text_width), command);
+  let mut out = svg_start(&chart_title, &chart_desc, "heatmap", "day", width, height, command);
   text_element(
     &mut out,
     28.0,
@@ -208,7 +216,7 @@ fn render_heatmap(series: &ActivitySeries) -> String {
   }
   text_element(&mut out, 136.0, legend_y + 10.0, 12, MUTED, "start", "More", "");
   text_element(&mut out, 28.0, 254.0, 13, MUTED, "start", &summary(series), "");
-  out.push_str("</svg>\n");
+  out.push_str("  </g>\n</svg>\n");
   out
 }
 
@@ -219,23 +227,57 @@ fn svg_start(
   resolution: &str,
   width: usize,
   height: usize,
+  command: &str,
 ) -> String {
+  let outer_height = height + CONTENT_TOP;
   let mut out = String::new();
   writeln!(
     out,
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" aria-labelledby=\"title desc\" data-chart=\"{chart}\" data-resolution=\"{resolution}\">"
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{outer_height}\" viewBox=\"0 0 {width} {outer_height}\" role=\"img\" aria-labelledby=\"title desc\" data-chart=\"{chart}\" data-resolution=\"{resolution}\">"
   )
   .unwrap();
   writeln!(out, "  <title id=\"title\">{}</title>", escape_xml(chart_title)).unwrap();
   writeln!(out, "  <desc id=\"desc\">{}</desc>", escape_xml(chart_desc)).unwrap();
   writeln!(
     out,
-    "  <rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"12\" fill=\"{BACKGROUND}\" stroke=\"{BORDER}\"/>",
+    "  <rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"16\" fill=\"{BACKGROUND}\" stroke=\"{BORDER}\"/>",
     width - 1,
-    height - 1
+    outer_height - 1
   )
   .unwrap();
+  writeln!(
+    out,
+    "  <rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{HEADER_HEIGHT}\" rx=\"16\" fill=\"#161b22\"/>",
+    width - 1
+  )
+  .unwrap();
+  writeln!(
+    out,
+    "  <rect x=\"0.5\" y=\"32\" width=\"{}\" height=\"17\" fill=\"#161b22\"/>",
+    width - 1
+  )
+  .unwrap();
+  out.push_str("  <circle cx=\"24\" cy=\"24\" r=\"6\" fill=\"#ff5f56\"/>\n");
+  out.push_str("  <circle cx=\"44\" cy=\"24\" r=\"6\" fill=\"#ffbd2e\"/>\n");
+  out.push_str("  <circle cx=\"64\" cy=\"24\" r=\"6\" fill=\"#27c93f\"/>\n");
+  chrome_text_element(&mut out, width as f64 / 2.0, 29.0, 13, "middle", "llm-tokei");
+  chrome_text_element(&mut out, 22.0, 75.0, 14, "start", &format!("$ {command}"));
+  writeln!(out, "  <g transform=\"translate(0 {CONTENT_TOP})\">").unwrap();
   out
+}
+
+fn chrome_text_element(out: &mut String, x: f64, y: f64, size: usize, anchor: &str, text: &str) {
+  writeln!(
+    out,
+    "  <text x=\"{x:.1}\" y=\"{y:.1}\" fill=\"{MUTED}\" font-family=\"{MONO_FONT_FAMILY}\" font-size=\"{size}\" text-anchor=\"{anchor}\">{}</text>",
+    escape_xml(text)
+  )
+  .unwrap();
+}
+
+fn content_width(chart_width: usize, command: &str) -> usize {
+  let command_width = command.chars().count().saturating_mul(8) + 44;
+  chart_width.max(command_width).clamp(MIN_WIDTH, MAX_WIDTH)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -279,21 +321,22 @@ mod tests {
   #[test]
   fn auto_renders_short_ranges_as_native_svg_bars() {
     let series = ActivitySeries::from_values(date(2026, 7, 1), (1..=30).map(f64::from).collect(), Unit::Tokens);
-    let svg = render_activity_svg(&series, GraphChart::Auto);
+    let svg = render_activity_svg(&series, GraphChart::Auto, "llm-tokei graph --month --format svg");
 
     assert!(svg.starts_with("<svg "));
     assert!(svg.contains("data-chart=\"plot\""));
     assert!(svg.contains("data-resolution=\"day\""));
     assert!(svg.contains("class=\"activity-bar\""));
     assert_eq!(svg.matches("class=\"activity-hit-target\"").count(), 30);
-    assert!(!svg.contains("terminal-content"));
+    assert!(svg.contains("fill=\"#ff5f56\""));
+    assert!(svg.contains("$ llm-tokei graph --month --format svg"));
     assert!(svg.ends_with("</svg>\n"));
   }
 
   #[test]
   fn auto_renders_long_ranges_as_accessible_calendar_cells() {
     let series = ActivitySeries::from_values(date(2026, 6, 1), vec![1.0; 31], Unit::Tokens);
-    let svg = render_activity_svg(&series, GraphChart::Auto);
+    let svg = render_activity_svg(&series, GraphChart::Auto, "llm-tokei graph --format svg");
 
     assert!(svg.contains("data-chart=\"heatmap\""));
     assert_eq!(svg.matches("class=\"activity-cell\"").count(), 31);
@@ -305,7 +348,7 @@ mod tests {
   #[test]
   fn plot_includes_zero_grid_and_summary() {
     let series = ActivitySeries::from_values(date(2026, 7, 1), vec![0.0; 7], Unit::Cost);
-    let svg = render_activity_svg(&series, GraphChart::Plot);
+    let svg = render_activity_svg(&series, GraphChart::Plot, "llm-tokei graph --7d --format svg");
     assert!(svg.contains("$0.00"));
     assert!(svg.contains("Active 0/7 days"));
     assert!(!svg.contains("class=\"activity-bar\""));
@@ -319,13 +362,19 @@ mod tests {
       .unwrap()
       .with_timezone(&Utc);
     let series = HourlyActivitySeries::from_values(start, vec![0.0, 10.0, 20.0], Unit::Tokens);
-    let svg = render_hourly_activity_svg(&series);
+    let svg = render_hourly_activity_svg(&series, "llm-tokei graph --3h --format svg");
 
     assert!(svg.contains("data-chart=\"plot\""));
     assert!(svg.contains("data-resolution=\"hour\""));
     assert!(svg.contains("Hourly token activity"));
     assert_eq!(svg.matches("class=\"activity-hit-target\"").count(), 3);
     assert_eq!(svg.matches("class=\"activity-axis-label\"").count(), 3);
+    let width = svg
+      .split_once("width=\"")
+      .and_then(|(_, rest)| rest.split_once('"'))
+      .and_then(|(width, _)| width.parse::<usize>().ok())
+      .unwrap();
+    assert!(width < 680);
   }
 
   #[test]
@@ -335,12 +384,14 @@ mod tests {
     let start = DateTime::parse_from_rfc3339("2026-07-11T01:00:00Z")
       .unwrap()
       .with_timezone(&Utc);
-    let one_hour = render_hourly_activity_svg(&HourlyActivitySeries::from_values(start, vec![10.0], Unit::Tokens));
-    let two_hours = render_hourly_activity_svg(&HourlyActivitySeries::from_values(
-      start,
-      vec![10.0, 20.0],
-      Unit::Tokens,
-    ));
+    let one_hour = render_hourly_activity_svg(
+      &HourlyActivitySeries::from_values(start, vec![10.0], Unit::Tokens),
+      "llm-tokei graph --1h --format svg",
+    );
+    let two_hours = render_hourly_activity_svg(
+      &HourlyActivitySeries::from_values(start, vec![10.0, 20.0], Unit::Tokens),
+      "llm-tokei graph --2h --format svg",
+    );
 
     assert_eq!(one_hour.matches("class=\"activity-axis-label\"").count(), 1);
     assert_eq!(two_hours.matches("class=\"activity-axis-label\"").count(), 2);

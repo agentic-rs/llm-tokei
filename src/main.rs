@@ -377,6 +377,7 @@ fn render_activity_graph(
   args: &Args,
   opts: GraphOpts,
 ) -> Result<()> {
+  let command = display_command();
   let unit = output_unit(args);
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
   let width = opts.width.or_else(|| {
@@ -397,6 +398,7 @@ fn render_activity_graph(
       cost_mode: args.cost,
       use_color,
       width,
+      command: &command,
     },
   )?;
   print!("{rendered}");

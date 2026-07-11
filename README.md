@@ -32,6 +32,26 @@ llm-tokei --cost-per provider --cost official --month -h
 - **Replayable transcripts**: dump Codex and Copilot sessions into JSONL message streams.
 - **Safe local reads**: parses local files and opens OpenCode's SQLite database read-only.
 
+## Activity Graphs
+
+Use `llm-tokei graph` for a GitHub-style calendar heatmap of the trailing year.
+Shorter ranges automatically switch to plots: hourly below 30 hours and daily
+for ranges up to 30 dates.
+
+```sh
+llm-tokei graph --format svg > activity.svg
+```
+
+### Calendar heatmap
+
+![GitHub-style token activity calendar heatmap](docs/assets/activity-heatmap.svg)
+
+### Hourly and daily plots
+
+| Hourly (`--24h`) | Daily (`--month`) |
+| --- | --- |
+| ![Hourly token activity plot](docs/assets/activity-hourly.svg) | ![Daily token activity plot](docs/assets/activity-daily.svg) |
+
 ## Install
 
 ```sh

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="602" height="456" viewBox="0 0 602 456" role="img" aria-labelledby="title desc" data-chart="plot" data-resolution="day">
+  <title id="title">Token activity graph</title>
+  <desc id="desc">Token activity · Jul 1–12, 2026. Total ~957.0M · Active 8/12 days · Best Jul 12: 350.7M · Longest streak 7 days</desc>
+  <rect x="0.5" y="0.5" width="601" height="455" rx="16" fill="#0d1117" stroke="#30363d"/>
+  <rect x="0.5" y="0.5" width="601" height="48" rx="16" fill="#161b22"/>
+  <rect x="0.5" y="32" width="601" height="17" fill="#161b22"/>
+  <circle cx="24" cy="24" r="6" fill="#ff5f56"/>
+  <circle cx="44" cy="24" r="6" fill="#ffbd2e"/>
+  <circle cx="64" cy="24" r="6" fill="#27c93f"/>
+  <text x="301.0" y="29.0" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" text-anchor="middle">llm-tokei</text>
+  <text x="22.0" y="75.0" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" text-anchor="start">$ llm-tokei graph --month --format svg</text>
+  <g transform="translate(0 96)">
+  <text x="28.0" y="39.0" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" text-anchor="start" font-weight="600">Token activity · Jul 1–12, 2026</text>
+  <line x1="78.0" y1="260.0" x2="572.0" y2="260.0" stroke="#21262d"/>
+  <text x="68.0" y="264.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >0</text>
+  <line x1="78.0" y1="198.7" x2="572.0" y2="198.7" stroke="#21262d"/>
+  <text x="68.0" y="202.7" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >116.9M</text>
+  <line x1="78.0" y1="137.3" x2="572.0" y2="137.3" stroke="#21262d"/>
+  <text x="68.0" y="141.3" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >233.8M</text>
+  <line x1="78.0" y1="76.0" x2="572.0" y2="76.0" stroke="#21262d"/>
+  <text x="68.0" y="80.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >350.7M</text>
+  <rect class="activity-hit-target" x="78.0" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 1, 2026: 0</title></rect>
+  <rect class="activity-hit-target" x="119.2" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 2, 2026: 0</title></rect>
+  <rect class="activity-hit-target" x="160.3" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 3, 2026: 0</title></rect>
+  <rect class="activity-bar" x="207.3" y="259.0" width="29.6" height="1.0" rx="2" fill="#0e4429"/>
+  <rect class="activity-hit-target" x="201.5" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 4, 2026: ~593.4K</title></rect>
+  <rect class="activity-hit-target" x="242.7" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 5, 2026: 0</title></rect>
+  <rect class="activity-bar" x="289.6" y="242.6" width="29.6" height="17.4" rx="2" fill="#0e4429"/>
+  <rect class="activity-hit-target" x="283.8" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 6, 2026: ~33.2M</title></rect>
+  <rect class="activity-bar" x="330.8" y="222.6" width="29.6" height="37.4" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="325.0" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 7, 2026: 71.4M</title></rect>
+  <rect class="activity-bar" x="371.9" y="222.3" width="29.6" height="37.7" rx="2" fill="#26a641"/>
+  <rect class="activity-hit-target" x="366.2" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 8, 2026: ~71.9M</title></rect>
+  <rect class="activity-bar" x="413.1" y="139.5" width="29.6" height="120.5" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="407.3" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 9, 2026: ~229.6M</title></rect>
+  <rect class="activity-bar" x="454.3" y="241.1" width="29.6" height="18.9" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="448.5" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 10, 2026: 36.0M</title></rect>
+  <rect class="activity-bar" x="495.4" y="174.2" width="29.6" height="85.8" rx="2" fill="#26a641"/>
+  <rect class="activity-hit-target" x="489.7" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026: ~163.5M</title></rect>
+  <rect class="activity-bar" x="536.6" y="76.0" width="29.6" height="184.0" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="530.8" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 12, 2026: 350.7M</title></rect>
+  <text x="78.0" y="285.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="start" class="activity-axis-label">Jul 1</text>
+  <text x="325.0" y="285.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="middle" class="activity-axis-label">Jul 7</text>
+  <text x="572.0" y="285.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" class="activity-axis-label">Jul 12</text>
+  <text x="28.0" y="329.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" text-anchor="start" >Total ~957.0M · Active 8/12 days · Best Jul 12: 350.7M · Longest streak 7 days</text>
+  </g>
+</svg>

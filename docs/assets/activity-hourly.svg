@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="683" height="456" viewBox="0 0 683 456" role="img" aria-labelledby="title desc" data-chart="plot" data-resolution="hour">
+  <title id="title">Hourly token activity graph</title>
+  <desc id="desc">Hourly token activity · Jul 11, 02:13–Jul 12, 02:13, 2026. Total ~513.9M · Active 10/25 hours · Best Jul 12 01:00: 185.3M · Longest streak 5 hours</desc>
+  <rect x="0.5" y="0.5" width="682" height="455" rx="16" fill="#0d1117" stroke="#30363d"/>
+  <rect x="0.5" y="0.5" width="682" height="48" rx="16" fill="#161b22"/>
+  <rect x="0.5" y="32" width="682" height="17" fill="#161b22"/>
+  <circle cx="24" cy="24" r="6" fill="#ff5f56"/>
+  <circle cx="44" cy="24" r="6" fill="#ffbd2e"/>
+  <circle cx="64" cy="24" r="6" fill="#27c93f"/>
+  <text x="341.5" y="29.0" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" text-anchor="middle">llm-tokei</text>
+  <text x="22.0" y="75.0" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" text-anchor="start">$ llm-tokei graph --24h --format svg</text>
+  <g transform="translate(0 96)">
+  <text x="28.0" y="39.0" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" text-anchor="start" font-weight="600">Hourly token activity · Jul 11, 02:13–Jul 12, 02:13, 2026</text>
+  <line x1="78.0" y1="260.0" x2="653.0" y2="260.0" stroke="#21262d"/>
+  <text x="68.0" y="264.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >0</text>
+  <line x1="78.0" y1="198.7" x2="653.0" y2="198.7" stroke="#21262d"/>
+  <text x="68.0" y="202.7" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >61.8M</text>
+  <line x1="78.0" y1="137.3" x2="653.0" y2="137.3" stroke="#21262d"/>
+  <text x="68.0" y="141.3" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >123.5M</text>
+  <line x1="78.0" y1="76.0" x2="653.0" y2="76.0" stroke="#21262d"/>
+  <text x="68.0" y="80.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >185.3M</text>
+  <rect class="activity-hit-target" x="78.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 02:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="101.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 03:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="124.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 04:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="147.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 05:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="170.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 06:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="193.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 07:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="216.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 08:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="239.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 09:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="262.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 10:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="285.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 11:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="308.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 12:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="331.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 13:00 +08:00: 0</title></rect>
+  <rect class="activity-bar" x="357.2" y="257.9" width="16.6" height="2.1" rx="2" fill="#0e4429"/>
+  <rect class="activity-hit-target" x="354.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 14:00 +08:00: ~2.1M</title></rect>
+  <rect class="activity-bar" x="380.2" y="246.8" width="16.6" height="13.2" rx="2" fill="#26a641"/>
+  <rect class="activity-hit-target" x="377.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 15:00 +08:00: 13.3M</title></rect>
+  <rect class="activity-bar" x="403.2" y="253.8" width="16.6" height="6.2" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="400.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 16:00 +08:00: 6.3M</title></rect>
+  <rect class="activity-bar" x="426.2" y="258.8" width="16.6" height="1.2" rx="2" fill="#0e4429"/>
+  <rect class="activity-hit-target" x="423.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 17:00 +08:00: 1.3M</title></rect>
+  <rect class="activity-hit-target" x="446.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 18:00 +08:00: 0</title></rect>
+  <rect class="activity-hit-target" x="469.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 19:00 +08:00: 0</title></rect>
+  <rect class="activity-bar" x="495.2" y="252.6" width="16.6" height="7.4" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="492.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 20:00 +08:00: 7.5M</title></rect>
+  <rect class="activity-hit-target" x="515.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 21:00 +08:00: 0</title></rect>
+  <rect class="activity-bar" x="541.2" y="226.7" width="16.6" height="33.3" rx="2" fill="#26a641"/>
+  <rect class="activity-hit-target" x="538.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 22:00 +08:00: 33.6M</title></rect>
+  <rect class="activity-bar" x="564.2" y="161.1" width="16.6" height="98.9" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="561.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026 23:00 +08:00: 99.6M</title></rect>
+  <rect class="activity-bar" x="587.2" y="109.2" width="16.6" height="150.8" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="584.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 12, 2026 00:00 +08:00: 151.8M</title></rect>
+  <rect class="activity-bar" x="610.2" y="76.0" width="16.6" height="184.0" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="607.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 12, 2026 01:00 +08:00: 185.3M</title></rect>
+  <rect class="activity-bar" x="633.2" y="246.9" width="16.6" height="13.1" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="630.0" y="76.0" width="23.0" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 12, 2026 02:00 +08:00: 13.2M</title></rect>
+  <text x="78.0" y="285.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="start" class="activity-axis-label">Jul 11 02:00</text>
+  <text x="365.5" y="285.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="middle" class="activity-axis-label">Jul 11 14:00</text>
+  <text x="653.0" y="285.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" class="activity-axis-label">Jul 12 02:00</text>
+  <text x="28.0" y="329.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" text-anchor="start" >Total ~513.9M · Active 10/25 hours · Best Jul 12 01:00: 185.3M · Longest streak 5 hours</text>
+  </g>
+</svg>
