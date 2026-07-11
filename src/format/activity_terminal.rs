@@ -1,6 +1,12 @@
+use super::activity_common::{
+  format_date_short, format_value, month_labels as calendar_month_labels, summary, title, CalendarGrid,
+};
 use crate::activity::{ActivityDay, ActivitySeries};
-use crate::cli::{GraphChart, Unit};
-use chrono::{Datelike, Duration, NaiveDate};
+use crate::cli::GraphChart;
+#[cfg(test)]
+use crate::cli::Unit;
+#[cfg(test)]
+use chrono::NaiveDate;
 
 const PLOT_HEIGHT: usize = 6;
 
@@ -81,18 +87,16 @@ fn render_heatmap(series: &ActivitySeries, opts: &ActivityTerminalOpts) -> Strin
     return out;
   }
 
-  let grid_start = previous_sunday(series.start);
-  let grid_end = next_saturday(series.end);
-  let week_count = ((grid_end - grid_start).num_days() as usize / 7) + 1;
+  let grid = CalendarGrid::new(series).expect("non-empty activity series has a calendar grid");
   out.push_str("    ");
-  out.push_str(&month_labels(series, grid_start, week_count));
+  out.push_str(&terminal_month_labels(series, &grid));
   out.push('\n');
 
   for row in 0..7 {
     out.push_str(weekday_label(row));
     out.push(' ');
-    for week in 0..week_count {
-      let date = grid_start + Duration::days((week * 7 + row) as i64);
+    for week in 0..grid.week_count {
+      let date = grid.date(week, row);
       match series.day(date) {
         Some(day) => out.push_str(&heatmap_cell(day, opts.use_color)),
         None => out.push(' '),
@@ -139,17 +143,10 @@ fn plot_date_labels(series: &ActivitySeries, plot_width: usize, cell_width: usiz
   canvas.into_iter().collect::<String>().trim_end().to_string()
 }
 
-fn month_labels(series: &ActivitySeries, grid_start: NaiveDate, week_count: usize) -> String {
-  let mut canvas = vec![' '; week_count];
-  let mut previous = None;
-  for day in &series.days {
-    let month = (day.date.year(), day.date.month());
-    if previous == Some(month) {
-      continue;
-    }
-    previous = Some(month);
-    let week = ((day.date - grid_start).num_days() as usize) / 7;
-    place_text(&mut canvas, week, &day.date.format("%b").to_string());
+fn terminal_month_labels(series: &ActivitySeries, grid: &CalendarGrid) -> String {
+  let mut canvas = vec![' '; grid.week_count];
+  for (week, label) in calendar_month_labels(series, grid) {
+    place_text(&mut canvas, week, &label);
   }
   canvas.into_iter().collect::<String>().trim_end().to_string()
 }
@@ -184,15 +181,6 @@ fn weekday_label(row: usize) -> &'static str {
   }
 }
 
-fn previous_sunday(date: NaiveDate) -> NaiveDate {
-  date - Duration::days(date.weekday().num_days_from_sunday() as i64)
-}
-
-fn next_saturday(date: NaiveDate) -> NaiveDate {
-  let remaining = 6 - date.weekday().num_days_from_sunday();
-  date + Duration::days(remaining as i64)
-}
-
 fn heatmap_cell(day: &ActivityDay, use_color: bool) -> String {
   let glyph = match day.level {
     0 => "·",
@@ -216,96 +204,6 @@ fn colorize(text: &str, level: u8, use_color: bool) -> String {
     _ => "57;211;83",
   };
   format!("\x1b[38;2;{color}m{text}\x1b[0m")
-}
-
-fn title(series: &ActivitySeries) -> String {
-  format!(
-    "{} activity · {}",
-    unit_name(series.unit),
-    format_date_range(series.start, series.end)
-  )
-}
-
-fn summary(series: &ActivitySeries) -> String {
-  let mut parts = vec![
-    format!("Total {}", format_value(series.total, series.unit, series.estimated)),
-    format!("Active {}/{} days", series.active_days, series.len()),
-  ];
-  if let Some(best) = series.best_day() {
-    parts.push(format!(
-      "Best {}: {}",
-      format_date_short(best.date),
-      format_value(best.value, series.unit, best.estimated)
-    ));
-  }
-  parts.push(format!(
-    "Longest streak {} {}",
-    series.longest_streak,
-    pluralize(series.longest_streak, "day", "days")
-  ));
-  parts.join(" · ")
-}
-
-fn unit_name(unit: Unit) -> &'static str {
-  match unit {
-    Unit::Tokens => "Token",
-    Unit::Bytes => "Byte",
-    Unit::Cost => "Cost",
-  }
-}
-
-fn pluralize<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {
-  if count == 1 {
-    singular
-  } else {
-    plural
-  }
-}
-
-fn format_value(value: f64, unit: Unit, estimated: bool) -> String {
-  let prefix = if estimated { "~" } else { "" };
-  if unit == Unit::Cost {
-    let value = if value >= 100.0 {
-      format!("${value:.0}")
-    } else if value >= 1.0 {
-      format!("${value:.2}")
-    } else if value > 0.0 {
-      format!("${value:.4}")
-    } else {
-      "$0.00".to_string()
-    };
-    return format!("{prefix}{value}");
-  }
-
-  let (scaled, suffix) = if value >= 1_000_000_000_000.0 {
-    (value / 1_000_000_000_000.0, "T")
-  } else if value >= 1_000_000_000.0 {
-    (value / 1_000_000_000.0, "B")
-  } else if value >= 1_000_000.0 {
-    (value / 1_000_000.0, "M")
-  } else if value >= 1_000.0 {
-    (value / 1_000.0, "K")
-  } else {
-    return format!("{prefix}{value:.0}");
-  };
-  format!("{prefix}{scaled:.1}{suffix}")
-}
-
-fn format_date_short(date: NaiveDate) -> String {
-  date.format("%b %-d").to_string()
-}
-
-fn format_date_range(start: NaiveDate, end: NaiveDate) -> String {
-  if start == end {
-    return start.format("%b %-d, %Y").to_string();
-  }
-  if start.year() == end.year() && start.month() == end.month() {
-    return format!("{}–{}", start.format("%b %-d"), end.format("%-d, %Y"));
-  }
-  if start.year() == end.year() {
-    return format!("{}–{}", start.format("%b %-d"), end.format("%b %-d, %Y"));
-  }
-  format!("{}–{}", start.format("%b %-d, %Y"), end.format("%b %-d, %Y"))
 }
 
 #[cfg(test)]
@@ -378,24 +276,5 @@ mod tests {
       },
     );
     assert!(rendered.contains("\x1b[38;2;57;211;83m"));
-  }
-
-  #[test]
-  fn formats_ranges_across_months_and_years() {
-    assert_eq!(
-      format_date_range(date(2026, 1, 1), date(2026, 7, 1)),
-      "Jan 1–Jul 1, 2026"
-    );
-    assert_eq!(
-      format_date_range(date(2025, 7, 1), date(2026, 7, 1)),
-      "Jul 1, 2025–Jul 1, 2026"
-    );
-  }
-
-  #[test]
-  fn aligns_calendar_to_sunday_and_saturday() {
-    assert_eq!(previous_sunday(date(2026, 7, 1)), date(2026, 6, 28));
-    assert_eq!(next_saturday(date(2026, 7, 1)), date(2026, 7, 4));
-    assert_eq!(date(2026, 7, 1).weekday(), chrono::Weekday::Wed);
   }
 }

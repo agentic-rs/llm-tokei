@@ -24,6 +24,7 @@ use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
 use crate::cli::{Args, Cmd, ConfigCmd, Format, GraphChart, Unit};
 use crate::format::{
+  activity_svg::render_activity_svg,
   activity_terminal::{render_activity_terminal, ActivityTerminalOpts},
   json::render_json,
   svg::render_svg_terminal,
@@ -382,7 +383,7 @@ fn render_activity_graph(
         render_activity_terminal(&series, chart, &ActivityTerminalOpts { use_color, width })
       );
     }
-    Format::Svg => anyhow::bail!("graph: SVG output is not implemented yet"),
+    Format::Svg => print!("{}", render_activity_svg(&series, chart)),
     Format::Json => anyhow::bail!("graph: --format json is not supported; use table or svg"),
   }
   Ok(())
