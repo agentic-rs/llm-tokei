@@ -12,10 +12,13 @@ mod text_count;
 mod time;
 
 use anyhow::{Context, Result};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, UNIX_EPOCH};
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
@@ -94,7 +97,7 @@ fn main() -> Result<()> {
     let path = args.codex_dir.clone().or_else(CodexSource::default_path);
     if let Some(p) = path {
       let src = CodexSource::new(p);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(c, "codex", src.discover_files(), CodexSource::parse_file, progress)
       } else {
@@ -120,7 +123,7 @@ fn main() -> Result<()> {
       .unwrap_or_else(CopilotCliSource::default_paths);
     if !roots.is_empty() {
       let src = CopilotCliSource::new(roots);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(
           c,
@@ -157,14 +160,15 @@ fn main() -> Result<()> {
     let path = args.opencode_db.clone().or_else(OpenCodeSource::default_path);
     if let Some(p) = path {
       let src = OpenCodeSource::new(p);
-      let progress = ProcessingProgress::new(args.format);
+      let mut progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_opencode_with_cache(c, &src, progress)
       } else {
         if src.db_path.exists() {
           progress.show("opencode", &src.db_path);
         }
-        src.collect().map(|records| {
+        let collected = src.collect();
+        collected.map(|records| {
           let mut stats = CacheStats::new();
           stats.scanned = usize::from(src.db_path.exists());
           (records, stats)
@@ -187,7 +191,7 @@ fn main() -> Result<()> {
     let path = args.pi_agent_dir.clone().or_else(PiAgentSource::default_path);
     if let Some(p) = path {
       let src = PiAgentSource::new(p);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(c, "pi-agent", src.discover_files(), PiAgentSource::parse_file, progress)
       } else {
@@ -210,7 +214,7 @@ fn main() -> Result<()> {
     let path = args.claude_dir.clone().or_else(ClaudeSource::default_path);
     if let Some(p) = path {
       let src = ClaudeSource::new(p);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(c, "claude", src.discover_files(), ClaudeSource::parse_file, progress)
       } else {
@@ -233,7 +237,7 @@ fn main() -> Result<()> {
     let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);
     if !roots.is_empty() {
       let src = CopilotSource::new(roots);
-      let progress = ProcessingProgress::new(args.format);
+      let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_ref() {
         collect_one_record_source_with_cache(c, "copilot", src.discover_files(), CopilotSource::parse_file, progress)
       } else {
@@ -475,22 +479,123 @@ fn terminal_width() -> Option<usize> {
   terminal_size::terminal_size().map(|(terminal_size::Width(width), _)| width as usize)
 }
 
-#[derive(Clone, Copy)]
 struct ProcessingProgress {
+  bar: ProgressBar,
   enabled: bool,
+  gate: Option<DelayedProgressGate>,
 }
 
+const PROGRESS_DELAY: Duration = Duration::from_secs(1);
+const PROGRESS_TICK_INTERVAL: Duration = Duration::from_millis(100);
+
 impl ProcessingProgress {
-  fn new(format: Format) -> Self {
+  fn new(format: Format, verbose: bool) -> Self {
+    Self::with_terminal(format, std::io::stderr().is_terminal(), verbose)
+  }
+
+  fn with_terminal(format: Format, is_terminal: bool, verbose: bool) -> Self {
+    let enabled = format != Format::Json && is_terminal && !verbose;
+    let bar = ProgressBar::new_spinner();
+    bar.set_draw_target(ProgressDrawTarget::hidden());
+    bar.set_style(
+      ProgressStyle::with_template("{spinner} processing {msg}").expect("processing progress template is valid"),
+    );
     Self {
-      enabled: format != Format::Json,
+      bar,
+      enabled,
+      gate: None,
     }
   }
 
-  fn show(self, source: &str, file: &Path) {
+  fn show(&mut self, source: &str, file: &Path) {
     if self.enabled {
-      eprintln!("processing {source}: {}", file.display());
+      self.bar.set_message(format!("{source}: {}", file.display()));
+      if self.gate.is_none() {
+        let bar = self.bar.clone();
+        self.gate = Some(DelayedProgressGate::start(PROGRESS_DELAY, move || {
+          bar.set_draw_target(ProgressDrawTarget::stderr());
+          bar.enable_steady_tick(PROGRESS_TICK_INTERVAL);
+        }));
+      }
     }
+  }
+}
+
+impl Drop for ProcessingProgress {
+  fn drop(&mut self) {
+    if let Some(mut gate) = self.gate.take() {
+      gate.cancel();
+    }
+    self.bar.finish_and_clear();
+  }
+}
+
+struct DelayedProgressGate {
+  cancelled: Arc<(Mutex<bool>, Condvar)>,
+  handle: Option<JoinHandle<()>>,
+}
+
+impl DelayedProgressGate {
+  fn start(delay: Duration, reveal: impl FnOnce() + Send + 'static) -> Self {
+    let cancelled = Arc::new((Mutex::new(false), Condvar::new()));
+    let worker_cancelled = Arc::clone(&cancelled);
+    let handle = std::thread::spawn(move || {
+      let (lock, wake) = &*worker_cancelled;
+      let cancelled = lock.lock().expect("progress gate lock is not poisoned");
+      let (cancelled, timeout) = wake
+        .wait_timeout_while(cancelled, delay, |cancelled| !*cancelled)
+        .expect("progress gate lock is not poisoned");
+      if !*cancelled && timeout.timed_out() {
+        drop(cancelled);
+        reveal();
+      }
+    });
+    Self {
+      cancelled,
+      handle: Some(handle),
+    }
+  }
+
+  fn cancel(&mut self) {
+    let (lock, wake) = &*self.cancelled;
+    *lock.lock().expect("progress gate lock is not poisoned") = true;
+    wake.notify_all();
+    if let Some(handle) = self.handle.take() {
+      let _ = handle.join();
+    }
+  }
+}
+
+impl Drop for DelayedProgressGate {
+  fn drop(&mut self) {
+    self.cancel();
+  }
+}
+
+#[cfg(test)]
+mod processing_progress_tests {
+  use super::*;
+
+  #[test]
+  fn progress_is_only_enabled_for_interactive_non_json_output() {
+    assert!(ProcessingProgress::with_terminal(Format::Table, true, false).enabled);
+    assert!(ProcessingProgress::with_terminal(Format::Svg, true, false).enabled);
+    assert!(!ProcessingProgress::with_terminal(Format::Json, true, false).enabled);
+    assert!(!ProcessingProgress::with_terminal(Format::Table, false, false).enabled);
+    assert!(!ProcessingProgress::with_terminal(Format::Table, true, true).enabled);
+  }
+
+  #[test]
+  fn delayed_progress_gate_can_cancel_before_reveal() {
+    let revealed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let worker_revealed = Arc::clone(&revealed);
+    let mut gate = DelayedProgressGate::start(Duration::from_secs(1), move || {
+      worker_revealed.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+
+    gate.cancel();
+
+    assert!(!revealed.load(std::sync::atomic::Ordering::SeqCst));
   }
 }
 
@@ -499,7 +604,7 @@ fn collect_one_record_source_with_cache<F>(
   source: &str,
   files: Vec<PathBuf>,
   parse_file: F,
-  progress: ProcessingProgress,
+  mut progress: ProcessingProgress,
 ) -> Result<(Vec<UsageRecord>, CacheStats)>
 where
   F: Fn(&Path) -> Result<Option<Vec<UsageRecord>>>,
@@ -512,8 +617,6 @@ where
   let mut seen: HashSet<PathBuf> = HashSet::new();
 
   for file in files {
-    debug!(source, file = %file.display(), "processing file");
-    progress.show(source, &file);
     seen.insert(file.clone());
     let mtime = file_mtime_secs(&file).unwrap_or(0);
     let was_known = known.get(&file).copied();
@@ -521,7 +624,10 @@ where
     if was_known == Some(mtime) {
       let mut cached = cache.load_active_for_file(source, &file)?;
       if cached.is_empty() {
-        let parsed = parse_file(&file)?.unwrap_or_default();
+        debug!(source, file = %file.display(), "processing file");
+        progress.show(source, &file);
+        let parsed = parse_file(&file);
+        let parsed = parsed?.unwrap_or_default();
         debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
         if let Some(prev) = was_known {
           if prev == mtime {
@@ -538,7 +644,10 @@ where
       continue;
     }
 
-    let parsed = parse_file(&file)?.unwrap_or_default();
+    debug!(source, file = %file.display(), "processing file");
+    progress.show(source, &file);
+    let parsed = parse_file(&file);
+    let parsed = parsed?.unwrap_or_default();
     debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
     if was_known.is_some() {
       stats.updated += 1;
@@ -566,7 +675,7 @@ fn collect_one_record_source_direct<F>(
   source: &str,
   files: Vec<PathBuf>,
   parse_file: F,
-  progress: ProcessingProgress,
+  mut progress: ProcessingProgress,
 ) -> Result<(Vec<UsageRecord>, CacheStats)>
 where
   F: Fn(&Path) -> Result<Option<Vec<UsageRecord>>>,
@@ -578,7 +687,8 @@ where
   for file in files {
     debug!(source, file = %file.display(), "processing file");
     progress.show(source, &file);
-    let Ok(Some(records)) = parse_file(&file) else {
+    let parsed = parse_file(&file);
+    let Ok(Some(records)) = parsed else {
       continue;
     };
     debug!(source, file = %file.display(), summary = %file_summary(&records), "file summary");
@@ -605,7 +715,7 @@ fn period_since(args: &Args) -> Option<anyhow::Result<chrono::DateTime<chrono::U
 fn collect_opencode_with_cache(
   cache: &CacheDb,
   src: &OpenCodeSource,
-  progress: ProcessingProgress,
+  mut progress: ProcessingProgress,
 ) -> Result<(Vec<UsageRecord>, CacheStats)> {
   let mut stats = CacheStats::new();
   let mut out = Vec::new();
@@ -621,8 +731,6 @@ fn collect_opencode_with_cache(
   }
 
   stats.scanned = 1;
-  debug!(source = "opencode", file = %file.display(), "processing file");
-  progress.show("opencode", &file);
   let mtime = file_mtime_secs(&file).unwrap_or(0);
   let known = cache.file_mtimes_for("opencode")?;
   let was_known = known.get(&file).copied();
@@ -635,7 +743,10 @@ fn collect_opencode_with_cache(
     }
   }
 
-  out = src.collect()?;
+  debug!(source = "opencode", file = %file.display(), "processing file");
+  progress.show("opencode", &file);
+  let collected = src.collect();
+  out = collected?;
   debug!(source = "opencode", file = %file.display(), summary = %file_summary(&out), "file summary");
   if was_known.is_some() {
     stats.updated = 1;

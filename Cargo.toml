@@ -34,6 +34,7 @@ anyhow = "1"
 walkdir = "2"
 glob = "0.3"
 humantime = "2"
+indicatif = { version = "0.18", default-features = false, features = ["unicode-width"] }
 terminal_size = "0.4"
 thiserror = "2"
 tracing = "0.1"

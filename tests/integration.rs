@@ -48,7 +48,7 @@ fn bin() -> std::path::PathBuf {
 }
 
 #[test]
-fn table_output_shows_current_processing_entry() {
+fn redirected_table_output_does_not_persist_processing_entries() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
   let (mut cmd, cache_home) = isolated_cmd("processing-table");
   let out = cmd
@@ -64,11 +64,7 @@ fn table_output_shows_current_processing_entry() {
   let _ = std::fs::remove_dir_all(cache_home);
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
   let stderr = String::from_utf8_lossy(&out.stderr);
-  assert!(stderr.contains("processing codex:"), "stderr: {stderr}");
-  assert!(
-    stderr.contains("rollout-2025-01-02T10-00-00-test.jsonl"),
-    "stderr: {stderr}"
-  );
+  assert!(!stderr.contains("processing codex:"), "stderr: {stderr}");
 }
 
 #[test]
@@ -93,6 +89,47 @@ fn json_output_hides_current_processing_entry() {
   assert!(!stderr.contains("processing codex:"), "stderr: {stderr}");
   let stdout = String::from_utf8_lossy(&out.stdout);
   serde_json::from_str::<serde_json::Value>(&stdout).expect("valid json");
+}
+
+#[test]
+fn cached_files_are_skipped_without_processing_output() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot/workspaceStorage");
+  let cache_home = temp_cache_home("processing-cached");
+  let args = [
+    "--source",
+    "copilot",
+    "--copilot-dir",
+    fixtures.to_str().unwrap(),
+    "--no-color",
+  ];
+
+  let first = Command::new(bin())
+    .env("XDG_CACHE_HOME", &cache_home)
+    .args(args)
+    .output()
+    .expect("populate processing cache");
+  assert!(
+    first.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&first.stderr)
+  );
+
+  let second = Command::new(bin())
+    .env("XDG_CACHE_HOME", &cache_home)
+    .args(args)
+    .arg("--verbose")
+    .output()
+    .expect("read processing cache");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(
+    second.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&second.stderr)
+  );
+  let stderr = String::from_utf8_lossy(&second.stderr);
+  assert!(stderr.contains("2 cached, 0 added, 0 updated"), "stderr: {stderr}");
+  assert!(!stderr.contains("processing copilot:"), "stderr: {stderr}");
 }
 
 #[test]
