@@ -53,7 +53,12 @@ pub fn title(series: &ActivitySeries) -> String {
 pub fn summary(series: &ActivitySeries) -> String {
   let mut parts = vec![
     format!("Total {}", format_value(series.total, series.unit, series.estimated)),
-    format!("Active {}/{} days", series.active_days, series.len()),
+    format!(
+      "Active {}/{} {}",
+      series.active_days,
+      series.len(),
+      pluralize(series.len(), "day", "days")
+    ),
   ];
   if let Some(best) = series.best_day() {
     parts.push(format!(

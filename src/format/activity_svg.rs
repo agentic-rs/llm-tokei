@@ -75,16 +75,21 @@ fn render_plot(series: &ActivitySeries) -> String {
   };
   let bar_width = (slot * 0.72).max(1.0);
   for (index, day) in series.days.iter().enumerate() {
-    if day.value <= 0.0 || !day.value.is_finite() || max <= 0.0 {
-      continue;
+    let slot_x = chart_left + index as f64 * slot;
+    if day.value > 0.0 && day.value.is_finite() && max > 0.0 {
+      let bar_height = (day.value / max * chart_height).max(1.0);
+      let x = slot_x + (slot - bar_width) / 2.0;
+      let y = chart_bottom - bar_height;
+      writeln!(
+        out,
+        "  <rect class=\"activity-bar\" x=\"{x:.1}\" y=\"{y:.1}\" width=\"{bar_width:.1}\" height=\"{bar_height:.1}\" rx=\"2\" fill=\"{}\"/>",
+        level_color(day.level)
+      )
+      .unwrap();
     }
-    let bar_height = (day.value / max * chart_height).max(1.0);
-    let x = chart_left + index as f64 * slot + (slot - bar_width) / 2.0;
-    let y = chart_bottom - bar_height;
     writeln!(
       out,
-      "  <rect class=\"activity-bar\" x=\"{x:.1}\" y=\"{y:.1}\" width=\"{bar_width:.1}\" height=\"{bar_height:.1}\" rx=\"2\" fill=\"{}\"><title>{}</title></rect>",
-      level_color(day.level),
+      "  <rect class=\"activity-hit-target\" x=\"{slot_x:.1}\" y=\"{chart_top:.1}\" width=\"{slot:.1}\" height=\"{chart_height:.1}\" fill=\"#000000\" fill-opacity=\"0\"><title>{}</title></rect>",
       escape_xml(&day_tooltip(day, series))
     )
     .unwrap();
@@ -252,6 +257,7 @@ mod tests {
     assert!(svg.starts_with("<svg "));
     assert!(svg.contains("data-chart=\"plot\""));
     assert!(svg.contains("class=\"activity-bar\""));
+    assert_eq!(svg.matches("class=\"activity-hit-target\"").count(), 30);
     assert!(!svg.contains("terminal-content"));
     assert!(svg.ends_with("</svg>\n"));
   }

@@ -44,8 +44,9 @@ impl ActivitySeries {
         continue;
       }
       let index = (date - start).num_days() as usize;
-      values[index] += record_value(record, pricing, cost_mode, unit);
-      estimated[index] |= record_is_estimated(record, unit);
+      let value = record_value(record, pricing, cost_mode, unit);
+      values[index] += value;
+      estimated[index] |= value > 0.0 && record_is_estimated(record, unit);
     }
 
     Self::from_values_with_estimates(start, values, estimated, unit)
@@ -137,7 +138,7 @@ fn record_is_estimated(record: &UsageRecord, unit: Unit) -> bool {
   match unit {
     Unit::Tokens => record.input_estimated || record.output_estimated,
     Unit::Bytes => record.input_bytes_estimated || record.output_bytes_estimated,
-    Unit::Cost => false,
+    Unit::Cost => record.input_estimated || record.output_estimated,
   }
 }
 

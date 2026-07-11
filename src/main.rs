@@ -55,6 +55,9 @@ fn main() -> Result<()> {
     Some(cmd) => return run_subcommand(cmd, &args),
     None => None,
   };
+  if graph_opts.is_some() && args.format == Format::Json {
+    anyhow::bail!("graph: --format json is not supported; use table or svg");
+  }
 
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
   let cache = if args.no_cache {
@@ -268,7 +271,7 @@ fn main() -> Result<()> {
   let until = args
     .until
     .as_deref()
-    .map(time::parse_when)
+    .map(time::parse_until)
     .transpose()
     .context("parsing --until")?;
   let filters = Filters {
@@ -392,7 +395,7 @@ fn render_activity_graph(
       );
     }
     Format::Svg => print!("{}", render_activity_svg(&series, opts.chart)),
-    Format::Json => anyhow::bail!("graph: --format json is not supported; use table or svg"),
+    Format::Json => unreachable!("graph JSON output is rejected before collecting records"),
   }
   Ok(())
 }

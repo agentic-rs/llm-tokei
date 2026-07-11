@@ -41,6 +41,8 @@ llm-tokei --period 1m --sort cost --limit 20
 
 `--since` and `--until` provide explicit filters. They accept RFC3339 datetimes,
 `YYYY-MM-DD`, and relative expressions such as `24h`, `7d`, `2w`, and `1mo`.
+Date-only values use the local timezone, and a date-only `--until` includes that
+complete calendar day.
 
 ```sh
 llm-tokei --since 2026-05-01 --until 2026-05-12
@@ -86,9 +88,11 @@ Heatmap intensities are quantiles of the nonzero days in the requested range,
 so the four levels remain useful when usage has large spikes. Both layouts end
 with total activity, active-day count, best day, and longest streak.
 
-Terminal output is the default. `--width <N>` controls whether daily bars use
-one or two character cells; it never removes dates. `--no-color` keeps the
-graph readable with distinct Unicode intensity glyphs.
+Terminal output is the default (`--format table`, with `terminal` accepted as
+an alias). `--width <N>` controls whether daily bars use one or two character
+cells; it never removes dates. `--no-color` keeps the graph readable with
+distinct Unicode intensity glyphs. Graph output currently supports terminal
+and SVG; `--format json` is rejected before scanning session files.
 
 Use `--format svg` for a native standalone chart with accessible labels and
 per-day SVG tooltips:

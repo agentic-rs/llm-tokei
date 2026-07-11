@@ -310,6 +310,65 @@ fn graph_rejects_json_output() {
   assert!(!out.status.success());
   let stderr = String::from_utf8_lossy(&out.stderr);
   assert!(stderr.contains("--format json is not supported"), "stderr: {stderr}");
+  assert!(!stderr.contains("processing "), "stderr: {stderr}");
+}
+
+#[test]
+fn graph_date_only_bounds_include_the_complete_day() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("graph-date-bound");
+  let out = cmd
+    .env("TZ", "America/Los_Angeles")
+    .args([
+      "graph",
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2025-01-02",
+      "--until",
+      "2025-01-02",
+      "--no-color",
+    ])
+    .output()
+    .expect("run activity graph with local date bounds");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Token activity · Jan 2, 2025"), "graph: {graph}");
+  assert!(graph.contains("Total 720 · Active 1/1 day"), "graph: {graph}");
+}
+
+#[test]
+fn graph_marks_cost_from_estimated_tokens_as_estimated() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot/workspaceStorage");
+  let (mut cmd, cache_home) = isolated_cmd("graph-estimated-cost");
+  let out = cmd
+    .args([
+      "graph",
+      "--source",
+      "copilot",
+      "--copilot-dir",
+      fixtures.to_str().unwrap(),
+      "--no-cache",
+      "--since",
+      "2026-04-17",
+      "--until",
+      "2026-04-18",
+      "--unit",
+      "cost",
+      "--no-color",
+    ])
+    .output()
+    .expect("run estimated cost activity graph");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let graph = String::from_utf8_lossy(&out.stdout);
+  assert!(graph.contains("Total ~$"), "graph: {graph}");
 }
 
 #[test]
