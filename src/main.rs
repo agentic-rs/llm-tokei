@@ -1,3 +1,4 @@
+mod activity;
 mod aggregate;
 mod cache;
 mod cli;
