@@ -186,6 +186,7 @@ fn epoch_utc() -> DateTime<Utc> {
 #[derive(Default)]
 struct SessionMeta {
   session_id: Option<String>,
+  forked_from_id: Option<String>,
   cwd: Option<String>,
   model: Option<String>,
   provider: Option<String>,
@@ -198,6 +199,9 @@ impl SessionMeta {
       let str_field = |key: &str| meta.get(key).and_then(|v| v.as_str()).map(str::to_string);
       if self.session_id.is_none() {
         self.session_id = str_field("id");
+      }
+      if self.forked_from_id.is_none() {
+        self.forked_from_id = str_field("forked_from_id");
       }
       if self.cwd.is_none() {
         self.cwd = str_field("cwd");
@@ -240,6 +244,7 @@ struct RecordBuilder<'a> {
   prev_total: Option<TokenUsageStats>,
   pending_bytes: BytesSink,
   pending_rounds: u64,
+  inherited_turn: bool,
   calls: Vec<Turn>,
 }
 
@@ -262,6 +267,7 @@ impl<'a> RecordBuilder<'a> {
       prev_total: None,
       pending_bytes: BytesSink::default(),
       pending_rounds: 0,
+      inherited_turn: false,
       calls: Vec::new(),
     }
   }
@@ -327,6 +333,11 @@ impl RolloutVisitor for RecordBuilder<'_> {
     let Some(tokens) = extract_turn_usage(payload, &mut self.prev_total) else {
       return;
     };
+    if self.inherited_turn {
+      self.pending_bytes.take();
+      self.pending_rounds = 0;
+      return;
+    }
     let ts = self.last_ts.or(self.session_ts).unwrap_or(ts);
     self.calls.push(Turn {
       ts,
@@ -339,6 +350,7 @@ impl RolloutVisitor for RecordBuilder<'_> {
   }
 
   fn turn_context(&mut self, payload: &Value) {
+    self.inherited_turn = is_inherited_fork_turn(&self.meta, payload);
     self.pending_rounds += 1;
     if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
       self.meta.model = Some(m.to_string());
@@ -377,6 +389,28 @@ impl RolloutVisitor for RecordBuilder<'_> {
   fn reasoning(&mut self, payload: &Value) {
     visit_reasoning(payload, &mut self.pending_bytes);
   }
+}
+
+/// Forked Codex rollouts begin with a replay of the parent thread. UUIDv7 turn
+/// IDs preserve creation order, so turns older than the fork's own session ID
+/// belong to that inherited replay and must not be counted again.
+fn is_inherited_fork_turn(meta: &SessionMeta, payload: &Value) -> bool {
+  let Some(session_id) = meta.session_id.as_deref().filter(|_| meta.forked_from_id.is_some()) else {
+    return false;
+  };
+  let Some(turn_id) = payload.get("turn_id").and_then(Value::as_str) else {
+    return false;
+  };
+  is_uuid_v7(session_id) && is_uuid_v7(turn_id) && turn_id < session_id
+}
+
+fn is_uuid_v7(value: &str) -> bool {
+  value.len() == 36
+    && value.as_bytes().get(14) == Some(&b'7')
+    && value.bytes().enumerate().all(|(idx, byte)| match idx {
+      8 | 13 | 18 | 23 => byte == b'-',
+      _ => byte.is_ascii_hexdigit(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -680,5 +714,74 @@ mod tests {
     let mut stats = SpanStatsSink::default();
     visit_message(&payload, &mut stats);
     assert_eq!(stats.stats.bytes, "hello world".len() as u64);
+  }
+
+  #[test]
+  fn forked_rollout_ignores_parent_replay_but_keeps_new_turns() {
+    let path = Path::new("forked.jsonl");
+    let mut builder = RecordBuilder::new(path);
+    builder.session_meta(&serde_json::json!({
+      "payload": {
+        "id": "019f57cd-7555-7292-a6cc-540fc0df1778",
+        "forked_from_id": "019f4a9e-3a88-7a00-9989-2d12dda99487"
+      }
+    }));
+
+    builder.turn_context(&serde_json::json!({
+      "turn_id": "019f4a9e-7b5c-71c1-b7a5-7b8c6805bc6e",
+      "model": "gpt-5.6-sol"
+    }));
+    builder.message(&serde_json::json!({
+      "type": "message",
+      "role": "user",
+      "content": [{ "type": "input_text", "text": "inherited" }]
+    }));
+    builder.turn_end(
+      epoch_utc(),
+      &serde_json::json!({
+        "info": {
+          "last_token_usage": {
+            "input_tokens": 100,
+            "cached_input_tokens": 80,
+            "output_tokens": 10,
+            "reasoning_output_tokens": 2,
+            "total_tokens": 110
+          }
+        }
+      }),
+    );
+
+    builder.turn_context(&serde_json::json!({
+      "turn_id": "019f57cd-7c10-7aa1-b465-056defebbe28",
+      "model": "gpt-5.6-sol"
+    }));
+    builder.message(&serde_json::json!({
+      "type": "message",
+      "role": "user",
+      "content": [{ "type": "input_text", "text": "new" }]
+    }));
+    builder.turn_end(
+      epoch_utc(),
+      &serde_json::json!({
+        "info": {
+          "last_token_usage": {
+            "input_tokens": 40,
+            "cached_input_tokens": 30,
+            "output_tokens": 5,
+            "reasoning_output_tokens": 1,
+            "total_tokens": 45
+          }
+        }
+      }),
+    );
+
+    let records = builder.into_records().expect("new fork turn should produce a record");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].prompt, 10);
+    assert_eq!(records[0].cache_read, 30);
+    assert_eq!(records[0].completion, 4);
+    assert_eq!(records[0].reasoning, 1);
+    assert_eq!(records[0].input_bytes, 3);
+    assert_eq!(records[0].rounds, 1);
   }
 }
