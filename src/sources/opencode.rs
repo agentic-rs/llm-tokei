@@ -170,6 +170,8 @@ impl UsageSource for OpenCodeSource {
       records.push(UsageRecord {
         source: Source::OpenCode,
         session_id,
+        session_kind: crate::model::SessionKind::Root,
+        parent_session_id: None,
         session_title: meta.title.clone(),
         project_cwd: cwd,
         project_name: meta.project_name.clone(),

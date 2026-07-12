@@ -1,17 +1,19 @@
-use crate::model::{Source, UsageRecord};
+use crate::model::{SessionKind, Source, UsageRecord};
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-const CACHE_SCHEMA_VERSION: i64 = 6;
+const CACHE_SCHEMA_VERSION: i64 = 8;
 
 const SCHEMA: &str = "\
 CREATE TABLE IF NOT EXISTS sessions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     source        TEXT NOT NULL,
     session_id    TEXT NOT NULL,
+    session_kind  TEXT NOT NULL,
+    parent_session_id TEXT,
     session_title TEXT,
     project_cwd   TEXT,
     project_name  TEXT,
@@ -55,6 +57,8 @@ const EXPECTED_SESSIONS_COLUMNS: &[&str] = &[
   "id",
   "source",
   "session_id",
+  "session_kind",
+  "parent_session_id",
   "session_title",
   "project_cwd",
   "project_name",
@@ -178,7 +182,7 @@ impl CacheDb {
   pub fn load_active_for_file(&self, source: &str, file_path: &Path) -> Result<Vec<UsageRecord>> {
     let fp_str = file_path.to_string_lossy();
     let mut stmt = self.conn.prepare(
-      "SELECT s.source, s.session_id, s.session_title, s.project_cwd, s.project_name, \
+      "SELECT s.source, s.session_id, s.session_kind, s.parent_session_id, s.session_title, s.project_cwd, s.project_name, \
                r.provider, r.model, r.ts, r.prompt, r.completion, r.input_bytes, r.output_bytes, \
                r.input_estimated, r.output_estimated, r.input_bytes_estimated, r.output_bytes_estimated, \
                r.reasoning, r.cache_read, r.cache_write, r.total, r.mode, r.agent, r.is_compaction, r.rounds, \
@@ -189,7 +193,7 @@ impl CacheDb {
     )?;
     let rows = stmt.query_map(params![source, fp_str.as_ref()], |row| {
       let source_str: String = row.get(0)?;
-      let ts_str: String = row.get(7)?;
+      let ts_str: String = row.get(9)?;
       Ok(row_to_record(row, &source_str, &ts_str))
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -221,12 +225,14 @@ impl CacheDb {
       let first = session_records.first().expect("session group is non-empty");
       let (first_ts, last_ts) = ts_range(&session_records);
       self.conn.execute(
-        "INSERT INTO sessions (source, session_id, session_title, project_cwd, project_name, \
+        "INSERT INTO sessions (source, session_id, session_kind, parent_session_id, session_title, project_cwd, project_name, \
                               file_path, first_ts, last_ts, file_mtime, pruned) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0)",
         params![
           source,
           first.session_id,
+          first.session_kind.as_str(),
+          first.parent_session_id,
           first.session_title,
           first.project_cwd,
           first.project_name,
@@ -366,30 +372,35 @@ fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> Usa
   UsageRecord {
     source,
     session_id: row.get(1).unwrap_or_default(),
-    session_title: row.get(2).unwrap_or(None),
-    project_cwd: row.get(3).unwrap_or(None),
-    project_name: row.get(4).unwrap_or(None),
-    provider: row.get(5).unwrap_or(None),
-    model: row.get(6).unwrap_or(None),
+    session_kind: match row.get::<_, String>(2).as_deref() {
+      Ok("sub_agent") => SessionKind::SubAgent,
+      _ => SessionKind::Root,
+    },
+    parent_session_id: row.get(3).unwrap_or(None),
+    session_title: row.get(4).unwrap_or(None),
+    project_cwd: row.get(5).unwrap_or(None),
+    project_name: row.get(6).unwrap_or(None),
+    provider: row.get(7).unwrap_or(None),
+    model: row.get(8).unwrap_or(None),
     ts,
-    prompt: row.get::<_, i64>(8).ok().map(from_sql_i64).unwrap_or(0),
-    completion: row.get::<_, i64>(9).ok().map(from_sql_i64).unwrap_or(0),
-    input_bytes: row.get::<_, i64>(10).ok().map(from_sql_i64).unwrap_or(0),
-    output_bytes: row.get::<_, i64>(11).ok().map(from_sql_i64).unwrap_or(0),
-    input_estimated: row.get::<_, i64>(12).unwrap_or(0) != 0,
-    output_estimated: row.get::<_, i64>(13).unwrap_or(0) != 0,
-    input_bytes_estimated: row.get::<_, i64>(14).unwrap_or(0) != 0,
-    output_bytes_estimated: row.get::<_, i64>(15).unwrap_or(0) != 0,
-    reasoning: row.get::<_, i64>(16).ok().map(from_sql_i64).unwrap_or(0),
-    cache_read: row.get::<_, i64>(17).ok().map(from_sql_i64).unwrap_or(0),
-    cache_write: row.get::<_, i64>(18).ok().map(from_sql_i64).unwrap_or(0),
-    total_direct: row.get::<_, Option<i64>>(19).unwrap_or(None).map(from_sql_i64),
-    mode: row.get(20).unwrap_or(None),
-    agent: row.get(21).unwrap_or(None),
-    is_compaction: row.get::<_, i64>(22).unwrap_or(0) != 0,
-    rounds: row.get::<_, i64>(23).ok().map(from_sql_i64).unwrap_or(0),
-    calls: row.get::<_, i64>(24).ok().map(from_sql_i64).unwrap_or(0),
-    cost_embedded: row.get(25).unwrap_or(None),
+    prompt: row.get::<_, i64>(10).ok().map(from_sql_i64).unwrap_or(0),
+    completion: row.get::<_, i64>(11).ok().map(from_sql_i64).unwrap_or(0),
+    input_bytes: row.get::<_, i64>(12).ok().map(from_sql_i64).unwrap_or(0),
+    output_bytes: row.get::<_, i64>(13).ok().map(from_sql_i64).unwrap_or(0),
+    input_estimated: row.get::<_, i64>(14).unwrap_or(0) != 0,
+    output_estimated: row.get::<_, i64>(15).unwrap_or(0) != 0,
+    input_bytes_estimated: row.get::<_, i64>(16).unwrap_or(0) != 0,
+    output_bytes_estimated: row.get::<_, i64>(17).unwrap_or(0) != 0,
+    reasoning: row.get::<_, i64>(18).ok().map(from_sql_i64).unwrap_or(0),
+    cache_read: row.get::<_, i64>(19).ok().map(from_sql_i64).unwrap_or(0),
+    cache_write: row.get::<_, i64>(20).ok().map(from_sql_i64).unwrap_or(0),
+    total_direct: row.get::<_, Option<i64>>(21).unwrap_or(None).map(from_sql_i64),
+    mode: row.get(22).unwrap_or(None),
+    agent: row.get(23).unwrap_or(None),
+    is_compaction: row.get::<_, i64>(24).unwrap_or(0) != 0,
+    rounds: row.get::<_, i64>(25).ok().map(from_sql_i64).unwrap_or(0),
+    calls: row.get::<_, i64>(26).ok().map(from_sql_i64).unwrap_or(0),
+    cost_embedded: row.get(27).unwrap_or(None),
   }
 }
 

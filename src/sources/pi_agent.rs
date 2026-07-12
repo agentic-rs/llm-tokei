@@ -272,6 +272,8 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     .map(|turn| UsageRecord {
       source: Source::PiAgent,
       session_id: session_id.clone(),
+      session_kind: crate::model::SessionKind::Root,
+      parent_session_id: None,
       session_title: None,
       project_cwd: cwd.clone(),
       project_name: None,
@@ -302,6 +304,8 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   records.extend(plugin_turns.into_iter().map(|turn| UsageRecord {
     source: Source::PiAgent,
     session_id: session_id.clone(),
+    session_kind: crate::model::SessionKind::Root,
+    parent_session_id: None,
     session_title: None,
     project_cwd: cwd.clone(),
     project_name: None,

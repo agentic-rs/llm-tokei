@@ -17,6 +17,8 @@ struct JsonRow<'a> {
   calls: u64,
   rounds: u64,
   sessions: u64,
+  root_sessions: u64,
+  sub_agent_sessions: u64,
   cost_embedded: f64,
   cost: f64,
   #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -57,6 +59,8 @@ pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim], unit: Unit) -> String 
         calls: a.calls,
         rounds: a.rounds,
         sessions: a.sessions,
+        root_sessions: a.root_sessions,
+        sub_agent_sessions: a.sub_agent_sessions,
         cost_embedded: a.cost_embedded,
         cost: a.cost,
         cost_per: &a.cost_per,
