@@ -148,11 +148,27 @@ jobs:
           fi
       - name: Verify published packages
         run: |
+          verify_published() {
+            package_name="$1"
+            package_version="$2"
+            for attempt in {1..6}; do
+              if published_version=$(npm view "$package_name@$package_version" version --prefer-online 2>/dev/null) \
+                && [[ "$published_version" == "$package_version" ]]; then
+                echo "verified $package_name@$package_version"
+                return 0
+              fi
+              if [[ "$attempt" -eq 6 ]]; then
+                echo "failed to verify $package_name@$package_version after $attempt attempts" >&2
+                return 1
+              fi
+              echo "$package_name@$package_version is not visible yet; retrying in 10 seconds ($attempt/6)"
+              sleep 10
+            done
+          }
           for package_dir in dist/npm/*; do
             package_name=$(node -p "require('./' + process.argv[1] + '/package.json').name" "$package_dir")
             package_version=$(node -p "require('./' + process.argv[1] + '/package.json').version" "$package_dir")
-            published_version=$(npm view "$package_name@$package_version" version --prefer-online)
-            test "$published_version" = "$package_version"
+            verify_published "$package_name" "$package_version"
           done
 
   publish-crate:
