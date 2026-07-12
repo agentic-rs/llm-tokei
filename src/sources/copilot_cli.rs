@@ -362,6 +362,8 @@ impl EventsVisitor for RecordBuilder<'_> {
     self.records.push(UsageRecord {
       source: Source::CopilotCli,
       session_id: sid,
+      session_kind: crate::model::SessionKind::Root,
+      parent_session_id: None,
       session_title: None,
       project_cwd: None,
       project_name: None,
@@ -406,6 +408,8 @@ impl EventsVisitor for RecordBuilder<'_> {
     self.records.push(UsageRecord {
       source: Source::CopilotCli,
       session_id: sid,
+      session_kind: crate::model::SessionKind::Root,
+      parent_session_id: None,
       session_title: None,
       project_cwd: None,
       project_name: None,

@@ -576,6 +576,8 @@ impl SessionVisitor for RecordBuilder<'_> {
     self.records.push(UsageRecord {
       source: Source::Copilot,
       session_id: self.session_id.clone(),
+      session_kind: crate::model::SessionKind::Root,
+      parent_session_id: None,
       session_title: self.title.clone(),
       project_cwd: self.project_cwd.clone(),
       project_name: self.project_name.clone(),

@@ -912,6 +912,57 @@ fn codex_bytes_mode_rebuilds_stale_zero_byte_cache() {
 }
 
 #[test]
+fn codex_cache_distinguishes_sub_agent_sessions_and_unique_rounds() {
+  let sessions_dir = temp_cache_home("codex-sub-agent-sessions");
+  std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+  let rollout = sessions_dir.join("forked.jsonl");
+  std::fs::write(
+    &rollout,
+    concat!(
+      "{\"timestamp\":\"2026-07-12T19:28:32Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"019f57cd-7555-7292-a6cc-540fc0df1778\",\"forked_from_id\":\"019f4a9e-3a88-7a00-9989-2d12dda99487\",\"model_provider\":\"openai\"}}\n",
+      "{\"timestamp\":\"2026-07-12T19:28:33Z\",\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"019f4a9e-7b5c-71c1-b7a5-7b8c6805bc6e\",\"model\":\"gpt-5.6-sol\"}}\n",
+      "{\"timestamp\":\"2026-07-12T19:28:34Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":100,\"output_tokens\":10}}}}\n",
+      "{\"timestamp\":\"2026-07-12T19:29:00Z\",\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"019f57cd-7c10-7aa1-b465-056defebbe28\",\"model\":\"gpt-5.6-sol\"}}\n",
+      "{\"timestamp\":\"2026-07-12T19:29:01Z\",\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"019f57cd-7c10-7aa1-b465-056defebbe28\",\"model\":\"gpt-5.6-sol\"}}\n",
+      "{\"timestamp\":\"2026-07-12T19:29:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":40,\"output_tokens\":5}}}}\n"
+    ),
+  )
+  .expect("write rollout");
+
+  let (mut cmd, cache_home) = isolated_cmd("codex-sub-agent-cache");
+  let out = cmd
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      sessions_dir.to_str().unwrap(),
+      "--format",
+      "json",
+    ])
+    .output()
+    .expect("run llm-tokei");
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+
+  let conn = rusqlite::Connection::open(cache_home.join("llm-tokei.db")).expect("open cache");
+  let session = conn
+    .query_row(
+      "SELECT session_kind, parent_session_id FROM sessions WHERE pruned = 0",
+      [],
+      |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+    )
+    .expect("read cached session metadata");
+  assert_eq!(session.0, "sub_agent");
+  assert_eq!(session.1.as_deref(), Some("019f4a9e-3a88-7a00-9989-2d12dda99487"));
+  let rounds: i64 = conn
+    .query_row("SELECT SUM(rounds) FROM records", [], |row| row.get(0))
+    .expect("read cached rounds");
+  assert_eq!(rounds, 1);
+
+  let _ = std::fs::remove_dir_all(sessions_dir);
+  let _ = std::fs::remove_dir_all(cache_home);
+}
+
+#[test]
 fn claude_fixture_parses_usage() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/projects");
   let out = Command::new(bin())

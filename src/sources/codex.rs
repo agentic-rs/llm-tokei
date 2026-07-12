@@ -1,4 +1,4 @@
-use crate::model::{Source, UsageRecord};
+use crate::model::{SessionKind, Source, UsageRecord};
 use crate::sources::dump::{DumpSink, DumpedSession};
 use crate::sources::{read_jsonl, summarize_records, UsageSource};
 use crate::text_count::{
@@ -9,6 +9,7 @@ use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 use walkdir::WalkDir;
@@ -245,6 +246,7 @@ struct RecordBuilder<'a> {
   pending_bytes: BytesSink,
   pending_rounds: u64,
   inherited_turn: bool,
+  seen_round_ids: HashSet<String>,
   calls: Vec<Turn>,
 }
 
@@ -268,6 +270,7 @@ impl<'a> RecordBuilder<'a> {
       pending_bytes: BytesSink::default(),
       pending_rounds: 0,
       inherited_turn: false,
+      seen_round_ids: HashSet::new(),
       calls: Vec::new(),
     }
   }
@@ -289,6 +292,12 @@ impl<'a> RecordBuilder<'a> {
         .map(|t| UsageRecord {
           source: Source::Codex,
           session_id: sid.clone(),
+          session_kind: if self.meta.forked_from_id.is_some() {
+            SessionKind::SubAgent
+          } else {
+            SessionKind::Root
+          },
+          parent_session_id: self.meta.forked_from_id.clone(),
           session_title: None,
           project_cwd: self.meta.cwd.clone(),
           project_name: None,
@@ -352,14 +361,25 @@ impl RolloutVisitor for RecordBuilder<'_> {
 
   fn turn_context(&mut self, payload: &Value) {
     if let Some(inherited) = is_inherited_fork_turn(&self.meta, payload) {
+      if self.inherited_turn && !inherited {
+        self.pending_bytes.take();
+        self.pending_rounds = 0;
+      }
       self.inherited_turn = inherited;
     }
-    self.pending_rounds += 1;
     if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
       self.meta.model = Some(m.to_string());
     }
     if let Some(p) = payload.get("model_provider").and_then(|v| v.as_str()) {
       self.meta.provider = Some(p.to_string());
+    }
+    if self.inherited_turn {
+      return;
+    }
+    match payload.get("turn_id").and_then(Value::as_str) {
+      Some(turn_id) if self.seen_round_ids.insert(turn_id.to_string()) => self.pending_rounds += 1,
+      Some(_) => {}
+      None => self.pending_rounds += 1,
     }
   }
 
@@ -778,6 +798,10 @@ mod tests {
       "turn_id": "019f57cd-7c10-7aa1-b465-056defebbe28",
       "model": "gpt-5.6-sol"
     }));
+    builder.turn_context(&serde_json::json!({
+      "turn_id": "019f57cd-7c10-7aa1-b465-056defebbe28",
+      "model": "gpt-5.6-sol"
+    }));
     builder.message(&serde_json::json!({
       "type": "message",
       "role": "user",
@@ -800,6 +824,11 @@ mod tests {
 
     let records = builder.into_records().expect("new fork turn should produce a record");
     assert_eq!(records.len(), 1);
+    assert_eq!(records[0].session_kind, SessionKind::SubAgent);
+    assert_eq!(
+      records[0].parent_session_id.as_deref(),
+      Some("019f4a9e-3a88-7a00-9989-2d12dda99487")
+    );
     assert_eq!(records[0].prompt, 10);
     assert_eq!(records[0].cache_read, 30);
     assert_eq!(records[0].completion, 4);

@@ -49,6 +49,8 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
       UsageRecord {
         source: args.source,
         session_id: session_id.clone(),
+        session_kind: crate::model::SessionKind::Root,
+        parent_session_id: None,
         session_title: None,
         project_cwd: args.project_cwd.clone(),
         project_name: args.project_name.clone(),

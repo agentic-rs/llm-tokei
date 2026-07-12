@@ -242,6 +242,8 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     records.push(UsageRecord {
       source: Source::Claude,
       session_id: sid.clone(),
+      session_kind: crate::model::SessionKind::Root,
+      parent_session_id: None,
       session_title: None,
       project_cwd: cwd.clone(),
       project_name: None,

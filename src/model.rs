@@ -30,10 +30,28 @@ impl std::fmt::Display for Source {
   }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub enum SessionKind {
+  #[default]
+  Root,
+  SubAgent,
+}
+
+impl SessionKind {
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Root => "root",
+      Self::SubAgent => "sub_agent",
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct UsageRecord {
   pub source: Source,
   pub session_id: String,
+  pub session_kind: SessionKind,
+  pub parent_session_id: Option<String>,
   pub session_title: Option<String>,
   pub project_cwd: Option<String>,
   pub project_name: Option<String>,
