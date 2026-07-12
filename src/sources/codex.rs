@@ -327,6 +327,7 @@ impl RolloutVisitor for RecordBuilder<'_> {
 
   fn session_meta(&mut self, line: &Value) {
     self.meta.apply(line);
+    self.inherited_turn = self.meta.forked_from_id.is_some();
   }
 
   fn turn_end(&mut self, ts: DateTime<Utc>, payload: &Value) {
@@ -350,7 +351,9 @@ impl RolloutVisitor for RecordBuilder<'_> {
   }
 
   fn turn_context(&mut self, payload: &Value) {
-    self.inherited_turn = is_inherited_fork_turn(&self.meta, payload);
+    if let Some(inherited) = is_inherited_fork_turn(&self.meta, payload) {
+      self.inherited_turn = inherited;
+    }
     self.pending_rounds += 1;
     if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
       self.meta.model = Some(m.to_string());
@@ -394,14 +397,14 @@ impl RolloutVisitor for RecordBuilder<'_> {
 /// Forked Codex rollouts begin with a replay of the parent thread. UUIDv7 turn
 /// IDs preserve creation order, so turns older than the fork's own session ID
 /// belong to that inherited replay and must not be counted again.
-fn is_inherited_fork_turn(meta: &SessionMeta, payload: &Value) -> bool {
+fn is_inherited_fork_turn(meta: &SessionMeta, payload: &Value) -> Option<bool> {
   let Some(session_id) = meta.session_id.as_deref().filter(|_| meta.forked_from_id.is_some()) else {
-    return false;
+    return None;
   };
   let Some(turn_id) = payload.get("turn_id").and_then(Value::as_str) else {
-    return false;
+    return None;
   };
-  is_uuid_v7(session_id) && is_uuid_v7(turn_id) && turn_id < session_id
+  (is_uuid_v7(session_id) && is_uuid_v7(turn_id)).then(|| turn_id < session_id)
 }
 
 fn is_uuid_v7(value: &str) -> bool {
@@ -726,6 +729,26 @@ mod tests {
         "forked_from_id": "019f4a9e-3a88-7a00-9989-2d12dda99487"
       }
     }));
+
+    // Older replay formats can omit turn IDs. Stay in inherited mode until a
+    // UUIDv7 turn boundary proves that the fork's own activity has begun.
+    builder.turn_context(&serde_json::json!({ "model": "gpt-5.6-sol" }));
+
+    // Replayed token events may precede the first inherited turn context.
+    builder.turn_end(
+      epoch_utc(),
+      &serde_json::json!({
+        "info": {
+          "last_token_usage": {
+            "input_tokens": 50,
+            "cached_input_tokens": 40,
+            "output_tokens": 5,
+            "reasoning_output_tokens": 1,
+            "total_tokens": 55
+          }
+        }
+      }),
+    );
 
     builder.turn_context(&serde_json::json!({
       "turn_id": "019f4a9e-7b5c-71c1-b7a5-7b8c6805bc6e",
