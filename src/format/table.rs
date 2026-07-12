@@ -179,7 +179,7 @@ fn render_fitted_table(table: &FittedTable, use_color: bool) -> String {
 
 // Statistic column definitions and value extraction.
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum StatColumnId {
   Input,
   Output,
@@ -254,14 +254,19 @@ impl StatColumnSpec {
       StatColumnId::Total => fmt_usage_value_avg(shown_total(a, opts), false, den, opts),
       StatColumnId::Calls => fmt_int(a.calls),
       StatColumnId::Rounds => fmt_int(a.rounds),
-      StatColumnId::Sessions => fmt_int(a.sessions),
+      StatColumnId::Sessions => fmt_session_count(a.root_sessions, a.sub_agent_sessions).0,
       StatColumnId::CostBase => fmt_cost_avg(a.cost, den),
     };
     let muted = opts.human
       && self
         .human_unit(a, opts, den)
         .is_some_and(|unit| unit < max_units[self.id.idx()]);
-    Col::num(&text).with_muted(muted)
+    let col = Col::num(&text).with_muted(muted);
+    if self.id == StatColumnId::Sessions {
+      col.with_muted_suffix(fmt_session_count(a.root_sessions, a.sub_agent_sessions).1)
+    } else {
+      col
+    }
   }
 
   fn total_col(&self, totals: &TableTotals, aggs: &[Aggregate], opts: &TableOpts, max_units: &[usize]) -> Col {
@@ -277,14 +282,19 @@ impl StatColumnSpec {
       StatColumnId::Total => fmt_usage_value_avg(totals.shown_total(opts), false, den, opts),
       StatColumnId::Calls => fmt_int(totals.calls),
       StatColumnId::Rounds => fmt_int(totals.rounds),
-      StatColumnId::Sessions => fmt_int(totals.sessions),
+      StatColumnId::Sessions => fmt_session_count(totals.root_sessions, totals.sub_agent_sessions).0,
       StatColumnId::CostBase => fmt_cost_avg(totals.cost, den),
     };
     let muted = opts.human
       && self
         .total_human_unit(totals, opts, den)
         .is_some_and(|unit| unit < max_units[self.id.idx()]);
-    Col::num(&text).with_muted(muted)
+    let col = Col::num(&text).with_muted(muted);
+    if self.id == StatColumnId::Sessions {
+      col.with_muted_suffix(fmt_session_count(totals.root_sessions, totals.sub_agent_sessions).1)
+    } else {
+      col
+    }
   }
 
   fn human_unit(&self, a: &Aggregate, opts: &TableOpts, den: u64) -> Option<usize> {
@@ -385,6 +395,8 @@ struct TableTotals {
   calls: u64,
   rounds: u64,
   sessions: u64,
+  root_sessions: u64,
+  sub_agent_sessions: u64,
   cost: f64,
 }
 
@@ -406,6 +418,8 @@ impl TableTotals {
     self.calls += a.calls;
     self.rounds += a.rounds;
     self.sessions += a.sessions;
+    self.root_sessions += a.root_sessions;
+    self.sub_agent_sessions += a.sub_agent_sessions;
     self.cost += a.cost;
   }
 
@@ -730,6 +744,7 @@ struct Col {
   text: String,
   right: bool,
   muted: bool,
+  muted_suffix: Option<String>,
 }
 
 impl Col {
@@ -738,6 +753,7 @@ impl Col {
       text: s.to_string(),
       right: false,
       muted: false,
+      muted_suffix: None,
     }
   }
   fn num(s: &str) -> Self {
@@ -745,10 +761,15 @@ impl Col {
       text: s.to_string(),
       right: true,
       muted: false,
+      muted_suffix: None,
     }
   }
   fn with_muted(mut self, muted: bool) -> Self {
     self.muted = muted;
+    self
+  }
+  fn with_muted_suffix(mut self, suffix: Option<String>) -> Self {
+    self.muted_suffix = suffix;
     self
   }
 }
@@ -782,6 +803,13 @@ fn format_row(cols: &[Col], widths: &[usize], use_color: bool) -> String {
     let idx = parts.len() - 1;
     if use_color && c.muted {
       parts[idx] = colorize(&parts[idx], Style::Muted);
+    } else if use_color {
+      if let Some(suffix) = c.muted_suffix.as_deref() {
+        if let Some(start) = parts[idx].rfind(suffix) {
+          let end = start + suffix.len();
+          parts[idx].replace_range(start..end, &colorize(suffix, Style::Muted));
+        }
+      }
     }
   }
   parts.join("  ")
@@ -820,6 +848,15 @@ fn fmt_int(n: u64) -> String {
     out.push(*b as char);
   }
   out
+}
+
+fn fmt_session_count(root: u64, sub_agent: u64) -> (String, Option<String>) {
+  if sub_agent == 0 {
+    (fmt_int(root), None)
+  } else {
+    let suffix = format!("+{}", fmt_int(sub_agent));
+    (format!("{}{suffix}", fmt_int(root)), Some(suffix))
+  }
 }
 
 fn fmt_cost(v: f64) -> String {
@@ -947,6 +984,8 @@ mod tests {
       calls: 1_234,
       rounds: 2_345,
       sessions: 3_456,
+      root_sessions: 3_400,
+      sub_agent_sessions: 56,
       cost_embedded: 0.0,
       cost: 12.3456,
       cost_per: BTreeMap::new(),
@@ -972,6 +1011,20 @@ mod tests {
   }
 
   #[test]
+  fn session_count_omits_empty_sub_agent_suffix() {
+    assert_eq!(fmt_session_count(4, 0), ("4".into(), None));
+    assert_eq!(fmt_session_count(4, 11), ("4+11".into(), Some("+11".into())));
+  }
+
+  #[test]
+  fn session_count_mutes_only_sub_agent_suffix_in_color_output() {
+    let mut options = opts(true, None, Unit::Tokens, false, None);
+    options.use_color = true;
+    let table = render_table(&[aggregate(&["codex"])], &[GroupDim::Source], &options);
+    assert!(table.contains("3,400\x1b[90m+56\x1b[0m"), "table output: {table:?}");
+  }
+
+  #[test]
   fn table_uses_plain_numbers_by_default() {
     let table = render_table(
       &[aggregate(&["codex"])],
@@ -985,7 +1038,7 @@ mod tests {
     assert!(table.contains("3,501,233"), "table output: {table}");
     assert!(table.contains("1,234"), "table output: {table}");
     assert!(table.contains("2,345"), "table output: {table}");
-    assert!(table.contains("3,456"), "table output: {table}");
+    assert!(table.contains("3,400+56"), "table output: {table}");
     assert!(table.contains("12.3456"), "table output: {table}");
   }
 
@@ -1005,7 +1058,7 @@ mod tests {
     assert!(table.contains("3.5M"), "table output: {table}");
     assert!(table.contains("1,234"), "table output: {table}");
     assert!(table.contains("2,345"), "table output: {table}");
-    assert!(table.contains("3,456"), "table output: {table}");
+    assert!(table.contains("3,400+56"), "table output: {table}");
     assert!(table.contains("12.3456"), "table output: {table}");
   }
 

@@ -1,4 +1,4 @@
-use crate::model::UsageRecord;
+use crate::model::{SessionKind, UsageRecord};
 use crate::pricing::{CostMode, PricingTable};
 use crate::time::date_bucket;
 use chrono::{DateTime, Utc};
@@ -63,6 +63,8 @@ pub struct Aggregate {
   pub calls: u64,
   pub rounds: u64,
   pub sessions: u64,
+  pub root_sessions: u64,
+  pub sub_agent_sessions: u64,
   pub cost_embedded: f64,
   pub cost: f64,
   pub cost_per: BTreeMap<String, f64>,
@@ -153,8 +155,13 @@ pub fn aggregate(
   cost_per: Option<GroupDim>,
   cost_mode: CostMode,
 ) -> Vec<Aggregate> {
+  let session_parents: BTreeMap<&str, Option<&str>> = records
+    .iter()
+    .map(|r| (r.session_id.as_str(), r.parent_session_id.as_deref()))
+    .collect();
   let mut map: BTreeMap<Vec<String>, Aggregate> = BTreeMap::new();
-  let mut session_sets: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+  let mut root_session_sets: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
+  let mut sub_agent_session_sets: BTreeMap<Vec<String>, BTreeSet<String>> = BTreeMap::new();
   for r in records.iter().filter(|r| filters.matches(r, pricing)) {
     let key = key_for(r, dims, date_bucket_unit, pricing);
     let agg = map.entry(key.clone()).or_insert_with(|| Aggregate {
@@ -179,14 +186,24 @@ pub fn aggregate(
       calls: 0,
       rounds: 0,
       sessions: 0,
+      root_sessions: 0,
+      sub_agent_sessions: 0,
       cost_embedded: 0.0,
       cost: 0.0,
       cost_per: BTreeMap::new(),
       first_ts: None,
       last_ts: None,
     });
-    let sess_set = session_sets.entry(key).or_default();
-    sess_set.insert(r.session_id.clone());
+    root_session_sets
+      .entry(key.clone())
+      .or_default()
+      .insert(root_session_id(&r.session_id, &session_parents).to_string());
+    if r.session_kind == SessionKind::SubAgent {
+      sub_agent_session_sets
+        .entry(key)
+        .or_default()
+        .insert(r.session_id.clone());
+    }
 
     agg.input += r.display_input();
     agg.output += r.display_output();
@@ -231,11 +248,23 @@ pub fn aggregate(
     });
   }
   for (key, agg) in map.iter_mut() {
-    if let Some(set) = session_sets.get(key) {
-      agg.sessions = set.len() as u64;
-    }
+    agg.root_sessions = root_session_sets.get(key).map_or(0, |set| set.len() as u64);
+    agg.sub_agent_sessions = sub_agent_session_sets.get(key).map_or(0, |set| set.len() as u64);
+    agg.sessions = agg.root_sessions + agg.sub_agent_sessions;
   }
   map.into_values().collect()
+}
+
+fn root_session_id<'a>(session_id: &'a str, parents: &BTreeMap<&'a str, Option<&'a str>>) -> &'a str {
+  let mut current = session_id;
+  let mut seen = BTreeSet::new();
+  while seen.insert(current) {
+    match parents.get(current).copied().flatten() {
+      Some(parent) => current = parent,
+      None => break,
+    }
+  }
+  current
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -247,6 +276,23 @@ pub enum SortKey {
   CostBase,
   Date,
   Calls,
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn root_session_id_follows_nested_sub_agents() {
+    let parents = BTreeMap::from([("root", None), ("child", Some("root")), ("grandchild", Some("child"))]);
+    assert_eq!(root_session_id("grandchild", &parents), "root");
+  }
+
+  #[test]
+  fn root_session_id_stops_on_cycles() {
+    let parents = BTreeMap::from([("one", Some("two")), ("two", Some("one"))]);
+    assert!(matches!(root_session_id("one", &parents), "one" | "two"));
+  }
 }
 
 impl SortKey {

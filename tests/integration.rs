@@ -942,6 +942,10 @@ fn codex_cache_distinguishes_sub_agent_sessions_and_unique_rounds() {
     .output()
     .expect("run llm-tokei");
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let report: serde_json::Value = serde_json::from_slice(&out.stdout).expect("parse report");
+  assert_eq!(report[0]["sessions"], 2);
+  assert_eq!(report[0]["root_sessions"], 1);
+  assert_eq!(report[0]["sub_agent_sessions"], 1);
 
   let conn = rusqlite::Connection::open(cache_home.join("llm-tokei.db")).expect("open cache");
   let session = conn
