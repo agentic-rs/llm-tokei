@@ -278,23 +278,6 @@ pub enum SortKey {
   Calls,
 }
 
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn root_session_id_follows_nested_sub_agents() {
-    let parents = BTreeMap::from([("root", None), ("child", Some("root")), ("grandchild", Some("child"))]);
-    assert_eq!(root_session_id("grandchild", &parents), "root");
-  }
-
-  #[test]
-  fn root_session_id_stops_on_cycles() {
-    let parents = BTreeMap::from([("one", Some("two")), ("two", Some("one"))]);
-    assert!(matches!(root_session_id("one", &parents), "one" | "two"));
-  }
-}
-
 impl SortKey {
   pub fn parse(s: &str) -> Option<Self> {
     Some(match s.to_lowercase().as_str() {
@@ -357,4 +340,21 @@ fn shown_input_cost(a: &Aggregate) -> f64 {
 
 fn shown_output_cost(a: &Aggregate) -> f64 {
   a.completion_cost + a.reasoning_cost
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn root_session_id_follows_nested_sub_agents() {
+    let parents = BTreeMap::from([("root", None), ("child", Some("root")), ("grandchild", Some("child"))]);
+    assert_eq!(root_session_id("grandchild", &parents), "root");
+  }
+
+  #[test]
+  fn root_session_id_stops_on_cycles() {
+    let parents = BTreeMap::from([("one", Some("two")), ("two", Some("one"))]);
+    assert!(matches!(root_session_id("one", &parents), "one" | "two"));
+  }
 }

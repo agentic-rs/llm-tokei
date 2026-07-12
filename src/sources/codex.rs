@@ -418,12 +418,8 @@ impl RolloutVisitor for RecordBuilder<'_> {
 /// IDs preserve creation order, so turns older than the fork's own session ID
 /// belong to that inherited replay and must not be counted again.
 fn is_inherited_fork_turn(meta: &SessionMeta, payload: &Value) -> Option<bool> {
-  let Some(session_id) = meta.session_id.as_deref().filter(|_| meta.forked_from_id.is_some()) else {
-    return None;
-  };
-  let Some(turn_id) = payload.get("turn_id").and_then(Value::as_str) else {
-    return None;
-  };
+  let session_id = meta.session_id.as_deref().filter(|_| meta.forked_from_id.is_some())?;
+  let turn_id = payload.get("turn_id").and_then(Value::as_str)?;
   (is_uuid_v7(session_id) && is_uuid_v7(turn_id)).then(|| turn_id < session_id)
 }
 
