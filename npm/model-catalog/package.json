@@ -24,6 +24,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "models-dev:report": "npm run build && node scripts/models-dev-report.mjs",
     "prepack": "npm run build",
     "test": "npm run build && node --test test/*.test.mjs"
   },

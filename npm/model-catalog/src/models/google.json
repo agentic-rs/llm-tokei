@@ -27,23 +27,36 @@
     "provider": "google"
   },
   "gemini-3-flash": {
-    "provider": "google"
+    "provider": "google",
+    "aliases": [
+      "gemini-3-flash-preview"
+    ]
   },
   "gemini-3-pro": {
-    "provider": "google"
+    "provider": "google",
+    "aliases": [
+      "gemini-3-pro-preview"
+    ]
   },
   "gemini-3-pro-image-preview": {
     "provider": "google"
   },
   "gemini-3.1-flash-image": {
-    "provider": "google"
+    "provider": "google",
+    "aliases": [
+      "gemini-3.1-flash-image-preview"
+    ]
   },
   "gemini-3.1-flash-lite": {
-    "provider": "google"
+    "provider": "google",
+    "aliases": [
+      "gemini-3.1-flash-lite-preview"
+    ]
   },
   "gemini-3.1-pro": {
     "provider": "google",
     "aliases": [
+      "gemini-3.1-pro-preview",
       "gemini-3.1-pro-preview-customtools"
     ]
   },

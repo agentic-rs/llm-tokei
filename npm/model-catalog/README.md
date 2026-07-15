@@ -18,3 +18,17 @@ resolveModel({ model: "anthropic/claude-sonnet-4-5-20250929" });
 
 Use only `confidence: "exact"` results for strict billing. `heuristic` results
 are useful for usage aggregation and should be explicitly accepted by callers.
+
+## Audit against models.dev
+
+The development-only report fetches every current models.dev model record and
+shows how the catalog resolves it. It does not modify the catalog.
+
+```sh
+pnpm models-dev:report
+pnpm models-dev:report -- --official --unmatched
+pnpm models-dev:report -- --json > models-dev-report.json
+```
+
+Use the JSON report to review aliases. An `unknown` result means the record is
+not safely mapped; it may need a new canonical model instead of an alias.

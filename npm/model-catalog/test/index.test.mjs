@@ -35,6 +35,19 @@ test("reports normalization separately from alias resolution", () => {
   assert.equal(model.matched_by, "normalization");
 });
 
+test("resolves current official models.dev aliases exactly", () => {
+  for (const [model, canonicalName] of [
+    ["claude-opus-4-5-20251101", "claude-opus-4.5"],
+    ["gemini-3.1-pro-preview", "gemini-3.1-pro"],
+    ["gpt-4o-2024-08-06", "gpt-4o"],
+    ["gpt-5.3-chat-latest", "gpt-5.3-chat"]
+  ]) {
+    const resolution = resolveModel({ model });
+    assert.equal(resolution.canonical_name, canonicalName);
+    assert.equal(resolution.confidence, "exact");
+  }
+});
+
 test("marks normalized model names as heuristic", () => {
   const model = resolveModel({ model: "anthropic/claude-sonnet-4-5-20250929" });
   assert.equal(model.canonical_name, "claude-sonnet-4.5");

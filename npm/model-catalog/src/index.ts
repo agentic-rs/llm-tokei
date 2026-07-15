@@ -165,7 +165,7 @@ function stripModeSuffix(value: string): string {
 }
 
 function stripVariantSuffix(value: string): string {
-  return value.replace(/(?:-chat-latest|-latest|-chat|-preview)$/, "");
+  return value.replace(/(?:-latest|-chat|-preview)$/, "");
 }
 
 function stripProviderPrefix(value: string): string {
