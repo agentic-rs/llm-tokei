@@ -1,0 +1,175 @@
+{
+  "gpt-3.5-turbo": {
+    "vendor": "openai"
+  },
+  "gpt-4": {
+    "vendor": "openai"
+  },
+  "gpt-4-turbo": {
+    "vendor": "openai"
+  },
+  "gpt-4.1": {
+    "vendor": "openai"
+  },
+  "gpt-4.1-mini": {
+    "vendor": "openai"
+  },
+  "gpt-4.1-nano": {
+    "vendor": "openai"
+  },
+  "gpt-4o": {
+    "vendor": "openai",
+    "aliases": [
+      "gpt-4o-2024-05-13",
+      "gpt-4o-2024-08-06",
+      "gpt-4o-2024-11-20"
+    ]
+  },
+  "gpt-4o-mini": {
+    "vendor": "openai"
+  },
+  "gpt-5": {
+    "vendor": "openai",
+    "rolling_aliases": [
+      "gpt-5-chat-latest"
+    ]
+  },
+  "gpt-5-codex": {
+    "vendor": "openai"
+  },
+  "gpt-5-mini": {
+    "vendor": "openai"
+  },
+  "gpt-5-nano": {
+    "vendor": "openai"
+  },
+  "gpt-5-pro": {
+    "vendor": "openai"
+  },
+  "gpt-5.1": {
+    "vendor": "openai",
+    "rolling_aliases": [
+      "gpt-5.1-chat-latest"
+    ]
+  },
+  "gpt-5.1-codex": {
+    "vendor": "openai",
+    "aliases": [
+      "gpt-5.1-codex-max"
+    ]
+  },
+  "gpt-5.1-codex-mini": {
+    "vendor": "openai"
+  },
+  "gpt-5.2": {
+    "vendor": "openai",
+    "rolling_aliases": [
+      "gpt-5.2-chat-latest"
+    ]
+  },
+  "gpt-5.2-codex": {
+    "vendor": "openai",
+    "aliases": [
+      "gpt-5.2-codex-max"
+    ]
+  },
+  "gpt-5.2-pro": {
+    "vendor": "openai"
+  },
+  "gpt-5.3-chat": {
+    "vendor": "openai",
+    "rolling_aliases": [
+      "gpt-5.3-chat-latest"
+    ]
+  },
+  "gpt-5.3-codex": {
+    "vendor": "openai"
+  },
+  "gpt-5.3-codex-spark": {
+    "vendor": "openai"
+  },
+  "gpt-5.4": {
+    "vendor": "openai"
+  },
+  "gpt-5.4-mini": {
+    "vendor": "openai"
+  },
+  "gpt-5.4-nano": {
+    "vendor": "openai"
+  },
+  "gpt-5.4-pro": {
+    "vendor": "openai"
+  },
+  "gpt-5.5": {
+    "vendor": "openai"
+  },
+  "gpt-5.5-pro": {
+    "vendor": "openai"
+  },
+  "gpt-5.6-luna": {
+    "vendor": "openai"
+  },
+  "gpt-5.6-sol": {
+    "vendor": "openai",
+    "aliases": [
+      "gpt-5.6"
+    ]
+  },
+  "gpt-5.6-terra": {
+    "vendor": "openai"
+  },
+  "gpt-image-2": {
+    "vendor": "openai"
+  },
+  "openai-o1": {
+    "vendor": "openai",
+    "name": "o1",
+    "aliases": [
+      "o1-preview"
+    ]
+  },
+  "openai-o1-mini": {
+    "vendor": "openai",
+    "name": "o1-mini"
+  },
+  "openai-o1-pro": {
+    "vendor": "openai",
+    "name": "o1-pro"
+  },
+  "openai-o3": {
+    "vendor": "openai",
+    "name": "o3"
+  },
+  "openai-o3-deep-research": {
+    "vendor": "openai",
+    "name": "o3-deep-research"
+  },
+  "openai-o3-mini": {
+    "vendor": "openai",
+    "name": "o3-mini"
+  },
+  "openai-o3-pro": {
+    "vendor": "openai",
+    "name": "o3-pro"
+  },
+  "openai-o4-mini": {
+    "vendor": "openai",
+    "name": "o4-mini",
+    "aliases": [
+      "o4-mini"
+    ]
+  },
+  "openai-o4-mini-deep-research": {
+    "vendor": "openai",
+    "name": "o4-mini-deep-research"
+  },
+  "text-embedding-3-large": {
+    "vendor": "openai"
+  },
+  "text-embedding-3-small": {
+    "vendor": "openai"
+  },
+  "text-embedding-ada-002": {
+    "vendor": "openai"
+  }
+}

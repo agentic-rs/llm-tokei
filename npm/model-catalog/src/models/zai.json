@@ -1,0 +1,44 @@
+{
+  "glm-4.5": {
+    "vendor": "zai"
+  },
+  "glm-4.5-air": {
+    "vendor": "zai"
+  },
+  "glm-4.5-flash": {
+    "vendor": "zai"
+  },
+  "glm-4.5v": {
+    "vendor": "zai"
+  },
+  "glm-4.6": {
+    "vendor": "zai"
+  },
+  "glm-4.6v": {
+    "vendor": "zai"
+  },
+  "glm-4.7": {
+    "vendor": "zai"
+  },
+  "glm-4.7-flash": {
+    "vendor": "zai"
+  },
+  "glm-4.7-flashx": {
+    "vendor": "zai"
+  },
+  "glm-5": {
+    "vendor": "zai"
+  },
+  "glm-5-turbo": {
+    "vendor": "zai",
+    "aliases": [
+      "glm-5v-turbo"
+    ]
+  },
+  "glm-5.1": {
+    "vendor": "zai"
+  },
+  "glm-5.2": {
+    "vendor": "zai"
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "gemini-1.5-flash": {
+    "vendor": "google"
+  },
+  "gemini-1.5-flash-8b": {
+    "vendor": "google"
+  },
+  "gemini-1.5-pro": {
+    "vendor": "google"
+  },
+  "gemini-2.0-flash": {
+    "vendor": "google"
+  },
+  "gemini-2.0-flash-lite": {
+    "vendor": "google"
+  },
+  "gemini-2.5-flash": {
+    "vendor": "google"
+  },
+  "gemini-2.5-flash-image": {
+    "vendor": "google"
+  },
+  "gemini-2.5-flash-lite": {
+    "vendor": "google"
+  },
+  "gemini-2.5-pro": {
+    "vendor": "google"
+  },
+  "gemini-3-flash": {
+    "vendor": "google",
+    "aliases": [
+      "gemini-3-flash-preview"
+    ]
+  },
+  "gemini-3-pro": {
+    "vendor": "google",
+    "aliases": [
+      "gemini-3-pro-preview"
+    ]
+  },
+  "gemini-3-pro-image-preview": {
+    "vendor": "google"
+  },
+  "gemini-3.1-flash-image": {
+    "vendor": "google",
+    "aliases": [
+      "gemini-3.1-flash-image-preview"
+    ]
+  },
+  "gemini-3.1-flash-lite": {
+    "vendor": "google",
+    "aliases": [
+      "gemini-3.1-flash-lite-preview"
+    ]
+  },
+  "gemini-3.1-pro": {
+    "vendor": "google",
+    "aliases": [
+      "gemini-3.1-pro-preview",
+      "gemini-3.1-pro-preview-customtools"
+    ]
+  },
+  "gemini-3.5-flash": {
+    "vendor": "google"
+  },
+  "gemini-embedding-001": {
+    "vendor": "google"
+  },
+  "gemini-flash-latest": {
+    "vendor": "google",
+    "is_rolling": true
+  },
+  "gemini-flash-lite-latest": {
+    "vendor": "google",
+    "is_rolling": true
+  },
+  "gemini-live-2.5-flash": {
+    "vendor": "google",
+    "aliases": [
+      "gemini-live-2.5-flash-preview-native-audio"
+    ]
+  },
+  "gemini-omni-flash-preview": {
+    "vendor": "google"
+  },
+  "gemma-3-12b-it": {
+    "vendor": "google"
+  },
+  "gemma-3-27b-it": {
+    "vendor": "google"
+  },
+  "gemma-3-4b-it": {
+    "vendor": "google"
+  },
+  "gemma-3n-e2b-it": {
+    "vendor": "google"
+  },
+  "gemma-3n-e4b-it": {
+    "vendor": "google"
+  }
+}

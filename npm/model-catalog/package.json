@@ -1,0 +1,38 @@
+{
+  "name": "@tokn-ai/model-catalog",
+  "version": "0.1.0",
+  "description": "Canonical LLM model names, families, series, and alias resolution rules",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentic-rs/llm-tokei.git",
+    "directory": "npm/model-catalog"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./models/*.json": "./dist/models/*.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "models-dev:report": "npm run build && node scripts/models-dev-report.mjs",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "packageManager": "pnpm@10.30.3",
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

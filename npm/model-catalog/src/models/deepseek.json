@@ -1,0 +1,14 @@
+{
+  "deepseek-chat": {
+    "vendor": "deepseek"
+  },
+  "deepseek-reasoner": {
+    "vendor": "deepseek"
+  },
+  "deepseek-v4-flash": {
+    "vendor": "deepseek"
+  },
+  "deepseek-v4-pro": {
+    "vendor": "deepseek"
+  }
+}
