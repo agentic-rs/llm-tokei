@@ -76,7 +76,7 @@ struct CsvRow {
 fn main() -> Result<()> {
   let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
   let data = manifest.join("data");
-  let models_path = data.join("models.json");
+  let models_path = manifest.join("npm/model-catalog/src/models.json");
   let providers_path = data.join("providers.json");
   let models_dev_csv_path = data.join("models.dev.csv");
   let override_csv_path = data.join("prices.override.csv");

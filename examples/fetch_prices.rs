@@ -79,7 +79,7 @@ struct PriceKey {
 fn main() -> Result<()> {
   let auto_import = std::env::args().any(|a| a == "--auto-import");
   let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-  let models_path = manifest.join("data/models.json");
+  let models_path = manifest.join("npm/model-catalog/src/models.json");
   let providers_path = manifest.join("data/providers.json");
   let models_dev_csv_path = manifest.join("data/models.dev.csv");
   let cache_dir = manifest.join(CACHE_DIR);
@@ -452,7 +452,7 @@ fn flatten_models_dev<W: Write>(
           if source_providers.contains(&provider) && should_warn_unresolved_source_model(&name) {
             stats.unresolved_source_rows += 1;
             let warning = format!(
-                        "warning: source provider '{provider}' has unmapped model '{name}' (no canonical id; add to data/models.json)"
+                        "warning: source provider '{provider}' has unmapped model '{name}' (no canonical id; add to npm/model-catalog/src/models.json)"
                     );
             writeln!(log, "[warning] {warning}")?;
             eprintln!("{warning}");

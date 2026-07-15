@@ -124,7 +124,7 @@ pub struct PricingTable {
 }
 
 const BUNDLED: &str = include_str!(concat!(env!("OUT_DIR"), "/prices.json"));
-const BUNDLED_MODELS: &str = include_str!("../data/models.json");
+const BUNDLED_MODELS: &str = include_str!("../npm/model-catalog/src/models.json");
 const BUNDLED_PROVIDERS: &str = include_str!("../data/providers.json");
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 const CACHE_PRICE_FILE: &str = "llm-tokei.price.json";
