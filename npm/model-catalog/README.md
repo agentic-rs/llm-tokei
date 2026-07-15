@@ -4,7 +4,7 @@ A versioned, dependency-free catalog for resolving reported LLM model names to
 canonical names, vendors, families, and series. It deliberately does not ship
 prices: rate data is provider-, region-, and billing-mode-specific.
 
-For now, `src/models.json` is a deliberately duplicated snapshot of
+For now, `src/models/*.json` is a deliberately duplicated snapshot of
 `llm-tokei`'s existing model registry. The package can therefore evolve and
 publish independently without changing the Rust CLI's bundled data path.
 

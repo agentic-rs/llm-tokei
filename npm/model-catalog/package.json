@@ -16,14 +16,14 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./models.json": "./dist/models.json"
+    "./models/*.json": "./dist/models/*.json"
   },
   "files": [
     "dist",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
     "prepack": "npm run build",
     "test": "npm run build && node --test test/*.test.mjs"
   },

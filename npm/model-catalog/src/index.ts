@@ -1,4 +1,10 @@
-import definitions from "./models.json" with { type: "json" };
+import alibabaDefinitions from "./models/alibaba.json" with { type: "json" };
+import anthropicDefinitions from "./models/anthropic.json" with { type: "json" };
+import deepseekDefinitions from "./models/deepseek.json" with { type: "json" };
+import googleDefinitions from "./models/google.json" with { type: "json" };
+import minimaxDefinitions from "./models/minimax.json" with { type: "json" };
+import openaiDefinitions from "./models/openai.json" with { type: "json" };
+import zaiDefinitions from "./models/zai.json" with { type: "json" };
 
 export type ResolutionConfidence = "exact" | "normalized" | "heuristic" | "unknown";
 
@@ -35,7 +41,17 @@ export type ResolveModelInput = {
   provider?: string | null | undefined;
 };
 
-const catalog = definitions as Record<string, ModelDefinition>;
+type ModelCatalog = Record<string, ModelDefinition>;
+
+const catalog = mergeVendorCatalogs({
+  alibaba: alibabaDefinitions,
+  anthropic: anthropicDefinitions,
+  deepseek: deepseekDefinitions,
+  google: googleDefinitions,
+  minimax: minimaxDefinitions,
+  openai: openaiDefinitions,
+  zai: zaiDefinitions
+});
 const aliases = new Map<string, string>();
 
 for (const [canonicalName, definition] of Object.entries(catalog)) {
@@ -86,7 +102,23 @@ export function getModel(canonicalName: string): KnownModel | undefined {
 }
 
 export function listModels(): KnownModel[] {
-  return Object.keys(catalog).map(knownModel);
+  return Object.keys(catalog).sort().map(knownModel);
+}
+
+function mergeVendorCatalogs(vendorCatalogs: Record<string, ModelCatalog>): ModelCatalog {
+  const merged: ModelCatalog = {};
+  for (const [vendor, definitions] of Object.entries(vendorCatalogs)) {
+    for (const [canonicalName, definition] of Object.entries(definitions)) {
+      if (definition.provider !== vendor) {
+        throw new Error(`model ${canonicalName} belongs in ${definition.provider}.json, not ${vendor}.json`);
+      }
+      if (merged[canonicalName]) {
+        throw new Error(`canonical model ${canonicalName} appears in multiple vendor catalogs`);
+      }
+      merged[canonicalName] = definition;
+    }
+  }
+  return merged;
 }
 
 function resolved(canonicalName: string, confidence: ResolvedModel["confidence"], matchedBy: string): ResolvedModel {

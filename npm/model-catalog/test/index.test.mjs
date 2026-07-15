@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getModel, resolveModel } from "../dist/index.js";
+import { getModel, listModels, resolveModel } from "../dist/index.js";
+
+test("loads the complete vendor-split catalog", () => {
+  const models = listModels();
+  assert.equal(models.length, 163);
+  assert.deepEqual([...new Set(models.map((model) => model.vendor))].sort(), [
+    "alibaba",
+    "anthropic",
+    "deepseek",
+    "google",
+    "minimax",
+    "openai",
+    "zai"
+  ]);
+});
 
 test("resolves explicit aliases", () => {
   assert.deepEqual(resolveModel({ model: "o1" }), {
