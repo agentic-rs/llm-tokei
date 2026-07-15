@@ -547,7 +547,7 @@ Hand-curated pricing inputs:
 
 | File | Purpose |
 | --- | --- |
-| `npm/model-catalog/src/models.json` | Canonical model names, official providers, aliases; published by `@tokn-ai/model-catalog` |
+| `data/models.json` | Canonical model names, official providers, aliases |
 | `data/providers.json` | Provider/model included and multiplier metadata |
 | `data/prices.override.csv` | Rate overrides and additions |
 
