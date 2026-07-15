@@ -1,0 +1,162 @@
+{
+  "codestral-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "codestral",
+    "series": "codestral-latest"
+  },
+  "devstral-2512": {
+    "vendor": "mistral",
+    "family": "devstral",
+    "series": "devstral-2"
+  },
+  "devstral-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "devstral",
+    "series": "devstral-latest"
+  },
+  "devstral-medium-2507": {
+    "vendor": "mistral",
+    "family": "devstral-medium",
+    "series": "devstral"
+  },
+  "devstral-medium-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "devstral-medium",
+    "series": "devstral-latest"
+  },
+  "devstral-small-2505": {
+    "vendor": "mistral",
+    "family": "devstral-small",
+    "series": "devstral-small"
+  },
+  "devstral-small-2507": {
+    "vendor": "mistral",
+    "family": "devstral-small",
+    "series": "devstral-small"
+  },
+  "labs-devstral-small-2512": {
+    "vendor": "mistral",
+    "family": "devstral-small",
+    "series": "devstral-small-2"
+  },
+  "magistral-medium-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "magistral-medium",
+    "series": "magistral"
+  },
+  "magistral-small": {
+    "vendor": "mistral",
+    "family": "magistral-small",
+    "series": "magistral"
+  },
+  "ministral-3b-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "ministral-3b",
+    "series": "ministral"
+  },
+  "ministral-8b-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "ministral-8b",
+    "series": "ministral"
+  },
+  "mistral-embed": {
+    "vendor": "mistral",
+    "family": "mistral-embed",
+    "series": "mistral-embed"
+  },
+  "mistral-large-2411": {
+    "vendor": "mistral",
+    "family": "mistral-large",
+    "series": "mistral-large-2.1"
+  },
+  "mistral-large-2512": {
+    "vendor": "mistral",
+    "family": "mistral-large",
+    "series": "mistral-large-3"
+  },
+  "mistral-large-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "mistral-large",
+    "series": "mistral-large-latest"
+  },
+  "mistral-medium-2505": {
+    "vendor": "mistral",
+    "family": "mistral-medium",
+    "series": "mistral-medium-3"
+  },
+  "mistral-medium-2508": {
+    "vendor": "mistral",
+    "family": "mistral-medium",
+    "series": "mistral-medium-3.1"
+  },
+  "mistral-medium-2604": {
+    "vendor": "mistral",
+    "family": "mistral-medium",
+    "series": "mistral-medium-3.5"
+  },
+  "mistral-medium-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "mistral-medium",
+    "series": "mistral-medium-latest"
+  },
+  "mistral-nemo": {
+    "vendor": "mistral",
+    "family": "mistral-nemo",
+    "series": "mistral-nemo"
+  },
+  "mistral-small-2506": {
+    "vendor": "mistral",
+    "family": "mistral-small",
+    "series": "mistral-small-3.2"
+  },
+  "mistral-small-2603": {
+    "vendor": "mistral",
+    "family": "mistral-small",
+    "series": "mistral-small-4"
+  },
+  "mistral-small-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "mistral-small",
+    "series": "mistral-small-latest"
+  },
+  "open-mistral-7b": {
+    "vendor": "mistral",
+    "family": "mistral",
+    "series": "mistral-7b"
+  },
+  "open-mistral-nemo": {
+    "vendor": "mistral",
+    "family": "mistral-nemo",
+    "series": "mistral-nemo"
+  },
+  "open-mixtral-8x22b": {
+    "vendor": "mistral",
+    "family": "mixtral",
+    "series": "mixtral-8x22b"
+  },
+  "open-mixtral-8x7b": {
+    "vendor": "mistral",
+    "family": "mixtral",
+    "series": "mixtral-8x7b"
+  },
+  "pixtral-12b": {
+    "vendor": "mistral",
+    "family": "pixtral",
+    "series": "pixtral-12b"
+  },
+  "pixtral-large-latest": {
+    "vendor": "mistral",
+    "is_rolling": true,
+    "family": "pixtral-large",
+    "series": "pixtral-large-latest"
+  }
+}

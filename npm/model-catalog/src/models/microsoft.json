@@ -1,0 +1,159 @@
+{
+  "phi-3-medium-128k-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-3-medium",
+    "series": "phi-3",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-3-medium-128k-instruct"
+      ]
+    }
+  },
+  "phi-3-medium-4k-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-3-medium",
+    "series": "phi-3",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-3-medium-4k-instruct"
+      ]
+    }
+  },
+  "phi-3-mini-128k-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-3-mini",
+    "series": "phi-3",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-3-mini-128k-instruct"
+      ]
+    }
+  },
+  "phi-3-mini-4k-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-3-mini",
+    "series": "phi-3",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-3-mini-4k-instruct"
+      ]
+    }
+  },
+  "phi-3-small-128k-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-3-small",
+    "series": "phi-3",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-3-small-128k-instruct"
+      ]
+    }
+  },
+  "phi-3-small-8k-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-3-small",
+    "series": "phi-3",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-3-small-8k-instruct"
+      ]
+    }
+  },
+  "phi-3.5-mini-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-3.5-mini",
+    "series": "phi-3.5",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-3.5-mini-instruct"
+      ]
+    }
+  },
+  "phi-3.5-moe-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-3.5-moe",
+    "series": "phi-3.5",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-3.5-moe-instruct"
+      ]
+    }
+  },
+  "phi-3.5-vision-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-3.5-vision",
+    "series": "phi-3.5",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-3.5-vision-instruct"
+      ]
+    }
+  },
+  "phi-4": {
+    "vendor": "microsoft",
+    "family": "phi-4",
+    "series": "phi-4",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-4"
+      ]
+    }
+  },
+  "phi-4-mini-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-4-mini",
+    "series": "phi-4",
+    "source_aliases": {
+      "azure": [
+        "phi-4-mini"
+      ],
+      "azure-cognitive-services": [
+        "phi-4-mini"
+      ],
+      "github-models": [
+        "microsoft/phi-4-mini-instruct"
+      ]
+    }
+  },
+  "phi-4-mini-reasoning": {
+    "vendor": "microsoft",
+    "family": "phi-4-mini-reasoning",
+    "series": "phi-4",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-4-mini-reasoning"
+      ]
+    }
+  },
+  "phi-4-multimodal-instruct": {
+    "vendor": "microsoft",
+    "family": "phi-4-multimodal",
+    "series": "phi-4",
+    "source_aliases": {
+      "azure": [
+        "phi-4-multimodal"
+      ],
+      "azure-cognitive-services": [
+        "phi-4-multimodal"
+      ],
+      "github-models": [
+        "microsoft/phi-4-multimodal-instruct"
+      ]
+    }
+  },
+  "phi-4-reasoning": {
+    "vendor": "microsoft",
+    "family": "phi-4-reasoning",
+    "series": "phi-4",
+    "source_aliases": {
+      "github-models": [
+        "microsoft/phi-4-reasoning"
+      ]
+    }
+  },
+  "phi-4-reasoning-plus": {
+    "vendor": "microsoft",
+    "family": "phi-4-reasoning-plus",
+    "series": "phi-4"
+  }
+}

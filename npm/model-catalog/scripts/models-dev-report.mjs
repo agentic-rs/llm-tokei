@@ -1,21 +1,21 @@
 import { pathToFileURL } from "node:url";
 
-import { listModels, resolveModel } from "../dist/index.js";
+import { listModelsDevSources, resolveModel } from "../dist/index.js";
 
 const MODELS_DEV_URL = "https://models.dev/api.json";
 const confidenceLevels = ["exact", "normalized", "heuristic", "unknown"];
-const catalogVendors = new Set(listModels().map((model) => model.vendor));
-
 export function createModelsDevReport(api, options = {}) {
-  const selectedProviders = options.official
-    ? catalogVendors
-    : new Set((options.providers ?? []).map((provider) => provider.trim().toLowerCase()));
-  const filterProviders = selectedProviders.size > 0;
+  const requestedProviders = new Set((options.providers ?? []).map((provider) => provider.trim().toLowerCase()));
+  const officialSources = options.official ? sourcesByProvider(listModelsDevSources()) : undefined;
+  const filterProviders = requestedProviders.size > 0 || officialSources !== undefined;
   const providers = [];
 
   for (const [provider, providerData] of Object.entries(api).sort(([left], [right]) => left.localeCompare(right))) {
-    if (filterProviders && !selectedProviders.has(provider)) continue;
+    if (filterProviders && requestedProviders.size > 0 && !requestedProviders.has(provider)) continue;
+    const sourceFilters = officialSources?.get(provider);
+    if (officialSources && !sourceFilters) continue;
     const models = Object.entries(providerData?.models ?? {})
+      .filter(([sourceModel]) => !sourceFilters || sourceFilters.some((source) => sourceMatches(source, sourceModel)))
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([sourceModel, sourceData]) => ({
         source_model: sourceModel,
@@ -42,6 +42,20 @@ export function createModelsDevReport(api, options = {}) {
     counts,
     providers
   };
+}
+
+function sourcesByProvider(sources) {
+  const result = new Map();
+  for (const source of sources) {
+    const providerSources = result.get(source.provider) ?? [];
+    providerSources.push(source);
+    result.set(source.provider, providerSources);
+  }
+  return result;
+}
+
+function sourceMatches(source, sourceModel) {
+  return !source.model_prefix || sourceModel.startsWith(source.model_prefix);
 }
 
 function countByConfidence(models) {
@@ -90,7 +104,7 @@ Fetch every models.dev record and resolve it against this catalog.
 
 Options:
   --json                 Emit every record as JSON.
-  --official             Limit records to catalog vendors' official models.dev providers.
+  --official             Limit records to curated models.dev sources for catalog vendors.
   --provider <id>        Limit records to a models.dev provider; repeatable.
   --unmatched            Print every unmatched provider/model pair.
   --help, -h             Show this help.

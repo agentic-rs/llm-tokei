@@ -1,0 +1,48 @@
+{
+  "llama-3.3-70b-instruct": {
+    "vendor": "meta",
+    "family": "llama-3.3",
+    "series": "llama-3.3"
+  },
+  "llama-3.3-8b-instruct": {
+    "vendor": "meta",
+    "family": "llama-3.3",
+    "series": "llama-3.3"
+  },
+  "llama-4-maverick-17b-128e-instruct-fp8": {
+    "vendor": "meta",
+    "family": "llama-4-maverick",
+    "series": "llama-4"
+  },
+  "llama-4-maverick-17b-128e-instruct": {
+    "vendor": "meta",
+    "family": "llama-4-maverick",
+    "series": "llama-4",
+    "source_aliases": {
+      "llama": [
+        "cerebras-llama-4-maverick-17b-128e-instruct",
+        "groq-llama-4-maverick-17b-128e-instruct"
+      ]
+    }
+  },
+  "llama-4-scout-17b-16e-instruct-fp8": {
+    "vendor": "meta",
+    "family": "llama-4-scout",
+    "series": "llama-4"
+  },
+  "llama-4-scout-17b-16e-instruct": {
+    "vendor": "meta",
+    "family": "llama-4-scout",
+    "series": "llama-4",
+    "source_aliases": {
+      "llama": [
+        "cerebras-llama-4-scout-17b-16e-instruct"
+      ]
+    }
+  },
+  "muse-spark-1.1": {
+    "vendor": "meta",
+    "family": "muse",
+    "series": "muse-1.1"
+  }
+}

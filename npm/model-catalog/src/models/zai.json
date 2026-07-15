@@ -1,44 +1,44 @@
 {
   "glm-4.5": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-4.5-air": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-4.5-flash": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-4.5v": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-4.6": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-4.6v": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-4.7": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-4.7-flash": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-4.7-flashx": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-5": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-5-turbo": {
-    "provider": "zai",
+    "vendor": "zai",
     "aliases": [
       "glm-5v-turbo"
     ]
   },
   "glm-5.1": {
-    "provider": "zai"
+    "vendor": "zai"
   },
   "glm-5.2": {
-    "provider": "zai"
+    "vendor": "zai"
   }
 }

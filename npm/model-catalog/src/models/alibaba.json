@@ -1,155 +1,155 @@
 {
   "qvq-max": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-flash": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-max": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-mt-plus": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-mt-turbo": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-omni-turbo": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-omni-turbo-realtime": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-plus": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-plus-character-ja": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-turbo": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-vl-max": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-vl-ocr": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen-vl-plus": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen2-5-14b-instruct": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen2-5-32b-instruct": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen2-5-72b-instruct": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen2-5-7b-instruct": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen2-5-omni-7b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen2-5-vl-72b-instruct": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen2-5-vl-7b-instruct": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-14b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-235b-a22b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-32b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-8b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-asr-flash": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-coder-30b-a3b-instruct": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-coder-480b-a35b-instruct": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-coder-flash": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-coder-plus": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-livetranslate-flash-realtime": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-max": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-next-80b-a3b-instruct": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-next-80b-a3b-thinking": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-omni-flash": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-omni-flash-realtime": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-vl-235b-a22b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-vl-30b-a3b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3-vl-plus": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.5-122b-a10b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.5-27b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.5-35b-a3b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.5-397b-a17b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.5-plus": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.6-27b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.6-35b-a3b": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.6-flash": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.6-max-preview": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.6-plus": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.7-max": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwen3.7-plus": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   },
   "qwq-plus": {
-    "provider": "alibaba"
+    "vendor": "alibaba"
   }
 }

@@ -1,24 +1,24 @@
 {
   "gpt-3.5-turbo": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-4": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-4-turbo": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-4.1": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-4.1-mini": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-4.1-nano": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-4o": {
-    "provider": "openai",
+    "vendor": "openai",
     "aliases": [
       "gpt-4o-2024-05-13",
       "gpt-4o-2024-08-06",
@@ -26,150 +26,150 @@
     ]
   },
   "gpt-4o-mini": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5": {
-    "provider": "openai",
-    "aliases": [
+    "vendor": "openai",
+    "rolling_aliases": [
       "gpt-5-chat-latest"
     ]
   },
   "gpt-5-codex": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5-mini": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5-nano": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5-pro": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.1": {
-    "provider": "openai",
-    "aliases": [
+    "vendor": "openai",
+    "rolling_aliases": [
       "gpt-5.1-chat-latest"
     ]
   },
   "gpt-5.1-codex": {
-    "provider": "openai",
+    "vendor": "openai",
     "aliases": [
       "gpt-5.1-codex-max"
     ]
   },
   "gpt-5.1-codex-mini": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.2": {
-    "provider": "openai",
-    "aliases": [
+    "vendor": "openai",
+    "rolling_aliases": [
       "gpt-5.2-chat-latest"
     ]
   },
   "gpt-5.2-codex": {
-    "provider": "openai",
+    "vendor": "openai",
     "aliases": [
       "gpt-5.2-codex-max"
     ]
   },
   "gpt-5.2-pro": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.3-chat": {
-    "provider": "openai",
-    "aliases": [
+    "vendor": "openai",
+    "rolling_aliases": [
       "gpt-5.3-chat-latest"
     ]
   },
   "gpt-5.3-codex": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.3-codex-spark": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.4": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.4-mini": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.4-nano": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.4-pro": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.5": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.5-pro": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.6-luna": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-5.6-sol": {
-    "provider": "openai",
+    "vendor": "openai",
     "aliases": [
       "gpt-5.6"
     ]
   },
   "gpt-5.6-terra": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "gpt-image-2": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "openai-o1": {
-    "provider": "openai",
+    "vendor": "openai",
     "name": "o1",
     "aliases": [
       "o1-preview"
     ]
   },
   "openai-o1-mini": {
-    "provider": "openai",
+    "vendor": "openai",
     "name": "o1-mini"
   },
   "openai-o1-pro": {
-    "provider": "openai",
+    "vendor": "openai",
     "name": "o1-pro"
   },
   "openai-o3": {
-    "provider": "openai",
+    "vendor": "openai",
     "name": "o3"
   },
   "openai-o3-deep-research": {
-    "provider": "openai",
+    "vendor": "openai",
     "name": "o3-deep-research"
   },
   "openai-o3-mini": {
-    "provider": "openai",
+    "vendor": "openai",
     "name": "o3-mini"
   },
   "openai-o3-pro": {
-    "provider": "openai",
+    "vendor": "openai",
     "name": "o3-pro"
   },
   "openai-o4-mini": {
-    "provider": "openai",
+    "vendor": "openai",
     "name": "o4-mini",
     "aliases": [
       "o4-mini"
     ]
   },
   "openai-o4-mini-deep-research": {
-    "provider": "openai",
+    "vendor": "openai",
     "name": "o4-mini-deep-research"
   },
   "text-embedding-3-large": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "text-embedding-3-small": {
-    "provider": "openai"
+    "vendor": "openai"
   },
   "text-embedding-ada-002": {
-    "provider": "openai"
+    "vendor": "openai"
   }
 }

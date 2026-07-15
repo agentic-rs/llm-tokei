@@ -1,23 +1,23 @@
 {
   "minimax-m2": {
-    "provider": "minimax"
+    "vendor": "minimax"
   },
   "minimax-m2.1": {
-    "provider": "minimax"
+    "vendor": "minimax"
   },
   "minimax-m2.5": {
-    "provider": "minimax"
+    "vendor": "minimax"
   },
   "minimax-m2.5-highspeed": {
-    "provider": "minimax"
+    "vendor": "minimax"
   },
   "minimax-m2.7": {
-    "provider": "minimax"
+    "vendor": "minimax"
   },
   "minimax-m2.7-highspeed": {
-    "provider": "minimax"
+    "vendor": "minimax"
   },
   "minimax-m3": {
-    "provider": "minimax"
+    "vendor": "minimax"
   }
 }

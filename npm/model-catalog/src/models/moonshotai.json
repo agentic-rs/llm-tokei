@@ -1,0 +1,47 @@
+{
+  "kimi-k2-0711-preview": {
+    "vendor": "moonshotai",
+    "family": "kimi-k2",
+    "series": "kimi-k2"
+  },
+  "kimi-k2-0905-preview": {
+    "vendor": "moonshotai",
+    "family": "kimi-k2",
+    "series": "kimi-k2"
+  },
+  "kimi-k2-thinking": {
+    "vendor": "moonshotai",
+    "family": "kimi-k2-thinking",
+    "series": "kimi-k2"
+  },
+  "kimi-k2-thinking-turbo": {
+    "vendor": "moonshotai",
+    "family": "kimi-k2-thinking",
+    "series": "kimi-k2"
+  },
+  "kimi-k2-turbo-preview": {
+    "vendor": "moonshotai",
+    "family": "kimi-k2",
+    "series": "kimi-k2"
+  },
+  "kimi-k2.5": {
+    "vendor": "moonshotai",
+    "family": "kimi-k2",
+    "series": "kimi-k2.5"
+  },
+  "kimi-k2.6": {
+    "vendor": "moonshotai",
+    "family": "kimi-k2",
+    "series": "kimi-k2.6"
+  },
+  "kimi-k2.7-code": {
+    "vendor": "moonshotai",
+    "family": "kimi-k2-code",
+    "series": "kimi-k2.7"
+  },
+  "kimi-k2.7-code-highspeed": {
+    "vendor": "moonshotai",
+    "family": "kimi-k2-code",
+    "series": "kimi-k2.7"
+  }
+}

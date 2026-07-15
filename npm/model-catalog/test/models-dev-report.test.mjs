@@ -31,16 +31,20 @@ test("reports a resolution for every models.dev model record", () => {
   assert.equal(report.providers[1].models[1].resolution.canonical_name, "gpt-5");
 });
 
-test("can limit a report to official catalog vendors", () => {
+test("can limit a report to configured catalog source records", () => {
   const report = createModelsDevReport(
     {
       openai: { models: { "gpt-5": {} } },
+      azure: { models: { "gpt-5": {}, "phi-4-mini": {} } },
+      "github-models": { models: { "microsoft/phi-4-mini-instruct": {}, unrelated: {} } },
       ignored: { models: { "other-model": {} } }
     },
     { official: true }
   );
 
-  assert.equal(report.provider_count, 1);
-  assert.equal(report.model_count, 1);
-  assert.equal(report.providers[0].provider, "openai");
+  assert.equal(report.provider_count, 3);
+  assert.equal(report.model_count, 3);
+  assert.deepEqual(report.providers.map((provider) => provider.provider), ["azure", "github-models", "openai"]);
+  assert.equal(report.providers[0].models[0].resolution.canonical_name, "phi-4-mini-instruct");
+  assert.equal(report.providers[1].models[0].resolution.confidence, "exact");
 });

@@ -1,0 +1,72 @@
+{
+  "c4ai-aya-expanse-32b": {
+    "vendor": "cohere",
+    "family": "aya-expanse",
+    "series": "aya"
+  },
+  "c4ai-aya-expanse-8b": {
+    "vendor": "cohere",
+    "family": "aya-expanse",
+    "series": "aya"
+  },
+  "c4ai-aya-vision-32b": {
+    "vendor": "cohere",
+    "family": "aya-vision",
+    "series": "aya"
+  },
+  "c4ai-aya-vision-8b": {
+    "vendor": "cohere",
+    "family": "aya-vision",
+    "series": "aya"
+  },
+  "command-a-03-2025": {
+    "vendor": "cohere",
+    "family": "command-a",
+    "series": "command-a"
+  },
+  "command-a-plus-05-2026": {
+    "vendor": "cohere",
+    "family": "command-a-plus",
+    "series": "command-a"
+  },
+  "command-a-reasoning-08-2025": {
+    "vendor": "cohere",
+    "family": "command-a-reasoning",
+    "series": "command-a"
+  },
+  "command-a-translate-08-2025": {
+    "vendor": "cohere",
+    "family": "command-a-translate",
+    "series": "command-a"
+  },
+  "command-a-vision-07-2025": {
+    "vendor": "cohere",
+    "family": "command-a-vision",
+    "series": "command-a"
+  },
+  "command-r-08-2024": {
+    "vendor": "cohere",
+    "family": "command-r",
+    "series": "command-r"
+  },
+  "command-r-plus-08-2024": {
+    "vendor": "cohere",
+    "family": "command-r-plus",
+    "series": "command-r"
+  },
+  "command-r7b-12-2024": {
+    "vendor": "cohere",
+    "family": "command-r7b",
+    "series": "command-r"
+  },
+  "command-r7b-arabic-02-2025": {
+    "vendor": "cohere",
+    "family": "command-r7b-arabic",
+    "series": "command-r"
+  },
+  "north-mini-code-1-0": {
+    "vendor": "cohere",
+    "family": "north-mini-code",
+    "series": "north"
+  }
+}
