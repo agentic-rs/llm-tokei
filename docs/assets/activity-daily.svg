@@ -1,47 +1,114 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="602" height="432" viewBox="0 0 602 432" role="img" aria-labelledby="title desc" data-chart="plot" data-resolution="day">
+<svg xmlns="http://www.w3.org/2000/svg" width="602" height="432" viewBox="0 0 602 432" role="img" aria-labelledby="title desc" data-chart="plot" data-resolution="day" data-svg-theme-default="dark">
   <title id="title">Token activity graph</title>
-  <desc id="desc">Token activity · Jul 1–12, 2026. Total ~963.0M · Active 8/12 days · Best Jul 12: 356.7M · Longest streak 7 days</desc>
-  <rect x="0.5" y="0.5" width="601" height="431" rx="16" fill="#0d1117" stroke="#30363d"/>
-  <rect x="0.5" y="0.5" width="601" height="48" rx="16" fill="#161b22"/>
-  <rect x="0.5" y="32" width="601" height="17" fill="#161b22"/>
-  <circle cx="24" cy="24" r="6" fill="#ff5f56"/>
-  <circle cx="44" cy="24" r="6" fill="#ffbd2e"/>
-  <circle cx="64" cy="24" r="6" fill="#27c93f"/>
-  <text x="301.0" y="29.0" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" text-anchor="middle">llm-tokei</text>
-  <text x="22.0" y="75.0" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" text-anchor="start">$ llm-tokei graph --month</text>
+  <desc id="desc">Token activity · Jul 1–25, 2026. Total ~4.9B · Active 20/25 days · Best Jul 16: 743.8M · Longest streak 14 days</desc>
+  <style>
+    :root { color-scheme: light dark; --svg-background: #0d1117; --svg-surface: #161b22; --svg-border: #30363d; --svg-text: #f0f6fc; --svg-terminal-text: #c9d1d9; --svg-muted: #8b949e; --svg-grid: #21262d; --svg-cyan: #39c5cf; --svg-yellow: #d29922; --svg-dim: #6e7681; --svg-heat-0: #161b22; --svg-heat-1: #0e4429; --svg-heat-2: #006d32; --svg-heat-3: #26a641; --svg-heat-4: #39d353; --svg-window-red: #ff5f56; --svg-window-yellow: #ffbd2e; --svg-window-green: #27c93f; }
+    [data-svg-fill="background"] { fill: var(--svg-background); }
+    [data-svg-stroke="background"] { stroke: var(--svg-background); }
+    [data-svg-fill="surface"] { fill: var(--svg-surface); }
+    [data-svg-stroke="surface"] { stroke: var(--svg-surface); }
+    [data-svg-fill="border"] { fill: var(--svg-border); }
+    [data-svg-stroke="border"] { stroke: var(--svg-border); }
+    [data-svg-fill="text"] { fill: var(--svg-text); }
+    [data-svg-stroke="text"] { stroke: var(--svg-text); }
+    [data-svg-fill="terminal-text"] { fill: var(--svg-terminal-text); }
+    [data-svg-stroke="terminal-text"] { stroke: var(--svg-terminal-text); }
+    [data-svg-fill="muted"] { fill: var(--svg-muted); }
+    [data-svg-stroke="muted"] { stroke: var(--svg-muted); }
+    [data-svg-fill="grid"] { fill: var(--svg-grid); }
+    [data-svg-stroke="grid"] { stroke: var(--svg-grid); }
+    [data-svg-fill="cyan"] { fill: var(--svg-cyan); }
+    [data-svg-stroke="cyan"] { stroke: var(--svg-cyan); }
+    [data-svg-fill="yellow"] { fill: var(--svg-yellow); }
+    [data-svg-stroke="yellow"] { stroke: var(--svg-yellow); }
+    [data-svg-fill="dim"] { fill: var(--svg-dim); }
+    [data-svg-stroke="dim"] { stroke: var(--svg-dim); }
+    [data-svg-fill="heat-0"] { fill: var(--svg-heat-0); }
+    [data-svg-stroke="heat-0"] { stroke: var(--svg-heat-0); }
+    [data-svg-fill="heat-1"] { fill: var(--svg-heat-1); }
+    [data-svg-stroke="heat-1"] { stroke: var(--svg-heat-1); }
+    [data-svg-fill="heat-2"] { fill: var(--svg-heat-2); }
+    [data-svg-stroke="heat-2"] { stroke: var(--svg-heat-2); }
+    [data-svg-fill="heat-3"] { fill: var(--svg-heat-3); }
+    [data-svg-stroke="heat-3"] { stroke: var(--svg-heat-3); }
+    [data-svg-fill="heat-4"] { fill: var(--svg-heat-4); }
+    [data-svg-stroke="heat-4"] { stroke: var(--svg-heat-4); }
+    [data-svg-fill="window-red"] { fill: var(--svg-window-red); }
+    [data-svg-stroke="window-red"] { stroke: var(--svg-window-red); }
+    [data-svg-fill="window-yellow"] { fill: var(--svg-window-yellow); }
+    [data-svg-stroke="window-yellow"] { stroke: var(--svg-window-yellow); }
+    [data-svg-fill="window-green"] { fill: var(--svg-window-green); }
+    [data-svg-stroke="window-green"] { stroke: var(--svg-window-green); }
+    @media (prefers-color-scheme: light) {
+      :root { --svg-background: #ffffff; --svg-surface: #f6f8fa; --svg-border: #d0d7de; --svg-text: #24292f; --svg-terminal-text: #24292f; --svg-muted: #57606a; --svg-grid: #d8dee4; --svg-cyan: #0969da; --svg-yellow: #9a6700; --svg-dim: #57606a; --svg-heat-0: #ebedf0; --svg-heat-1: #9be9a8; --svg-heat-2: #40c463; --svg-heat-3: #30a14e; --svg-heat-4: #216e39; --svg-window-red: #cf222e; --svg-window-yellow: #bf8700; --svg-window-green: #1a7f37; }
+    }
+  </style>
+  <rect x="0.5" y="0.5" width="601" height="431" rx="16" data-svg-fill="background" fill="#0d1117" data-svg-stroke="border" stroke="#30363d"/>
+  <rect x="0.5" y="0.5" width="601" height="48" rx="16" data-svg-fill="surface" fill="#161b22"/>
+  <rect x="0.5" y="32" width="601" height="17" data-svg-fill="surface" fill="#161b22"/>
+  <circle cx="24.0" cy="24" r="6" data-svg-fill="window-red" fill="#ff5f56"/>
+  <circle cx="44.0" cy="24" r="6" data-svg-fill="window-yellow" fill="#ffbd2e"/>
+  <circle cx="64.0" cy="24" r="6" data-svg-fill="window-green" fill="#27c93f"/>
+  <text x="301.0" y="29.0" data-svg-fill="muted" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" text-anchor="middle">llm-tokei</text>
+  <text x="22.0" y="75.0" data-svg-fill="muted" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" text-anchor="start">$ llm-tokei graph --month</text>
   <g transform="translate(0 72)">
-  <text x="28.0" y="39.0" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" text-anchor="start" font-weight="600">Token activity · Jul 1–12, 2026</text>
-  <line x1="78.0" y1="260.0" x2="572.0" y2="260.0" stroke="#21262d"/>
-  <text x="68.0" y="264.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >0</text>
-  <line x1="78.0" y1="198.7" x2="572.0" y2="198.7" stroke="#21262d"/>
-  <text x="68.0" y="202.7" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >118.9M</text>
-  <line x1="78.0" y1="137.3" x2="572.0" y2="137.3" stroke="#21262d"/>
-  <text x="68.0" y="141.3" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >237.8M</text>
-  <line x1="78.0" y1="76.0" x2="572.0" y2="76.0" stroke="#21262d"/>
-  <text x="68.0" y="80.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >356.7M</text>
-  <rect class="activity-hit-target" x="78.0" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 1, 2026: 0</title></rect>
-  <rect class="activity-hit-target" x="119.2" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 2, 2026: 0</title></rect>
-  <rect class="activity-hit-target" x="160.3" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 3, 2026: 0</title></rect>
-  <rect class="activity-bar" x="207.3" y="259.0" width="29.6" height="1.0" rx="2" fill="#0e4429"/>
-  <rect class="activity-hit-target" x="201.5" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 4, 2026: ~593.4K</title></rect>
-  <rect class="activity-hit-target" x="242.7" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 5, 2026: 0</title></rect>
-  <rect class="activity-bar" x="289.6" y="242.9" width="29.6" height="17.1" rx="2" fill="#0e4429"/>
-  <rect class="activity-hit-target" x="283.8" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 6, 2026: ~33.2M</title></rect>
-  <rect class="activity-bar" x="330.8" y="223.2" width="29.6" height="36.8" rx="2" fill="#006d32"/>
-  <rect class="activity-hit-target" x="325.0" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 7, 2026: 71.4M</title></rect>
-  <rect class="activity-bar" x="371.9" y="222.9" width="29.6" height="37.1" rx="2" fill="#26a641"/>
-  <rect class="activity-hit-target" x="366.2" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 8, 2026: ~71.9M</title></rect>
-  <rect class="activity-bar" x="413.1" y="141.5" width="29.6" height="118.5" rx="2" fill="#39d353"/>
-  <rect class="activity-hit-target" x="407.3" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 9, 2026: ~229.6M</title></rect>
-  <rect class="activity-bar" x="454.3" y="241.4" width="29.6" height="18.6" rx="2" fill="#006d32"/>
-  <rect class="activity-hit-target" x="448.5" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 10, 2026: 36.0M</title></rect>
-  <rect class="activity-bar" x="495.4" y="175.6" width="29.6" height="84.4" rx="2" fill="#26a641"/>
-  <rect class="activity-hit-target" x="489.7" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026: ~163.5M</title></rect>
-  <rect class="activity-bar" x="536.6" y="76.0" width="29.6" height="184.0" rx="2" fill="#39d353"/>
-  <rect class="activity-hit-target" x="530.8" y="76.0" width="41.2" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 12, 2026: 356.7M</title></rect>
-  <text x="78.0" y="285.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="start" class="activity-axis-label">Jul 1</text>
-  <text x="325.0" y="285.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="middle" class="activity-axis-label">Jul 7</text>
-  <text x="572.0" y="285.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" class="activity-axis-label">Jul 12</text>
-  <text x="28.0" y="329.0" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" text-anchor="start" >Total ~963.0M · Active 8/12 days · Best Jul 12: 356.7M · Longest streak 7 days</text>
+  <text x="28.0" y="39.0" data-svg-fill="text" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" text-anchor="start" font-weight="600">Token activity · Jul 1–25, 2026</text>
+  <line x1="78.0" y1="260.0" x2="572.0" y2="260.0" data-svg-stroke="grid" stroke="#21262d"/>
+  <text x="68.0" y="264.0" data-svg-fill="muted" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >0</text>
+  <line x1="78.0" y1="198.7" x2="572.0" y2="198.7" data-svg-stroke="grid" stroke="#21262d"/>
+  <text x="68.0" y="202.7" data-svg-fill="muted" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >247.9M</text>
+  <line x1="78.0" y1="137.3" x2="572.0" y2="137.3" data-svg-stroke="grid" stroke="#21262d"/>
+  <text x="68.0" y="141.3" data-svg-fill="muted" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >495.9M</text>
+  <line x1="78.0" y1="76.0" x2="572.0" y2="76.0" data-svg-stroke="grid" stroke="#21262d"/>
+  <text x="68.0" y="80.0" data-svg-fill="muted" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" >743.8M</text>
+  <rect class="activity-hit-target" x="78.0" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 1, 2026: 0</title></rect>
+  <rect class="activity-hit-target" x="97.8" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 2, 2026: 0</title></rect>
+  <rect class="activity-hit-target" x="117.5" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 3, 2026: 0</title></rect>
+  <rect class="activity-bar" data-level="1" data-svg-fill="heat-1" x="140.0" y="259.0" width="14.2" height="1.0" rx="2" fill="#0e4429"/>
+  <rect class="activity-hit-target" x="137.3" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 4, 2026: ~593.4K</title></rect>
+  <rect class="activity-hit-target" x="157.0" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 5, 2026: 0</title></rect>
+  <rect class="activity-bar" data-level="1" data-svg-fill="heat-1" x="179.6" y="251.8" width="14.2" height="8.2" rx="2" fill="#0e4429"/>
+  <rect class="activity-hit-target" x="176.8" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 6, 2026: ~33.2M</title></rect>
+  <rect class="activity-bar" data-level="2" data-svg-fill="heat-2" x="199.3" y="242.3" width="14.2" height="17.7" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="196.6" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 7, 2026: 71.4M</title></rect>
+  <rect class="activity-bar" data-level="2" data-svg-fill="heat-2" x="219.1" y="242.2" width="14.2" height="17.8" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="216.3" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 8, 2026: ~71.9M</title></rect>
+  <rect class="activity-bar" data-level="3" data-svg-fill="heat-3" x="238.8" y="203.2" width="14.2" height="56.8" rx="2" fill="#26a641"/>
+  <rect class="activity-hit-target" x="236.1" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 9, 2026: ~229.6M</title></rect>
+  <rect class="activity-bar" data-level="1" data-svg-fill="heat-1" x="258.6" y="251.1" width="14.2" height="8.9" rx="2" fill="#0e4429"/>
+  <rect class="activity-hit-target" x="255.8" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 10, 2026: 36.0M</title></rect>
+  <rect class="activity-bar" data-level="2" data-svg-fill="heat-2" x="278.4" y="237.6" width="14.2" height="22.4" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="275.6" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 11, 2026: ~90.7M</title></rect>
+  <rect class="activity-bar" data-level="4" data-svg-fill="heat-4" x="298.1" y="139.9" width="14.2" height="120.1" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="295.4" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 12, 2026: 485.3M</title></rect>
+  <rect class="activity-bar" data-level="3" data-svg-fill="heat-3" x="317.9" y="161.4" width="14.2" height="98.6" rx="2" fill="#26a641"/>
+  <rect class="activity-hit-target" x="315.1" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 13, 2026: 398.6M</title></rect>
+  <rect class="activity-bar" data-level="4" data-svg-fill="heat-4" x="337.6" y="107.8" width="14.2" height="152.2" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="334.9" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 14, 2026: 615.3M</title></rect>
+  <rect class="activity-bar" data-level="4" data-svg-fill="heat-4" x="357.4" y="130.5" width="14.2" height="129.5" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="354.6" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 15, 2026: 523.7M</title></rect>
+  <rect class="activity-bar" data-level="4" data-svg-fill="heat-4" x="377.2" y="76.0" width="14.2" height="184.0" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="374.4" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 16, 2026: 743.8M</title></rect>
+  <rect class="activity-bar" data-level="4" data-svg-fill="heat-4" x="396.9" y="145.3" width="14.2" height="114.7" rx="2" fill="#39d353"/>
+  <rect class="activity-hit-target" x="394.2" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 17, 2026: 463.8M</title></rect>
+  <rect class="activity-bar" data-level="1" data-svg-fill="heat-1" x="416.7" y="252.1" width="14.2" height="7.9" rx="2" fill="#0e4429"/>
+  <rect class="activity-hit-target" x="413.9" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 18, 2026: 32.1M</title></rect>
+  <rect class="activity-bar" data-level="1" data-svg-fill="heat-1" x="436.4" y="259.0" width="14.2" height="1.0" rx="2" fill="#0e4429"/>
+  <rect class="activity-hit-target" x="433.7" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 19, 2026: 22.1K</title></rect>
+  <rect class="activity-hit-target" x="453.4" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 20, 2026: 0</title></rect>
+  <rect class="activity-bar" data-level="2" data-svg-fill="heat-2" x="476.0" y="244.0" width="14.2" height="16.0" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="473.2" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 21, 2026: ~64.6M</title></rect>
+  <rect class="activity-bar" data-level="3" data-svg-fill="heat-3" x="495.7" y="176.3" width="14.2" height="83.7" rx="2" fill="#26a641"/>
+  <rect class="activity-hit-target" x="493.0" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 22, 2026: 338.3M</title></rect>
+  <rect class="activity-bar" data-level="3" data-svg-fill="heat-3" x="515.5" y="208.5" width="14.2" height="51.5" rx="2" fill="#26a641"/>
+  <rect class="activity-hit-target" x="512.7" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 23, 2026: 208.2M</title></rect>
+  <rect class="activity-bar" data-level="3" data-svg-fill="heat-3" x="535.2" y="168.1" width="14.2" height="91.9" rx="2" fill="#26a641"/>
+  <rect class="activity-hit-target" x="532.5" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 24, 2026: 371.3M</title></rect>
+  <rect class="activity-bar" data-level="2" data-svg-fill="heat-2" x="555.0" y="236.0" width="14.2" height="24.0" rx="2" fill="#006d32"/>
+  <rect class="activity-hit-target" x="552.2" y="76.0" width="19.8" height="184.0" fill="#000000" fill-opacity="0"><title>Jul 25, 2026: 96.8M</title></rect>
+  <text x="78.0" y="285.0" data-svg-fill="muted" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="start" class="activity-axis-label">Jul 1</text>
+  <text x="325.0" y="285.0" data-svg-fill="muted" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="middle" class="activity-axis-label">Jul 13</text>
+  <text x="572.0" y="285.0" data-svg-fill="muted" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" text-anchor="end" class="activity-axis-label">Jul 25</text>
+  <text x="28.0" y="329.0" data-svg-fill="muted" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13" text-anchor="start" >Total ~4.9B · Active 20/25 days · Best Jul 16: 743.8M · Longest streak 14 days</text>
   </g>
 </svg>

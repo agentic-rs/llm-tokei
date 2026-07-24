@@ -1,4 +1,7 @@
-pub fn render_svg_terminal(command: &str, ansi: &str) -> String {
+use crate::cli::SvgTheme;
+use crate::format::svg_theme::{write_svg_theme_styles, SvgColor};
+
+pub fn render_svg_terminal(command: &str, ansi: &str, theme: SvgTheme) -> String {
   let mut raw_lines: Vec<&str> = ansi.lines().collect();
   while raw_lines.last().is_some_and(|line| line.trim().is_empty()) {
     raw_lines.pop();
@@ -25,25 +28,35 @@ pub fn render_svg_terminal(command: &str, ansi: &str) -> String {
 
   let mut out = String::new();
   out.push_str(&format!(
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" aria-labelledby=\"title desc\">\n"
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\" role=\"img\" aria-labelledby=\"title desc\" data-svg-theme-default=\"{}\">\n",
+    theme.as_str()
   ));
   out.push_str("  <title id=\"title\">llm-tokei terminal output</title>\n");
   out.push_str("  <desc id=\"desc\">A colored terminal table produced by llm-tokei.</desc>\n");
+  write_svg_theme_styles(&mut out, theme);
   out.push_str(&format!(
-    "  <rect width=\"{width}\" height=\"{height}\" rx=\"16\" fill=\"#0d1117\"/>\n"
+    "  <rect width=\"{width}\" height=\"{height}\" rx=\"16\" data-svg-fill=\"{}\" fill=\"{}\"/>\n",
+    SvgColor::Background.name(),
+    SvgColor::Background.color(theme)
   ));
   out.push_str(&format!(
-    "  <rect x=\"0\" y=\"0\" width=\"{width}\" height=\"48\" rx=\"16\" fill=\"#161b22\"/>\n"
+    "  <rect x=\"0\" y=\"0\" width=\"{width}\" height=\"48\" rx=\"16\" data-svg-fill=\"{}\" fill=\"{}\"/>\n",
+    SvgColor::Surface.name(),
+    SvgColor::Surface.color(theme)
   ));
   out.push_str(&format!(
-    "  <rect x=\"0\" y=\"32\" width=\"{width}\" height=\"16\" fill=\"#161b22\"/>\n"
+    "  <rect x=\"0\" y=\"32\" width=\"{width}\" height=\"16\" data-svg-fill=\"{}\" fill=\"{}\"/>\n",
+    SvgColor::Surface.name(),
+    SvgColor::Surface.color(theme)
   ));
-  out.push_str("  <circle cx=\"24\" cy=\"24\" r=\"6\" fill=\"#ff5f56\"/>\n");
-  out.push_str("  <circle cx=\"44\" cy=\"24\" r=\"6\" fill=\"#ffbd2e\"/>\n");
-  out.push_str("  <circle cx=\"64\" cy=\"24\" r=\"6\" fill=\"#27c93f\"/>\n");
+  out.push_str(&circle_element(24, SvgColor::WindowRed, theme));
+  out.push_str(&circle_element(44, SvgColor::WindowYellow, theme));
+  out.push_str(&circle_element(64, SvgColor::WindowGreen, theme));
   out.push_str(&format!(
-    "  <text x=\"{}\" y=\"29\" text-anchor=\"middle\" fill=\"#8b949e\" font-family=\"{}\" font-size=\"13\">llm-tokei</text>\n",
+    "  <text x=\"{}\" y=\"29\" text-anchor=\"middle\" data-svg-fill=\"{}\" fill=\"{}\" font-family=\"{}\" font-size=\"13\">llm-tokei</text>\n",
     width / 2,
+    SvgColor::Muted.name(),
+    SvgColor::Muted.color(theme),
     font_family()
   ));
   out.push_str("  <defs>\n");
@@ -58,30 +71,39 @@ pub fn render_svg_terminal(command: &str, ansi: &str) -> String {
     command_y,
     font_size,
     &[Span {
-      color: "#8b949e",
+      color: SvgColor::Muted,
       text: format!("$ {command}"),
     }],
+    theme,
   ));
   for (idx, line) in lines.iter().enumerate() {
     let y = table_start_y + idx * line_height;
-    out.push_str(&line_element(padding_x, y, font_size, line));
+    out.push_str(&line_element(padding_x, y, font_size, line, theme));
   }
   let blank_y = table_start_y + lines.len() * line_height;
-  out.push_str(&line_element(padding_x, blank_y, font_size, &[]));
+  out.push_str(&line_element(padding_x, blank_y, font_size, &[], theme));
   out.push_str("  </g>\n");
   out.push_str("</svg>\n");
   out
 }
 
+fn circle_element(x: usize, color: SvgColor, theme: SvgTheme) -> String {
+  format!(
+    "  <circle cx=\"{x}\" cy=\"24\" r=\"6\" data-svg-fill=\"{}\" fill=\"{}\"/>\n",
+    color.name(),
+    color.color(theme)
+  )
+}
+
 #[derive(Clone)]
 struct Span {
-  color: &'static str,
+  color: SvgColor,
   text: String,
 }
 
 fn parse_ansi_line(line: &str) -> Vec<Span> {
   let mut spans = Vec::new();
-  let mut color = "#c9d1d9";
+  let mut color = SvgColor::TerminalText;
   let mut buf = String::new();
   let mut chars = line.chars().peekable();
 
@@ -97,10 +119,10 @@ fn parse_ansi_line(line: &str) -> Vec<Span> {
       }
       push_span(&mut spans, color, &mut buf);
       color = match code.as_str() {
-        "0" => "#c9d1d9",
-        "36" => "#39c5cf",
-        "33" => "#d29922",
-        "90" => "#6e7681",
+        "0" => SvgColor::TerminalText,
+        "36" => SvgColor::Cyan,
+        "33" => SvgColor::Yellow,
+        "90" => SvgColor::Dim,
         _ => color,
       };
     } else {
@@ -111,7 +133,7 @@ fn parse_ansi_line(line: &str) -> Vec<Span> {
   spans
 }
 
-fn push_span(spans: &mut Vec<Span>, color: &'static str, buf: &mut String) {
+fn push_span(spans: &mut Vec<Span>, color: SvgColor, buf: &mut String) {
   if !buf.is_empty() {
     spans.push(Span {
       color,
@@ -120,15 +142,16 @@ fn push_span(spans: &mut Vec<Span>, color: &'static str, buf: &mut String) {
   }
 }
 
-fn line_element(x: usize, y: usize, font_size: usize, spans: &[Span]) -> String {
+fn line_element(x: usize, y: usize, font_size: usize, spans: &[Span], theme: SvgTheme) -> String {
   let mut out = format!(
     "    <text x=\"{x}\" y=\"{y}\" font-family=\"{}\" font-size=\"{font_size}\" xml:space=\"preserve\">",
     font_family()
   );
   for span in spans {
     out.push_str(&format!(
-      "<tspan fill=\"{}\">{}</tspan>",
-      span.color,
+      "<tspan data-svg-fill=\"{}\" fill=\"{}\">{}</tspan>",
+      span.color.name(),
+      span.color.color(theme),
       escape_xml(&span.text)
     ));
   }
@@ -147,7 +170,7 @@ pub(crate) fn escape_xml(text: &str) -> String {
       '&' => out.push_str("&amp;"),
       '<' => out.push_str("&lt;"),
       '>' => out.push_str("&gt;"),
-      '"' => out.push_str("&quot;"),
+      '\"' => out.push_str("&quot;"),
       '\'' => out.push_str("&apos;"),
       _ => out.push(ch),
     }
@@ -161,7 +184,7 @@ mod tests {
 
   #[test]
   fn svg_escapes_text_content() {
-    let svg = render_svg_terminal("llm-tokei --format svg", "source  total\n<&>\"'  42\n");
+    let svg = render_svg_terminal("llm-tokei --format svg", "source  total\n<&>\"'  42\n", SvgTheme::Dark);
     assert!(svg.contains("&lt;&amp;&gt;&quot;&apos;"));
     assert!(!svg.contains("<&>\"'"));
   }
@@ -171,11 +194,21 @@ mod tests {
     let svg = render_svg_terminal(
       "llm-tokei --format svg",
       "\x1b[36msource\x1b[0m\n\x1b[33mTOTAL\x1b[0m\n",
+      SvgTheme::Dark,
     );
-    assert!(svg.contains("rx=\"16\" fill=\"#0d1117\""));
-    assert!(svg.contains("fill=\"#ff5f56\""));
+    assert!(svg.contains("data-svg-fill=\"background\" fill=\"#0d1117\""));
+    assert!(svg.contains("data-svg-fill=\"window-red\" fill=\"#ff5f56\""));
     assert!(svg.contains("$ llm-tokei --format svg"));
-    assert!(svg.contains("fill=\"#39c5cf\""));
-    assert!(svg.contains("fill=\"#d29922\""));
+    assert!(svg.contains("data-svg-fill=\"cyan\" fill=\"#39c5cf\""));
+    assert!(svg.contains("data-svg-fill=\"yellow\" fill=\"#d29922\""));
+  }
+
+  #[test]
+  fn svg_uses_requested_theme_as_the_css_default() {
+    let svg = render_svg_terminal("llm-tokei", "source\n", SvgTheme::Light);
+
+    assert!(svg.contains("data-svg-theme-default=\"light\""));
+    assert!(svg.contains("data-svg-fill=\"background\" fill=\"#ffffff\""));
+    assert!(svg.contains("@media (prefers-color-scheme: dark)"));
   }
 }

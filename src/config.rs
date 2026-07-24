@@ -1,4 +1,4 @@
-use crate::cli::{Args, AvgBy, DateBucket, Format, Unit};
+use crate::cli::{Args, AvgBy, DateBucket, Format, SvgTheme, Unit};
 use crate::pricing::CostMode;
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, FromArgMatches, ValueEnum};
@@ -51,6 +51,8 @@ struct RawConfigFile {
 struct OutputConfig {
   #[serde(skip_serializing_if = "Option::is_none")]
   format: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  svg_theme: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   sort: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -349,6 +351,7 @@ fn flat_config_from_value(value: &Value) -> Result<FlatConfig> {
     }
     match key.as_str() {
       "format" => flat.output.format = value.as_str().map(str::to_string),
+      "svg-theme" => flat.output.svg_theme = value.as_str().map(str::to_string),
       "sort" => flat.output.sort = value.as_str().map(str::to_string),
       "asc" => flat.output.asc = value.as_bool(),
       "limit" => flat.output.limit = value.as_integer().and_then(|v| usize::try_from(v).ok()),
@@ -419,6 +422,9 @@ fn args_from_matches(matches: &clap::ArgMatches) -> Result<ConfigFile> {
   let mut out = ConfigFile::default();
   if cli_set(matches, "format") {
     out.output.format = value_name::<Format>(matches, "format");
+  }
+  if cli_set(matches, "svg_theme") {
+    out.output.svg_theme = value_name::<SvgTheme>(matches, "svg_theme");
   }
   if cli_set(matches, "sort") {
     out.output.sort = matches.get_one::<String>("sort").cloned();
@@ -512,6 +518,13 @@ fn args_from_matches(matches: &clap::ArgMatches) -> Result<ConfigFile> {
 fn config_to_args(config: &ConfigFile, current: &clap::ArgMatches) -> Vec<String> {
   let mut out = Vec::new();
   push_opt(&mut out, current, "format", "--format", config.output.format.as_deref());
+  push_opt(
+    &mut out,
+    current,
+    "svg_theme",
+    "--svg-theme",
+    config.output.svg_theme.as_deref(),
+  );
   push_opt(&mut out, current, "sort", "--sort", config.output.sort.as_deref());
   push_bool(&mut out, current, "asc", "--asc", config.output.asc);
   push_opt_display(&mut out, current, "limit", "--limit", config.output.limit);

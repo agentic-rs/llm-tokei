@@ -8,6 +8,10 @@ fn default_format() -> Format {
   Format::Table
 }
 
+fn default_svg_theme() -> SvgTheme {
+  SvgTheme::Dark
+}
+
 fn default_sort() -> String {
   "total".to_string()
 }
@@ -34,6 +38,28 @@ pub enum Format {
   Table,
   Json,
   Svg,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum SvgTheme {
+  Dark,
+  Light,
+}
+
+impl SvgTheme {
+  pub(crate) const fn as_str(self) -> &'static str {
+    match self {
+      Self::Dark => "dark",
+      Self::Light => "light",
+    }
+  }
+
+  pub(crate) const fn opposite(self) -> Self {
+    match self {
+      Self::Dark => Self::Light,
+      Self::Light => Self::Dark,
+    }
+  }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -91,6 +117,10 @@ pub struct Args {
   /// Output format.
   #[arg(long, value_enum, default_value_t = default_format(), help_heading = "Output", global = true)]
   pub format: Format,
+
+  /// Default theme for SVG output; SVGs adapt automatically to the viewer's light/dark preference.
+  #[arg(long, value_enum, default_value_t = default_svg_theme(), help_heading = "Output", global = true)]
+  pub svg_theme: SvgTheme,
 
   /// Sort key: total|input|output|cost|date|calls.
   #[arg(long, default_value_t = default_sort(), help_heading = "Output")]
