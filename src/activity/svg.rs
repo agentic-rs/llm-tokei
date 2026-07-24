@@ -1,34 +1,43 @@
 use super::plot::{format_value, month_labels, summary, title, ActivityPlot, CalendarGrid};
 use super::series::{ActivityDay, ActivitySeries, HourlyActivitySeries};
-use crate::cli::GraphChart;
+use crate::cli::{GraphChart, SvgTheme};
 use crate::format::svg::escape_xml;
+use crate::format::svg_theme::{write_svg_theme_styles, SvgColor};
 use std::fmt::Write;
 
 const FONT_FAMILY: &str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 const MONO_FONT_FAMILY: &str = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace";
-const BACKGROUND: &str = "#0d1117";
-const BORDER: &str = "#30363d";
-const TEXT: &str = "#f0f6fc";
-const MUTED: &str = "#8b949e";
-const GRID: &str = "#21262d";
 const HEADER_HEIGHT: usize = 48;
 const CONTENT_TOP: usize = 72;
 const MIN_WIDTH: usize = 360;
 const MAX_WIDTH: usize = 1_400;
 
-pub(super) fn render_activity_svg(series: &ActivitySeries, chart: GraphChart, command: &str) -> String {
+struct SvgFrame<'a> {
+  chart_title: &'a str,
+  chart_desc: &'a str,
+  chart: &'a str,
+  resolution: &'a str,
+  command: &'a str,
+}
+
+pub(super) fn render_activity_svg(
+  series: &ActivitySeries,
+  chart: GraphChart,
+  command: &str,
+  theme: SvgTheme,
+) -> String {
   match chart.resolve(series.len()) {
-    GraphChart::Plot => render_plot(&ActivityPlot::from_daily(series), "day", command),
-    GraphChart::Heatmap => render_heatmap(series, command),
+    GraphChart::Plot => render_plot(&ActivityPlot::from_daily(series), "day", command, theme),
+    GraphChart::Heatmap => render_heatmap(series, command, theme),
     GraphChart::Auto => unreachable!("auto chart is resolved before rendering"),
   }
 }
 
-pub(super) fn render_hourly_activity_svg(series: &HourlyActivitySeries, command: &str) -> String {
-  render_plot(&ActivityPlot::from_hourly(series), "hour", command)
+pub(super) fn render_hourly_activity_svg(series: &HourlyActivitySeries, command: &str, theme: SvgTheme) -> String {
+  render_plot(&ActivityPlot::from_hourly(series), "hour", command, theme)
 }
 
-fn render_plot(plot: &ActivityPlot, resolution: &str, command: &str) -> String {
+fn render_plot(plot: &ActivityPlot, resolution: &str, command: &str, theme: SvgTheme) -> String {
   let data_width = plot.len().saturating_mul(18) + 110;
   let title_width = plot.title.chars().count().saturating_mul(11) + 56;
   let summary_width = plot.summary.chars().count().saturating_mul(7) + 56;
@@ -47,21 +56,26 @@ fn render_plot(plot: &ActivityPlot, resolution: &str, command: &str) -> String {
     .filter(|value| value.is_finite())
     .fold(0.0, f64::max);
 
+  let chart_desc = format!("{}. {}", plot.title, plot.summary);
   let mut out = svg_start(
-    &plot.accessible_title,
-    &format!("{}. {}", plot.title, plot.summary),
-    "plot",
-    resolution,
+    SvgFrame {
+      chart_title: &plot.accessible_title,
+      chart_desc: &chart_desc,
+      chart: "plot",
+      resolution,
+      command,
+    },
     width,
     height,
-    command,
+    theme,
   );
   text_element(
     &mut out,
     28.0,
     39.0,
     20,
-    TEXT,
+    SvgColor::Text,
+    theme,
     "start",
     &plot.title,
     "font-weight=\"600\"",
@@ -73,7 +87,9 @@ fn render_plot(plot: &ActivityPlot, resolution: &str, command: &str) -> String {
     let value = max * fraction;
     writeln!(
       out,
-      "  <line x1=\"{chart_left:.1}\" y1=\"{y:.1}\" x2=\"{chart_right:.1}\" y2=\"{y:.1}\" stroke=\"{GRID}\"/>"
+      "  <line x1=\"{chart_left:.1}\" y1=\"{y:.1}\" x2=\"{chart_right:.1}\" y2=\"{y:.1}\" data-svg-stroke=\"{}\" stroke=\"{}\"/>",
+      SvgColor::Grid.name(),
+      SvgColor::Grid.color(theme)
     )
     .unwrap();
     text_element(
@@ -81,7 +97,8 @@ fn render_plot(plot: &ActivityPlot, resolution: &str, command: &str) -> String {
       chart_left - 10.0,
       y + 4.0,
       12,
-      MUTED,
+      SvgColor::Muted,
+      theme,
       "end",
       &format_value(value, plot.unit, false),
       "",
@@ -102,8 +119,10 @@ fn render_plot(plot: &ActivityPlot, resolution: &str, command: &str) -> String {
       let y = chart_bottom - bar_height;
       writeln!(
         out,
-        "  <rect class=\"activity-bar\" x=\"{x:.1}\" y=\"{y:.1}\" width=\"{bar_width:.1}\" height=\"{bar_height:.1}\" rx=\"2\" fill=\"{}\"/>",
-        level_color(point.level)
+      "  <rect class=\"activity-bar\" data-level=\"{}\" data-svg-fill=\"{}\" x=\"{x:.1}\" y=\"{y:.1}\" width=\"{bar_width:.1}\" height=\"{bar_height:.1}\" rx=\"2\" fill=\"{}\"/>",
+        point.level,
+        level_color(point.level).name(),
+        level_color(point.level).color(theme)
       )
       .unwrap();
     }
@@ -131,7 +150,8 @@ fn render_plot(plot: &ActivityPlot, resolution: &str, command: &str) -> String {
         x,
         chart_bottom + 25.0,
         12,
-        MUTED,
+        SvgColor::Muted,
+        theme,
         anchor,
         &plot.points[index].axis_label,
         "class=\"activity-axis-label\"",
@@ -139,12 +159,22 @@ fn render_plot(plot: &ActivityPlot, resolution: &str, command: &str) -> String {
     }
   }
 
-  text_element(&mut out, 28.0, 329.0, 13, MUTED, "start", &plot.summary, "");
+  text_element(
+    &mut out,
+    28.0,
+    329.0,
+    13,
+    SvgColor::Muted,
+    theme,
+    "start",
+    &plot.summary,
+    "",
+  );
   out.push_str("  </g>\n</svg>\n");
   out
 }
 
-fn render_heatmap(series: &ActivitySeries, command: &str) -> String {
+fn render_heatmap(series: &ActivitySeries, command: &str, theme: SvgTheme) -> String {
   const CELL: f64 = 11.0;
   const GAP: f64 = 3.0;
   const PITCH: f64 = CELL + GAP;
@@ -159,13 +189,25 @@ fn render_heatmap(series: &ActivitySeries, command: &str) -> String {
   let chart_desc = format!("{}. {}", title(series), summary(series));
   let text_width = chart_desc.chars().count().saturating_mul(7) + 56;
   let width = content_width(data_width.max(text_width), command);
-  let mut out = svg_start(&chart_title, &chart_desc, "heatmap", "day", width, height, command);
+  let mut out = svg_start(
+    SvgFrame {
+      chart_title: &chart_title,
+      chart_desc: &chart_desc,
+      chart: "heatmap",
+      resolution: "day",
+      command,
+    },
+    width,
+    height,
+    theme,
+  );
   text_element(
     &mut out,
     28.0,
     39.0,
     20,
-    TEXT,
+    SvgColor::Text,
+    theme,
     "start",
     &title(series),
     "font-weight=\"600\"",
@@ -174,12 +216,32 @@ fn render_heatmap(series: &ActivitySeries, command: &str) -> String {
   if let Some(grid) = grid.as_ref() {
     for (week, label) in month_labels(series, grid) {
       let x = GRID_LEFT + week as f64 * PITCH;
-      text_element(&mut out, x, GRID_TOP - 15.0, 12, MUTED, "start", &label, "");
+      text_element(
+        &mut out,
+        x,
+        GRID_TOP - 15.0,
+        12,
+        SvgColor::Muted,
+        theme,
+        "start",
+        &label,
+        "",
+      );
     }
 
     for (row, label) in [(1, "Mon"), (3, "Wed"), (5, "Fri")] {
       let y = GRID_TOP + row as f64 * PITCH + CELL - 1.0;
-      text_element(&mut out, GRID_LEFT - 10.0, y, 12, MUTED, "end", label, "");
+      text_element(
+        &mut out,
+        GRID_LEFT - 10.0,
+        y,
+        12,
+        SvgColor::Muted,
+        theme,
+        "end",
+        label,
+        "",
+      );
     }
 
     for week in 0..grid.week_count {
@@ -190,11 +252,16 @@ fn render_heatmap(series: &ActivitySeries, command: &str) -> String {
         };
         let x = GRID_LEFT + week as f64 * PITCH;
         let y = GRID_TOP + weekday as f64 * PITCH;
-        let stroke = if day.level == 0 { BORDER } else { level_color(day.level) };
+        let color = level_color(day.level);
+        let stroke = if day.level == 0 { SvgColor::Border } else { color };
         writeln!(
           out,
-          "  <rect class=\"activity-cell\" x=\"{x:.1}\" y=\"{y:.1}\" width=\"{CELL:.1}\" height=\"{CELL:.1}\" rx=\"2\" fill=\"{}\" stroke=\"{stroke}\"><title>{}</title></rect>",
-          level_color(day.level),
+          "  <rect class=\"activity-cell\" data-level=\"{}\" data-svg-fill=\"{}\" data-svg-stroke=\"{}\" x=\"{x:.1}\" y=\"{y:.1}\" width=\"{CELL:.1}\" height=\"{CELL:.1}\" rx=\"2\" fill=\"{}\" stroke=\"{}\"><title>{}</title></rect>",
+          day.level,
+          color.name(),
+          stroke.name(),
+          color.color(theme),
+          stroke.color(theme),
           escape_xml(&day_tooltip(day, series))
         )
         .unwrap();
@@ -203,73 +270,129 @@ fn render_heatmap(series: &ActivitySeries, command: &str) -> String {
   }
 
   let legend_y = 211.0;
-  text_element(&mut out, 28.0, legend_y + 10.0, 12, MUTED, "start", "Less", "");
+  text_element(
+    &mut out,
+    28.0,
+    legend_y + 10.0,
+    12,
+    SvgColor::Muted,
+    theme,
+    "start",
+    "Less",
+    "",
+  );
   for level in 0..=4 {
     let x = 61.0 + f64::from(level) * PITCH;
     writeln!(
       out,
-      "  <rect x=\"{x:.1}\" y=\"{legend_y:.1}\" width=\"{CELL:.1}\" height=\"{CELL:.1}\" rx=\"2\" fill=\"{}\" stroke=\"{}\"/>",
-      level_color(level),
-      if level == 0 { BORDER } else { level_color(level) }
+      "  <rect data-level=\"{level}\" data-svg-fill=\"{}\" data-svg-stroke=\"{}\" x=\"{x:.1}\" y=\"{legend_y:.1}\" width=\"{CELL:.1}\" height=\"{CELL:.1}\" rx=\"2\" fill=\"{}\" stroke=\"{}\"/>",
+      level_color(level).name(),
+      if level == 0 { SvgColor::Border.name() } else { level_color(level).name() },
+      level_color(level).color(theme),
+      if level == 0 { SvgColor::Border.color(theme) } else { level_color(level).color(theme) }
     )
     .unwrap();
   }
-  text_element(&mut out, 136.0, legend_y + 10.0, 12, MUTED, "start", "More", "");
-  text_element(&mut out, 28.0, 254.0, 13, MUTED, "start", &summary(series), "");
+  text_element(
+    &mut out,
+    136.0,
+    legend_y + 10.0,
+    12,
+    SvgColor::Muted,
+    theme,
+    "start",
+    "More",
+    "",
+  );
+  text_element(
+    &mut out,
+    28.0,
+    254.0,
+    13,
+    SvgColor::Muted,
+    theme,
+    "start",
+    &summary(series),
+    "",
+  );
   out.push_str("  </g>\n</svg>\n");
   out
 }
 
-fn svg_start(
-  chart_title: &str,
-  chart_desc: &str,
-  chart: &str,
-  resolution: &str,
-  width: usize,
-  height: usize,
-  command: &str,
-) -> String {
+fn svg_start(frame: SvgFrame<'_>, width: usize, height: usize, theme: SvgTheme) -> String {
   let outer_height = height + CONTENT_TOP;
   let mut out = String::new();
   writeln!(
     out,
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{outer_height}\" viewBox=\"0 0 {width} {outer_height}\" role=\"img\" aria-labelledby=\"title desc\" data-chart=\"{chart}\" data-resolution=\"{resolution}\">"
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{outer_height}\" viewBox=\"0 0 {width} {outer_height}\" role=\"img\" aria-labelledby=\"title desc\" data-chart=\"{}\" data-resolution=\"{}\" data-svg-theme-default=\"{}\">",
+    frame.chart,
+    frame.resolution,
+    theme.as_str()
   )
   .unwrap();
-  writeln!(out, "  <title id=\"title\">{}</title>", escape_xml(chart_title)).unwrap();
-  writeln!(out, "  <desc id=\"desc\">{}</desc>", escape_xml(chart_desc)).unwrap();
+  writeln!(out, "  <title id=\"title\">{}</title>", escape_xml(frame.chart_title)).unwrap();
+  writeln!(out, "  <desc id=\"desc\">{}</desc>", escape_xml(frame.chart_desc)).unwrap();
+  write_svg_theme_styles(&mut out, theme);
   writeln!(
     out,
-    "  <rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"16\" fill=\"{BACKGROUND}\" stroke=\"{BORDER}\"/>",
+    "  <rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"16\" data-svg-fill=\"{}\" fill=\"{}\" data-svg-stroke=\"{}\" stroke=\"{}\"/>",
     width - 1,
-    outer_height - 1
+    outer_height - 1,
+    SvgColor::Background.name(),
+    SvgColor::Background.color(theme),
+    SvgColor::Border.name(),
+    SvgColor::Border.color(theme)
   )
   .unwrap();
   writeln!(
     out,
-    "  <rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{HEADER_HEIGHT}\" rx=\"16\" fill=\"#161b22\"/>",
-    width - 1
+    "  <rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{HEADER_HEIGHT}\" rx=\"16\" data-svg-fill=\"{}\" fill=\"{}\"/>",
+    width - 1,
+    SvgColor::Surface.name(),
+    SvgColor::Surface.color(theme)
   )
   .unwrap();
   writeln!(
     out,
-    "  <rect x=\"0.5\" y=\"32\" width=\"{}\" height=\"17\" fill=\"#161b22\"/>",
-    width - 1
+    "  <rect x=\"0.5\" y=\"32\" width=\"{}\" height=\"17\" data-svg-fill=\"{}\" fill=\"{}\"/>",
+    width - 1,
+    SvgColor::Surface.name(),
+    SvgColor::Surface.color(theme)
   )
   .unwrap();
-  out.push_str("  <circle cx=\"24\" cy=\"24\" r=\"6\" fill=\"#ff5f56\"/>\n");
-  out.push_str("  <circle cx=\"44\" cy=\"24\" r=\"6\" fill=\"#ffbd2e\"/>\n");
-  out.push_str("  <circle cx=\"64\" cy=\"24\" r=\"6\" fill=\"#27c93f\"/>\n");
-  chrome_text_element(&mut out, width as f64 / 2.0, 29.0, 13, "middle", "llm-tokei");
-  chrome_text_element(&mut out, 22.0, 75.0, 14, "start", &format!("$ {command}"));
+  circle_element(&mut out, 24.0, SvgColor::WindowRed, theme);
+  circle_element(&mut out, 44.0, SvgColor::WindowYellow, theme);
+  circle_element(&mut out, 64.0, SvgColor::WindowGreen, theme);
+  chrome_text_element(&mut out, width as f64 / 2.0, 29.0, 13, theme, "middle", "llm-tokei");
+  chrome_text_element(
+    &mut out,
+    22.0,
+    75.0,
+    14,
+    theme,
+    "start",
+    &format!("$ {}", frame.command),
+  );
   writeln!(out, "  <g transform=\"translate(0 {CONTENT_TOP})\">").unwrap();
   out
 }
 
-fn chrome_text_element(out: &mut String, x: f64, y: f64, size: usize, anchor: &str, text: &str) {
+fn circle_element(out: &mut String, x: f64, color: SvgColor, theme: SvgTheme) {
   writeln!(
     out,
-    "  <text x=\"{x:.1}\" y=\"{y:.1}\" fill=\"{MUTED}\" font-family=\"{MONO_FONT_FAMILY}\" font-size=\"{size}\" text-anchor=\"{anchor}\">{}</text>",
+    "  <circle cx=\"{x:.1}\" cy=\"24\" r=\"6\" data-svg-fill=\"{}\" fill=\"{}\"/>",
+    color.name(),
+    color.color(theme)
+  )
+  .unwrap();
+}
+
+fn chrome_text_element(out: &mut String, x: f64, y: f64, size: usize, theme: SvgTheme, anchor: &str, text: &str) {
+  writeln!(
+    out,
+    "  <text x=\"{x:.1}\" y=\"{y:.1}\" data-svg-fill=\"{}\" fill=\"{}\" font-family=\"{MONO_FONT_FAMILY}\" font-size=\"{size}\" text-anchor=\"{anchor}\">{}</text>",
+    SvgColor::Muted.name(),
+    SvgColor::Muted.color(theme),
     escape_xml(text)
   )
   .unwrap();
@@ -281,10 +404,22 @@ fn content_width(chart_width: usize, command: &str) -> usize {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn text_element(out: &mut String, x: f64, y: f64, size: usize, color: &str, anchor: &str, text: &str, extra: &str) {
+fn text_element(
+  out: &mut String,
+  x: f64,
+  y: f64,
+  size: usize,
+  color: SvgColor,
+  theme: SvgTheme,
+  anchor: &str,
+  text: &str,
+  extra: &str,
+) {
   writeln!(
     out,
-    "  <text x=\"{x:.1}\" y=\"{y:.1}\" fill=\"{color}\" font-family=\"{FONT_FAMILY}\" font-size=\"{size}\" text-anchor=\"{anchor}\" {extra}>{}</text>",
+    "  <text x=\"{x:.1}\" y=\"{y:.1}\" data-svg-fill=\"{}\" fill=\"{}\" font-family=\"{FONT_FAMILY}\" font-size=\"{size}\" text-anchor=\"{anchor}\" {extra}>{}</text>",
+    color.name(),
+    color.color(theme),
     escape_xml(text)
   )
   .unwrap();
@@ -298,13 +433,13 @@ fn day_tooltip(day: &ActivityDay, series: &ActivitySeries) -> String {
   )
 }
 
-fn level_color(level: u8) -> &'static str {
+fn level_color(level: u8) -> SvgColor {
   match level {
-    0 => "#161b22",
-    1 => "#0e4429",
-    2 => "#006d32",
-    3 => "#26a641",
-    _ => "#39d353",
+    0 => SvgColor::Heat0,
+    1 => SvgColor::Heat1,
+    2 => SvgColor::Heat2,
+    3 => SvgColor::Heat3,
+    _ => SvgColor::Heat4,
   }
 }
 
@@ -321,14 +456,21 @@ mod tests {
   #[test]
   fn auto_renders_short_ranges_as_native_svg_bars() {
     let series = ActivitySeries::from_values(date(2026, 7, 1), (1..=30).map(f64::from).collect(), Unit::Tokens);
-    let svg = render_activity_svg(&series, GraphChart::Auto, "llm-tokei graph --month --format svg");
+    let svg = render_activity_svg(
+      &series,
+      GraphChart::Auto,
+      "llm-tokei graph --month --format svg",
+      SvgTheme::Dark,
+    );
 
     assert!(svg.starts_with("<svg "));
     assert!(svg.contains("data-chart=\"plot\""));
     assert!(svg.contains("data-resolution=\"day\""));
     assert!(svg.contains("class=\"activity-bar\""));
     assert_eq!(svg.matches("class=\"activity-hit-target\"").count(), 30);
-    assert!(svg.contains("fill=\"#ff5f56\""));
+    assert!(svg.contains("data-svg-fill=\"window-red\" fill=\"#ff5f56\""));
+    assert!(svg.contains("data-svg-fill=\"heat-4\""));
+    assert!(svg.contains("fill=\"#39d353\""));
     assert!(svg.contains("$ llm-tokei graph --month --format svg"));
     assert!(svg.ends_with("</svg>\n"));
   }
@@ -336,19 +478,30 @@ mod tests {
   #[test]
   fn auto_renders_long_ranges_as_accessible_calendar_cells() {
     let series = ActivitySeries::from_values(date(2026, 6, 1), vec![1.0; 31], Unit::Tokens);
-    let svg = render_activity_svg(&series, GraphChart::Auto, "llm-tokei graph --format svg");
+    let svg = render_activity_svg(
+      &series,
+      GraphChart::Auto,
+      "llm-tokei graph --format svg",
+      SvgTheme::Dark,
+    );
 
     assert!(svg.contains("data-chart=\"heatmap\""));
     assert_eq!(svg.matches("class=\"activity-cell\"").count(), 31);
     assert!(svg.contains("aria-labelledby=\"title desc\""));
     assert!(svg.contains("<title>Jun 1, 2026: 1</title>"));
+    assert!(svg.contains("data-svg-fill=\"heat-4\""));
     assert!(svg.contains("fill=\"#39d353\""));
   }
 
   #[test]
   fn plot_includes_zero_grid_and_summary() {
     let series = ActivitySeries::from_values(date(2026, 7, 1), vec![0.0; 7], Unit::Cost);
-    let svg = render_activity_svg(&series, GraphChart::Plot, "llm-tokei graph --7d --format svg");
+    let svg = render_activity_svg(
+      &series,
+      GraphChart::Plot,
+      "llm-tokei graph --7d --format svg",
+      SvgTheme::Dark,
+    );
     assert!(svg.contains("$0.00"));
     assert!(svg.contains("Active 0/7 days"));
     assert!(!svg.contains("class=\"activity-bar\""));
@@ -362,7 +515,7 @@ mod tests {
       .unwrap()
       .with_timezone(&Utc);
     let series = HourlyActivitySeries::from_values(start, vec![0.0, 10.0, 20.0], Unit::Tokens);
-    let svg = render_hourly_activity_svg(&series, "llm-tokei graph --3h --format svg");
+    let svg = render_hourly_activity_svg(&series, "llm-tokei graph --3h --format svg", SvgTheme::Dark);
 
     assert!(svg.contains("data-chart=\"plot\""));
     assert!(svg.contains("data-resolution=\"hour\""));
@@ -387,13 +540,27 @@ mod tests {
     let one_hour = render_hourly_activity_svg(
       &HourlyActivitySeries::from_values(start, vec![10.0], Unit::Tokens),
       "llm-tokei graph --1h --format svg",
+      SvgTheme::Dark,
     );
     let two_hours = render_hourly_activity_svg(
       &HourlyActivitySeries::from_values(start, vec![10.0, 20.0], Unit::Tokens),
       "llm-tokei graph --2h --format svg",
+      SvgTheme::Dark,
     );
 
     assert_eq!(one_hour.matches("class=\"activity-axis-label\"").count(), 1);
     assert_eq!(two_hours.matches("class=\"activity-axis-label\"").count(), 2);
+  }
+
+  #[test]
+  fn activity_svg_uses_requested_theme_as_the_css_fallback() {
+    let series = ActivitySeries::from_values(date(2026, 7, 1), vec![1.0], Unit::Tokens);
+    let svg = render_activity_svg(&series, GraphChart::Plot, "llm-tokei graph", SvgTheme::Light);
+
+    assert!(svg.contains("data-svg-theme-default=\"light\""));
+    assert!(svg.contains("data-svg-fill=\"background\" fill=\"#ffffff\""));
+    assert!(svg.contains("data-svg-fill=\"heat-4\""));
+    assert!(svg.contains("fill=\"#216e39\""));
+    assert!(svg.contains("@media (prefers-color-scheme: dark)"));
   }
 }

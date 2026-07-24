@@ -4,7 +4,7 @@ mod svg;
 mod terminal;
 
 use crate::aggregate::Filters;
-use crate::cli::{Format, GraphChart, Unit};
+use crate::cli::{Format, GraphChart, SvgTheme, Unit};
 use crate::model::UsageRecord;
 use crate::pricing::{CostMode, PricingTable};
 use anyhow::Result;
@@ -24,6 +24,7 @@ pub struct ActivityRenderOptions<'a> {
   pub use_color: bool,
   pub width: Option<usize>,
   pub command: &'a str,
+  pub svg_theme: SvgTheme,
 }
 
 pub fn render_activity(
@@ -46,7 +47,7 @@ pub fn render_activity(
         HourlyActivitySeries::from_records(records, filters, pricing, options.cost_mode, options.unit, start, end);
       return Ok(match options.format {
         Format::Table => render_hourly_activity_terminal(&series, &terminal_options),
-        Format::Svg => render_hourly_activity_svg(&series, options.command),
+        Format::Svg => render_hourly_activity_svg(&series, options.command, options.svg_theme),
         Format::Json => unreachable!("graph JSON output is rejected before collecting records"),
       });
     }
@@ -56,7 +57,7 @@ pub fn render_activity(
   let series = ActivitySeries::from_records(records, filters, pricing, options.cost_mode, options.unit, start, end);
   Ok(match options.format {
     Format::Table => render_activity_terminal(&series, options.chart, &terminal_options),
-    Format::Svg => render_activity_svg(&series, options.chart, options.command),
+    Format::Svg => render_activity_svg(&series, options.chart, options.command, options.svg_theme),
     Format::Json => unreachable!("graph JSON output is rejected before collecting records"),
   })
 }

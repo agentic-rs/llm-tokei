@@ -199,11 +199,46 @@ fn codex_fixture_renders_svg() {
   let svg = String::from_utf8_lossy(&out.stdout);
   assert!(svg.starts_with("<svg "), "svg: {svg}");
   assert!(svg.contains("llm-tokei terminal output"), "svg: {svg}");
+  assert!(svg.contains("data-svg-theme-default=\"dark\""), "svg: {svg}");
+  assert!(svg.contains("@media (prefers-color-scheme: light)"), "svg: {svg}");
   assert!(svg.contains("fill=\"#ff5f56\""), "svg: {svg}");
   assert!(svg.contains("fill=\"#39c5cf\""), "svg: {svg}");
   assert!(svg.contains("codex"), "svg: {svg}");
   assert!(svg.contains("gpt-5"), "svg: {svg}");
   assert!(svg.ends_with("</svg>\n"), "svg: {svg}");
+}
+
+#[test]
+fn codex_fixture_can_select_light_svg_fallback() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("codex-svg-light");
+  let out = cmd
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+      "--format",
+      "svg",
+      "--svg-theme",
+      "light",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run llm-tokei with a light SVG fallback");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let svg = String::from_utf8_lossy(&out.stdout);
+  assert!(svg.contains("data-svg-theme-default=\"light\""), "svg: {svg}");
+  assert!(
+    svg.contains("data-svg-fill=\"background\" fill=\"#ffffff\""),
+    "svg: {svg}"
+  );
+  assert!(svg.contains("data-svg-fill=\"cyan\" fill=\"#0969da\""), "svg: {svg}");
+  assert!(svg.contains("@media (prefers-color-scheme: dark)"), "svg: {svg}");
 }
 
 #[test]
@@ -411,6 +446,8 @@ fn graph_renders_native_svg_for_short_ranges() {
       "2025-01-30",
       "--format",
       "svg",
+      "--svg-theme",
+      "light",
     ])
     .output()
     .expect("run SVG activity graph");
@@ -421,6 +458,11 @@ fn graph_renders_native_svg_for_short_ranges() {
   assert!(svg.starts_with("<svg "), "svg: {svg}");
   assert!(svg.contains("data-chart=\"plot\""), "svg: {svg}");
   assert!(svg.contains("class=\"activity-bar\""), "svg: {svg}");
+  assert!(svg.contains("data-svg-theme-default=\"light\""), "svg: {svg}");
+  assert!(
+    svg.contains("data-svg-fill=\"background\" fill=\"#ffffff\""),
+    "svg: {svg}"
+  );
   assert!(svg.contains("<title>Jan 2, 2025: 720</title>"), "svg: {svg}");
   assert!(!svg.contains("terminal-content"), "svg: {svg}");
 }
@@ -1455,7 +1497,7 @@ fn config_args_saves_structured_defaults() {
       "config",
       "args",
       "--",
-      "--cost official --group-by provider --human --source codex",
+      "--cost official --group-by provider --human --source codex --svg-theme light",
     ])
     .output()
     .expect("run config args");
@@ -1468,6 +1510,7 @@ fn config_args_saves_structured_defaults() {
   let contents = std::fs::read_to_string(&config_path).expect("read saved config");
   let _ = std::fs::remove_dir_all(config_dir);
   assert!(contents.contains("cost = \"official\""), "config: {contents}");
+  assert!(contents.contains("svg-theme = \"light\""), "config: {contents}");
   assert!(contents.contains("group-by = [\"provider\"]"), "config: {contents}");
   assert!(contents.contains("human = true"), "config: {contents}");
   assert!(contents.contains("source = [\"codex\"]"), "config: {contents}");

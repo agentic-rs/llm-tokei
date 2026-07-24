@@ -363,7 +363,7 @@ fn main() -> Result<()> {
         let opts = table_opts(&args, show_cost, !args.no_color, unit, args.table_width);
         render_table(&aggs, &dims, &opts)
       };
-      print!("{}", render_svg_terminal(&display_command(), &text));
+      print!("{}", render_svg_terminal(&display_command(), &text, args.svg_theme));
     }
   }
 
@@ -399,6 +399,7 @@ fn render_activity_graph(
       use_color,
       width,
       command: &command,
+      svg_theme: args.svg_theme,
     },
   )?;
   print!("{rendered}");
@@ -420,9 +421,10 @@ fn display_command_from(mut args: Vec<String>) -> String {
   let mut visible = Vec::with_capacity(args.len());
   let mut args = args.into_iter().peekable();
   while let Some(arg) = args.next() {
-    if arg == "--format" && args.peek().is_some_and(|format| format == "svg") {
+    let omit_next = (arg == "--format" && args.peek().is_some_and(|format| format == "svg")) || arg == "--svg-theme";
+    if omit_next {
       args.next();
-    } else if arg != "--format=svg" {
+    } else if arg != "--format=svg" && !arg.starts_with("--svg-theme=") {
       visible.push(arg);
     }
   }
@@ -494,13 +496,25 @@ mod display_command_tests {
   use super::*;
 
   #[test]
-  fn svg_format_is_omitted_from_the_decorated_command() {
+  fn svg_rendering_options_are_omitted_from_the_decorated_command() {
     let command = display_command_from(
-      ["/tmp/llm-tokei", "graph", "--24h", "--format", "svg"]
+      [
+        "/tmp/llm-tokei",
+        "graph",
+        "--24h",
+        "--format",
+        "svg",
+        "--svg-theme",
+        "light",
+      ]
+      .map(str::to_string)
+      .to_vec(),
+    );
+    let equals_command = display_command_from(
+      ["/tmp/llm-tokei", "graph", "--format=svg", "--svg-theme=dark"]
         .map(str::to_string)
         .to_vec(),
     );
-    let equals_command = display_command_from(["/tmp/llm-tokei", "graph", "--format=svg"].map(str::to_string).to_vec());
 
     assert_eq!(command, "llm-tokei graph --24h");
     assert_eq!(equals_command, "llm-tokei graph");
