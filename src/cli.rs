@@ -118,7 +118,7 @@ pub struct Args {
   #[arg(long, value_enum, default_value_t = default_format(), help_heading = "Output", global = true)]
   pub format: Format,
 
-  /// Fallback theme for SVG output; SVGs adapt to the viewer's light/dark preference when supported.
+  /// Default theme for SVG output; SVGs adapt automatically to the viewer's light/dark preference.
   #[arg(long, value_enum, default_value_t = default_svg_theme(), help_heading = "Output", global = true)]
   pub svg_theme: SvgTheme,
 

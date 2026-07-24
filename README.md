@@ -101,7 +101,7 @@ llm-tokei graph --24h
 # Native SVG activity graph
 llm-tokei graph --format svg > activity.svg
 
-# Use a light fallback palette for static SVG renderers
+# Set the SVG's default palette (it still adapts automatically)
 llm-tokei graph --format svg --svg-theme light > activity.svg
 
 # JSON for scripts

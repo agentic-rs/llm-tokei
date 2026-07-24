@@ -113,8 +113,8 @@ llm-tokei graph --7d --format svg > recent-activity.svg
 ```
 
 SVG output automatically follows the viewer's light or dark preference. Use
-`--svg-theme dark` (the default) or `--svg-theme light` to choose the fallback
-palette for renderers that do not support `prefers-color-scheme`.
+`--svg-theme dark` (the default) or `--svg-theme light` to choose the SVG's
+default palette.
 
 ## Grouping
 
@@ -218,7 +218,7 @@ SVG uses the same table columns and table-specific flags as `--format table`.
 It does not auto-fit to the terminal width, but `--table-width <N>` can be used
 to create a narrower image. `llm-tokei graph --format svg` instead produces a
 native plot or heatmap as described in [Activity Graph](#activity-graph). The
-automatic light/dark behavior and `--svg-theme` fallback apply to both kinds of
+automatic light/dark behavior and `--svg-theme` default palette apply to both kinds of
 SVG output.
 
 ## Sorting And Limits

@@ -209,7 +209,7 @@ fn codex_fixture_renders_svg() {
 }
 
 #[test]
-fn codex_fixture_can_select_light_svg_fallback() {
+fn codex_fixture_can_select_light_svg_default_theme() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
   let (mut cmd, cache_home) = isolated_cmd("codex-svg-light");
   let out = cmd
@@ -227,7 +227,7 @@ fn codex_fixture_can_select_light_svg_fallback() {
       "--no-cache",
     ])
     .output()
-    .expect("run llm-tokei with a light SVG fallback");
+    .expect("run llm-tokei with a light SVG default theme");
   let _ = std::fs::remove_dir_all(cache_home);
 
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));

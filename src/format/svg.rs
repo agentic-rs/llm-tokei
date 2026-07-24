@@ -204,7 +204,7 @@ mod tests {
   }
 
   #[test]
-  fn svg_uses_requested_theme_as_the_css_fallback() {
+  fn svg_uses_requested_theme_as_the_css_default() {
     let svg = render_svg_terminal("llm-tokei", "source\n", SvgTheme::Light);
 
     assert!(svg.contains("data-svg-theme-default=\"light\""));

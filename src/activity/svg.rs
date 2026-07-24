@@ -553,7 +553,7 @@ mod tests {
   }
 
   #[test]
-  fn activity_svg_uses_requested_theme_as_the_css_fallback() {
+  fn activity_svg_uses_requested_theme_as_the_css_default() {
     let series = ActivitySeries::from_values(date(2026, 7, 1), vec![1.0], Unit::Tokens);
     let svg = render_activity_svg(&series, GraphChart::Plot, "llm-tokei graph", SvgTheme::Light);
 

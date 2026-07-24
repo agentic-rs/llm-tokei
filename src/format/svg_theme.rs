@@ -154,7 +154,7 @@ mod tests {
   use super::*;
 
   #[test]
-  fn styles_keep_the_requested_theme_as_a_fallback() {
+  fn styles_keep_the_requested_theme_as_the_default() {
     let mut dark = String::new();
     write_svg_theme_styles(&mut dark, SvgTheme::Dark);
     assert!(dark.contains("--svg-background: #0d1117;"));
