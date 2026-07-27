@@ -1,6 +1,6 @@
-use crate::model::{SessionKind, Source, UsageRecord};
+use crate::model::{ParsedUsageFile, ParsedUsageRecord, SessionKind, Source, UsageRecord};
 use crate::sources::dump::{DumpSink, DumpedSession};
-use crate::sources::{read_jsonl, summarize_records, UsageSource};
+use crate::sources::{read_jsonl_with_status, summarize_records, JsonlPosition, UsageSource};
 use crate::text_count::{
   all_strings, json_serialized_or_string, message_content, nested_fields, BytesSink, SpanSink, StatsSink, StringSink,
   TextSpan, TextStats, TokenSpan, TokenStatsSink, TokenUsageStats,
@@ -52,14 +52,19 @@ impl CodexSource {
   }
 
   pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
+    let records = Self::parse_cache_file(path)?.into_usage_records();
+    Ok(if records.is_empty() { None } else { Some(records) })
+  }
+
+  pub fn parse_cache_file(path: &Path) -> Result<ParsedUsageFile> {
     let mut builder = RecordBuilder::new(path);
-    walk_rollout(path, &mut builder)?;
-    Ok(builder.into_records())
+    let complete = walk_rollout(path, &mut builder)?;
+    Ok(builder.into_parsed_file(complete))
   }
 
   pub fn dump_session_messages(path: &Path) -> Result<Option<DumpedSession>> {
     let mut builder = DumpBuilder::new(path);
-    walk_rollout(path, &mut builder)?;
+    let _ = walk_rollout(path, &mut builder)?;
     Ok(builder.into_session())
   }
 }
@@ -108,7 +113,7 @@ trait RolloutVisitor {
 
   /// Called for `line.type == "event_msg" && line.payload.type == "token_count"`.
   /// Receives the parsed line timestamp and the full `line.payload` object.
-  fn turn_end(&mut self, _ts: DateTime<Utc>, _payload: &Value) {}
+  fn turn_end(&mut self, _ts: DateTime<Utc>, _payload: &Value, _position: JsonlPosition, _event_id: Option<&str>) {}
 
   /// Called for every `line.type == "response_item"`, before low-level dispatch.
   fn response_item(&mut self, _payload: &Value) {}
@@ -132,8 +137,8 @@ trait RolloutVisitor {
   fn reasoning(&mut self, _payload: &Value) {}
 }
 
-fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<()> {
-  read_jsonl::<Value, _>(path, |line| {
+fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<bool> {
+  read_jsonl_with_status::<Value, _>(path, |line, position| {
     let ts = parse_rfc3339(line.get("timestamp").and_then(|v| v.as_str()));
     if let Some(ts) = ts {
       visitor.timestamp(ts);
@@ -144,7 +149,7 @@ fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<()> {
         if let Some(payload) = line.get("payload") {
           if payload.get("type").and_then(|v| v.as_str()) == Some("token_count") {
             let ts = ts.unwrap_or_else(epoch_utc);
-            visitor.turn_end(ts, payload);
+            visitor.turn_end(ts, payload, position, source_event_id(&line));
           }
         }
       }
@@ -170,6 +175,23 @@ fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<()> {
       _ => {}
     }
   })
+}
+
+fn source_event_id(line: &Value) -> Option<&str> {
+  let payload = line.get("payload");
+  line
+    .get("id")
+    .and_then(Value::as_str)
+    .or_else(|| line.get("uuid").and_then(Value::as_str))
+    .or_else(|| payload.and_then(|value| value.get("id")).and_then(Value::as_str))
+    .or_else(|| payload.and_then(|value| value.get("uuid")).and_then(Value::as_str))
+}
+
+fn origin_key(event_id: Option<&str>, position: JsonlPosition, emitted_slot: usize) -> String {
+  match event_id.filter(|id| !id.is_empty()) {
+    Some(id) => format!("event:{id}:slot:{emitted_slot}"),
+    None => format!("offset:{}:slot:{emitted_slot}", position.byte_offset),
+  }
 }
 
 fn parse_rfc3339(s: Option<&str>) -> Option<DateTime<Utc>> {
@@ -257,6 +279,7 @@ struct Turn {
   tokens: TokenUsageStats,
   bytes: BytesSink,
   rounds: u64,
+  origin_key: String,
 }
 
 impl<'a> RecordBuilder<'a> {
@@ -275,9 +298,9 @@ impl<'a> RecordBuilder<'a> {
     }
   }
 
-  fn into_records(mut self) -> Option<Vec<UsageRecord>> {
+  fn into_parsed_file(mut self, complete: bool) -> ParsedUsageFile {
     if self.calls.is_empty() {
-      return None;
+      return ParsedUsageFile::new(complete, Vec::new());
     }
     // If no turn_context events were observed, attribute one round to the
     // first turn so totals match historical behavior.
@@ -285,11 +308,12 @@ impl<'a> RecordBuilder<'a> {
       self.calls[0].rounds = 1;
     }
     let sid = self.meta.resolved_session_id(self.path);
-    Some(
-      self
-        .calls
-        .into_iter()
-        .map(|t| UsageRecord {
+    let records = self
+      .calls
+      .into_iter()
+      .map(|t| ParsedUsageRecord {
+        origin_key: t.origin_key,
+        record: UsageRecord {
           source: Source::Codex,
           session_id: sid.clone(),
           session_kind: if self.meta.forked_from_id.is_some() {
@@ -322,24 +346,23 @@ impl<'a> RecordBuilder<'a> {
           rounds: t.rounds,
           calls: 1,
           cost_embedded: None,
-        })
-        .collect(),
-    )
-  }
-}
-
-impl RolloutVisitor for RecordBuilder<'_> {
-  fn timestamp(&mut self, ts: DateTime<Utc>) {
-    self.last_ts = Some(ts);
-    self.session_ts.get_or_insert(ts);
+        },
+      })
+      .collect();
+    ParsedUsageFile::new(complete, records)
   }
 
-  fn session_meta(&mut self, line: &Value) {
-    self.meta.apply(line);
-    self.inherited_turn = self.meta.forked_from_id.is_some();
+  #[cfg(test)]
+  fn into_records(self) -> Option<Vec<UsageRecord>> {
+    let records = self.into_parsed_file(true).into_usage_records();
+    if records.is_empty() {
+      None
+    } else {
+      Some(records)
+    }
   }
 
-  fn turn_end(&mut self, ts: DateTime<Utc>, payload: &Value) {
+  fn push_turn(&mut self, ts: DateTime<Utc>, payload: &Value, position: JsonlPosition, event_id: Option<&str>) {
     let Some(tokens) = extract_turn_usage(payload, &mut self.prev_total) else {
       return;
     };
@@ -356,7 +379,24 @@ impl RolloutVisitor for RecordBuilder<'_> {
       tokens,
       bytes: self.pending_bytes.take(),
       rounds: std::mem::take(&mut self.pending_rounds),
+      origin_key: origin_key(event_id, position, 0),
     });
+  }
+}
+
+impl RolloutVisitor for RecordBuilder<'_> {
+  fn timestamp(&mut self, ts: DateTime<Utc>) {
+    self.last_ts = Some(ts);
+    self.session_ts.get_or_insert(ts);
+  }
+
+  fn session_meta(&mut self, line: &Value) {
+    self.meta.apply(line);
+    self.inherited_turn = self.meta.forked_from_id.is_some();
+  }
+
+  fn turn_end(&mut self, ts: DateTime<Utc>, payload: &Value, position: JsonlPosition, event_id: Option<&str>) {
+    self.push_turn(ts, payload, position, event_id);
   }
 
   fn turn_context(&mut self, payload: &Value) {
@@ -673,10 +713,43 @@ mod tests {
   use super::*;
   use crate::text_count::SpanStatsSink;
 
+  fn test_position() -> JsonlPosition {
+    JsonlPosition {
+      byte_offset: 0,
+      line_number: 0,
+    }
+  }
+
   fn parse_fixture() -> Vec<UsageRecord> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
       .join("tests/fixtures/codex/sessions/2025/01/02/rollout-2025-01-02T10-00-00-test.jsonl");
     CodexSource::parse_file(&path).expect("parse fixture").expect("records")
+  }
+
+  #[test]
+  fn cache_parser_uses_stable_offset_keys_when_events_have_no_id() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/fixtures/codex/sessions/2025/01/02/rollout-2025-01-02T10-00-00-test.jsonl");
+
+    let parsed = CodexSource::parse_cache_file(&path).expect("parse fixture");
+    let keys = parsed
+      .records
+      .iter()
+      .map(|record| record.origin_key.clone())
+      .collect::<Vec<_>>();
+
+    assert!(parsed.complete);
+    assert_eq!(keys.len(), 4);
+    assert!(keys.iter().all(|key| key.starts_with("offset:")));
+    assert_eq!(
+      keys,
+      CodexSource::parse_cache_file(&path)
+        .expect("reparse fixture")
+        .records
+        .iter()
+        .map(|record| record.origin_key.clone())
+        .collect::<Vec<_>>()
+    );
   }
 
   #[test]
@@ -764,6 +837,8 @@ mod tests {
           }
         }
       }),
+      test_position(),
+      None,
     );
 
     builder.turn_context(&serde_json::json!({
@@ -788,6 +863,8 @@ mod tests {
           }
         }
       }),
+      test_position(),
+      None,
     );
 
     builder.turn_context(&serde_json::json!({
@@ -816,6 +893,8 @@ mod tests {
           }
         }
       }),
+      test_position(),
+      None,
     );
 
     let records = builder.into_records().expect("new fork turn should produce a record");

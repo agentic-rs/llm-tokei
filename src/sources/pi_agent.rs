@@ -1,5 +1,5 @@
-use crate::model::{Source, UsageRecord};
-use crate::sources::{read_jsonl, summarize_records, UsageSource};
+use crate::model::{ParsedUsageFile, ParsedUsageRecord, Source, UsageRecord};
+use crate::sources::{read_jsonl_with_status, summarize_records, JsonlPosition, UsageSource};
 use crate::text_count::{all_strings, BytesSink, SpanSink, StatsSink, TextSpan};
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
@@ -45,6 +45,11 @@ impl PiAgentSource {
   }
 
   pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
+    let records = Self::parse_cache_file(path)?.into_usage_records();
+    Ok(if records.is_empty() { None } else { Some(records) })
+  }
+
+  pub fn parse_cache_file(path: &Path) -> Result<ParsedUsageFile> {
     parse_session(path)
   }
 }
@@ -181,6 +186,7 @@ struct Cost {
 }
 
 struct PendingTurn {
+  origin_key: String,
   ts: DateTime<Utc>,
   provider: Option<String>,
   model: Option<String>,
@@ -192,6 +198,7 @@ struct PendingTurn {
 }
 
 struct PluginTurn {
+  origin_key: String,
   ts: DateTime<Utc>,
   provider: Option<String>,
   model: Option<String>,
@@ -203,7 +210,7 @@ struct PluginTurn {
   agent: Option<String>,
 }
 
-fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
+fn parse_session(path: &Path) -> Result<ParsedUsageFile> {
   let mut session_id = file_stem_or(path, "unknown");
   let mut cwd: Option<String> = None;
   let mut current_provider: Option<String> = None;
@@ -213,7 +220,7 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   let mut pending: Vec<PendingTurn> = Vec::new();
   let mut plugin_turns: Vec<PluginTurn> = Vec::new();
 
-  read_jsonl::<Line, _>(path, |line| {
+  let complete = read_jsonl_with_status::<Line, _>(path, |line, position| {
     let ts = parse_ts(line.timestamp.as_deref());
     match line.kind.as_deref() {
       Some("session") => {
@@ -232,13 +239,19 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
         let Some(message) = line.message else {
           return;
         };
+        let event_id = line.id.as_deref().or(message.response_id.as_deref());
         let role = message.role.as_deref();
         if role == Some("user") {
           pending_rounds = pending_rounds.saturating_add(1);
         }
         visit_message(role, message.content.as_ref(), &mut pending_bytes);
 
-        if let Some(plugin_turn) = plugin_summary_turn(&message, ts, line.parent_id.as_deref()) {
+        if let Some(plugin_turn) = plugin_summary_turn(
+          &message,
+          ts,
+          line.parent_id.as_deref(),
+          origin_key(event_id, position, 1),
+        ) {
           plugin_turns.push(plugin_turn);
         }
 
@@ -246,6 +259,7 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
           return;
         };
         pending.push(PendingTurn {
+          origin_key: origin_key(event_id, position, 0),
           ts,
           provider: message.provider.or_else(|| current_provider.clone()),
           model: message.model.or_else(|| current_model.clone()),
@@ -261,15 +275,52 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   })?;
 
   if pending.is_empty() && plugin_turns.is_empty() {
-    return Ok(None);
+    return Ok(ParsedUsageFile::new(complete, Vec::new()));
   }
   if !pending.is_empty() && pending.iter().all(|t| t.rounds == 0) {
     pending[0].rounds = 1;
   }
 
-  let mut records: Vec<UsageRecord> = pending
+  let mut records: Vec<ParsedUsageRecord> = pending
     .into_iter()
-    .map(|turn| UsageRecord {
+    .map(|turn| ParsedUsageRecord {
+      origin_key: turn.origin_key,
+      record: UsageRecord {
+        source: Source::PiAgent,
+        session_id: session_id.clone(),
+        session_kind: crate::model::SessionKind::Root,
+        parent_session_id: None,
+        session_title: None,
+        project_cwd: cwd.clone(),
+        project_name: None,
+        provider: turn.provider,
+        model: turn.model,
+        ts: turn.ts,
+        prompt: turn.usage.input,
+        completion: turn.usage.output,
+        input_bytes: turn.bytes.input,
+        output_bytes: turn.bytes.output.saturating_add(turn.bytes.reasoning),
+        input_estimated: false,
+        output_estimated: false,
+        input_bytes_estimated: true,
+        output_bytes_estimated: true,
+        reasoning: 0,
+        cache_read: turn.usage.cache_read,
+        cache_write: turn.usage.cache_write,
+        total_direct: turn.usage.total_tokens,
+        mode: turn.mode,
+        agent: turn.agent,
+        is_compaction: false,
+        rounds: turn.rounds,
+        calls: 1,
+        cost_embedded: turn.usage.cost.and_then(|c| c.total),
+      },
+    })
+    .collect();
+
+  records.extend(plugin_turns.into_iter().map(|turn| ParsedUsageRecord {
+    origin_key: turn.origin_key,
+    record: UsageRecord {
       source: Source::PiAgent,
       session_id: session_id.clone(),
       session_kind: crate::model::SessionKind::Root,
@@ -280,62 +331,43 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       provider: turn.provider,
       model: turn.model,
       ts: turn.ts,
-      prompt: turn.usage.input,
-      completion: turn.usage.output,
-      input_bytes: turn.bytes.input,
-      output_bytes: turn.bytes.output.saturating_add(turn.bytes.reasoning),
-      input_estimated: false,
-      output_estimated: false,
+      prompt: turn.prompt,
+      completion: turn.completion,
+      input_bytes: turn.input_bytes,
+      output_bytes: turn.output_bytes,
+      input_estimated: true,
+      output_estimated: true,
       input_bytes_estimated: true,
       output_bytes_estimated: true,
       reasoning: 0,
-      cache_read: turn.usage.cache_read,
-      cache_write: turn.usage.cache_write,
-      total_direct: turn.usage.total_tokens,
+      cache_read: 0,
+      cache_write: 0,
+      total_direct: None,
       mode: turn.mode,
       agent: turn.agent,
       is_compaction: false,
-      rounds: turn.rounds,
+      rounds: 0,
       calls: 1,
-      cost_embedded: turn.usage.cost.and_then(|c| c.total),
-    })
-    .collect();
-
-  records.extend(plugin_turns.into_iter().map(|turn| UsageRecord {
-    source: Source::PiAgent,
-    session_id: session_id.clone(),
-    session_kind: crate::model::SessionKind::Root,
-    parent_session_id: None,
-    session_title: None,
-    project_cwd: cwd.clone(),
-    project_name: None,
-    provider: turn.provider,
-    model: turn.model,
-    ts: turn.ts,
-    prompt: turn.prompt,
-    completion: turn.completion,
-    input_bytes: turn.input_bytes,
-    output_bytes: turn.output_bytes,
-    input_estimated: true,
-    output_estimated: true,
-    input_bytes_estimated: true,
-    output_bytes_estimated: true,
-    reasoning: 0,
-    cache_read: 0,
-    cache_write: 0,
-    total_direct: None,
-    mode: turn.mode,
-    agent: turn.agent,
-    is_compaction: false,
-    rounds: 0,
-    calls: 1,
-    cost_embedded: None,
+      cost_embedded: None,
+    },
   }));
 
-  Ok(Some(records))
+  Ok(ParsedUsageFile::new(complete, records))
 }
 
-fn plugin_summary_turn(message: &Message, ts: DateTime<Utc>, parent_id: Option<&str>) -> Option<PluginTurn> {
+fn origin_key(event_id: Option<&str>, position: JsonlPosition, emitted_slot: usize) -> String {
+  match event_id.filter(|id| !id.is_empty()) {
+    Some(id) => format!("event:{id}:slot:{emitted_slot}"),
+    None => format!("offset:{}:slot:{emitted_slot}", position.byte_offset),
+  }
+}
+
+fn plugin_summary_turn(
+  message: &Message,
+  ts: DateTime<Utc>,
+  parent_id: Option<&str>,
+  origin_key: String,
+) -> Option<PluginTurn> {
   let details = message.details.as_ref()?;
   let summary = details.summary.as_ref()?;
   if summary.fallback_used {
@@ -350,6 +382,7 @@ fn plugin_summary_turn(message: &Message, ts: DateTime<Utc>, parent_id: Option<&
   let prompt = prompt.trim();
   let completion_text = summary.text.trim();
   Some(PluginTurn {
+    origin_key,
     ts,
     provider,
     model,
@@ -481,4 +514,41 @@ fn file_stem_or(path: &Path, fallback: &str) -> String {
     .and_then(|s| s.to_str())
     .unwrap_or(fallback)
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn cache_parser_uses_pi_event_ids_and_distinct_emitted_slots() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/fixtures/pi_agent/sessions/--tmp-proj--/2026-05-27T01-02-03-004Z_abc123.jsonl");
+
+    let parsed = PiAgentSource::parse_cache_file(&path).expect("parse fixture");
+    let keys = parsed
+      .records
+      .iter()
+      .map(|record| record.origin_key.clone())
+      .collect::<Vec<_>>();
+
+    assert!(parsed.complete);
+    assert_eq!(
+      keys,
+      vec![
+        "event:a1:slot:0".to_string(),
+        "event:a2:slot:0".to_string(),
+        "event:t2:slot:1".to_string(),
+      ]
+    );
+    assert_eq!(
+      keys,
+      PiAgentSource::parse_cache_file(&path)
+        .expect("reparse fixture")
+        .records
+        .iter()
+        .map(|record| record.origin_key.clone())
+        .collect::<Vec<_>>()
+    );
+  }
 }

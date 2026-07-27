@@ -503,13 +503,34 @@ llm-tokei --source pi-agent --provider deepseek --group-by model
 ## Cache
 
 By default, parsed records are cached under your OS cache directory as
-`llm-tokei.db`. The cache is keyed by source file path and modification time.
+`llm-tokei.db`. The cache is keyed by source file path, modification time, and
+size. When a source file changes, `llm-tokei` reconciles its records by their
+source-event identities: unchanged events keep their existing cache rows, new
+events are inserted, changed events are updated, and events absent from a
+complete parse are removed. The reconciliation is atomic.
+
+A JSONL file that is still being written can still contribute its valid records
+to the current report, but is not saved back to the cache until it can be read
+completely without changing during parsing.
+
+For OpenCode, the cache key also includes the active SQLite write-ahead log
+(`opencode.db-wal`), so recent commits are not missed before SQLite checkpoints
+them into the main database.
 
 Use `--no-cache` to force a full re-parse:
 
 ```sh
 llm-tokei --no-cache
 ```
+
+To remove obsolete historical entries from older cache versions and compact
+reusable free pages in the database:
+
+```sh
+llm-tokei cache prune
+```
+
+This affects only derived cache data, never the original session files.
 
 Verbose mode prints cache stats:
 

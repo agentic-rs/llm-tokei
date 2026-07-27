@@ -21,36 +21,86 @@ pub trait UsageSource {
   fn collect(&self) -> Result<Vec<UsageRecord>>;
 }
 
-/// Read a JSONL file and call `visit` with each successfully parsed line.
-/// Empty lines and lines that fail to parse are silently skipped, matching
-/// the historical behavior of every per-source reader.
-pub fn read_jsonl<T, F>(path: &Path, mut visit: F) -> Result<()>
+#[derive(Debug, Clone, Copy)]
+pub struct JsonlPosition {
+  pub byte_offset: u64,
+  #[allow(dead_code)]
+  pub line_number: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsonlEntry<T> {
+  pub position: JsonlPosition,
+  pub value: T,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsonlRead<T> {
+  pub complete: bool,
+  pub entries: Vec<JsonlEntry<T>>,
+}
+
+/// Read a JSONL file and call `visit` with every valid line.
+///
+/// Invalid non-empty lines leave the read incomplete but do not discard other
+/// valid lines. Callers can still render the valid records while the cache
+/// avoids treating the partial result as a complete replacement snapshot.
+pub fn read_jsonl_with_status<T, F>(path: &Path, mut visit: F) -> Result<bool>
 where
   T: DeserializeOwned,
-  F: FnMut(T),
+  F: FnMut(T, JsonlPosition),
 {
   let file = File::open(path)?;
-  let reader = BufReader::new(file);
-  for line in reader.lines() {
-    let line = match line {
-      Ok(l) => l,
-      Err(_) => continue,
+  let mut reader = BufReader::new(file);
+  let mut byte_offset = 0u64;
+  let mut line_number = 0usize;
+  let mut complete = true;
+  let mut bytes = Vec::new();
+
+  loop {
+    bytes.clear();
+    let byte_count = reader.read_until(b'\n', &mut bytes)?;
+    if byte_count == 0 {
+      break;
+    }
+    line_number += 1;
+    let position = JsonlPosition {
+      byte_offset,
+      line_number,
+    };
+    byte_offset = byte_offset.saturating_add(byte_count as u64);
+
+    let Ok(line) = std::str::from_utf8(&bytes) else {
+      complete = false;
+      continue;
     };
     if line.trim().is_empty() {
       continue;
     }
-    if let Ok(parsed) = serde_json::from_str::<T>(&line) {
-      visit(parsed);
+    match serde_json::from_str::<T>(line) {
+      Ok(parsed) => visit(parsed, position),
+      Err(_) => complete = false,
     }
   }
-  Ok(())
+  Ok(complete)
 }
 
-/// Convenience: collect all JSONL records into a `Vec`.
+/// Collect JSONL records together with their positions and completeness.
+pub fn read_jsonl_collect_with_status<T: DeserializeOwned>(path: &Path) -> Result<JsonlRead<T>> {
+  let mut entries = Vec::new();
+  let complete = read_jsonl_with_status(path, |value, position| entries.push(JsonlEntry { position, value }))?;
+  Ok(JsonlRead { complete, entries })
+}
+
+/// Convenience: collect JSONL records into a `Vec`.
 pub fn read_jsonl_collect<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>> {
-  let mut out = Vec::new();
-  read_jsonl(path, |value| out.push(value))?;
-  Ok(out)
+  Ok(
+    read_jsonl_collect_with_status(path)?
+      .entries
+      .into_iter()
+      .map(|entry| entry.value)
+      .collect(),
+  )
 }
 
 /// Convert a Unix millisecond timestamp into UTC, defaulting to "now"

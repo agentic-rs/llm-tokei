@@ -1,13 +1,15 @@
-use crate::model::{Source, UsageRecord};
+use crate::model::{ParsedUsageFile, ParsedUsageRecord, Source, UsageRecord};
 use crate::sources::copilot_shutdown::{
   normalize_copilot_model, records_from_shutdown_model_metrics, ShutdownRecordArgs,
 };
 use crate::sources::dump::{DumpRecord, DumpedSession};
-use crate::sources::{ms_to_dt, read_jsonl_collect, summarize_records, UsageSource};
+use crate::sources::{
+  ms_to_dt, read_jsonl_collect, read_jsonl_collect_with_status, summarize_records, JsonlEntry, UsageSource,
+};
 use crate::text_count::{rich_text, text_value, SpanSink, SpanStatsSink, StatsSink, StringSink, TextSpan, TextStats};
 use anyhow::Result;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::debug;
 use walkdir::WalkDir;
@@ -93,6 +95,23 @@ impl CopilotSource {
       parse_transcript(path, cwd)
     } else {
       parse_session(path, cwd)
+    }
+  }
+
+  /// Parse a cacheable file into records with stable source-event identities.
+  ///
+  /// A partial JSONL read remains useful for direct reporting, but is marked
+  /// incomplete so the cache does not delete records absent from the partial
+  /// snapshot.
+  pub fn parse_cache_file(path: &Path) -> Result<ParsedUsageFile> {
+    let Some(ws_dir) = workspace_dir_for_file(path) else {
+      return Ok(ParsedUsageFile::new(true, Vec::new()));
+    };
+    let cwd = read_workspace_folder(ws_dir);
+    if is_transcript_file(path) {
+      parse_transcript_cache(path, cwd)
+    } else {
+      parse_session_cache(path, cwd)
     }
   }
 
@@ -185,10 +204,18 @@ trait SessionVisitor {
 }
 
 fn walk_session<V: SessionVisitor>(path: &Path, visitor: &mut V) -> Result<Option<()>> {
-  let mut state = Value::Null;
-  let mut requests_by_id: HashMap<String, Value> = HashMap::new();
+  Ok(walk_session_values(read_jsonl_collect::<Value>(path)?, visitor))
+}
 
-  for rec in read_jsonl_collect::<Value>(path)? {
+fn walk_session_values<V, I>(records: I, visitor: &mut V) -> Option<()>
+where
+  V: SessionVisitor,
+  I: IntoIterator<Item = Value>,
+{
+  let mut state = Value::Null;
+  let mut requests_by_id: BTreeMap<String, Value> = BTreeMap::new();
+
+  for rec in records {
     let kind = rec.get("kind").and_then(|v| v.as_i64()).unwrap_or(-1);
     match kind {
       0 => {
@@ -213,7 +240,7 @@ fn walk_session<V: SessionVisitor>(path: &Path, visitor: &mut V) -> Result<Optio
   }
 
   if state.is_null() {
-    return Ok(None);
+    return None;
   }
 
   visitor.replay_complete(&state);
@@ -230,7 +257,7 @@ fn walk_session<V: SessionVisitor>(path: &Path, visitor: &mut V) -> Result<Optio
     visitor.request(&request);
   }
 
-  Ok(Some(()))
+  Some(())
 }
 
 /// Visitor over the inside of a single Copilot request.
@@ -368,6 +395,68 @@ fn parse_transcript(path: &Path, project_cwd: Option<String>) -> Result<Option<V
   }
 }
 
+fn parse_transcript_cache(path: &Path, project_cwd: Option<String>) -> Result<ParsedUsageFile> {
+  let jsonl = read_jsonl_collect_with_status::<Value>(path)?;
+  let project_name = project_cwd
+    .as_ref()
+    .and_then(|p| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()));
+
+  let mut session_id: Option<String> = None;
+  let mut records = Vec::new();
+  let mut origin_key_counts = HashMap::new();
+  for entry in &jsonl.entries {
+    let event = &entry.value;
+    if event.get("type").and_then(|v| v.as_str()) == Some("session.start") {
+      session_id = event
+        .pointer("/data/sessionId")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or(session_id);
+    }
+
+    let event_id = transcript_event_id(entry);
+    for record in records_from_shutdown_model_metrics(ShutdownRecordArgs {
+      source: Source::Copilot,
+      source_path: path,
+      session_id: session_id.clone(),
+      project_cwd: project_cwd.clone(),
+      project_name: project_name.clone(),
+      event,
+    }) {
+      let provider = record.provider.as_deref().unwrap_or("unknown");
+      let model = record.model.as_deref().unwrap_or("unknown");
+      let origin_key = unique_origin_key(
+        format!("event:{event_id}:provider:{provider}:model:{model}"),
+        &mut origin_key_counts,
+      );
+      records.push(ParsedUsageRecord { origin_key, record });
+    }
+  }
+
+  Ok(ParsedUsageFile::new(jsonl.complete, records))
+}
+
+fn transcript_event_id(entry: &JsonlEntry<Value>) -> String {
+  entry
+    .value
+    .get("id")
+    .and_then(|v| v.as_str())
+    .filter(|id| !id.is_empty())
+    .map(str::to_string)
+    .unwrap_or_else(|| format!("offset:{}", entry.position.byte_offset))
+}
+
+fn unique_origin_key(base: String, counts: &mut HashMap<String, usize>) -> String {
+  let count = counts.entry(base.clone()).or_default();
+  let origin_key = if *count == 0 {
+    base
+  } else {
+    format!("{base}:duplicate:{count}")
+  };
+  *count += 1;
+  origin_key
+}
+
 fn read_workspace_folder(ws_dir: &Path) -> Option<String> {
   let p = ws_dir.join("workspace.json");
   let s = std::fs::read_to_string(&p).ok()?;
@@ -419,6 +508,16 @@ fn parse_session(path: &Path, project_cwd: Option<String>) -> Result<Option<Vec<
   Ok(if records.is_empty() { None } else { Some(records) })
 }
 
+fn parse_session_cache(path: &Path, project_cwd: Option<String>) -> Result<ParsedUsageFile> {
+  let jsonl = read_jsonl_collect_with_status::<Value>(path)?;
+  let complete = jsonl.complete;
+  let mut builder = RecordBuilder::new(path, project_cwd);
+  if walk_session_values(jsonl.entries.into_iter().map(|entry| entry.value), &mut builder).is_none() {
+    return Ok(ParsedUsageFile::new(complete, Vec::new()));
+  }
+  Ok(ParsedUsageFile::new(complete, builder.into_parsed_records()))
+}
+
 struct RecordBuilder<'a> {
   path: &'a Path,
   project_cwd: Option<String>,
@@ -427,7 +526,7 @@ struct RecordBuilder<'a> {
   creation_ms: Option<i64>,
   title: Option<String>,
   default_model: Option<String>,
-  records: Vec<UsageRecord>,
+  records: Vec<ParsedUsageRecord>,
 }
 
 impl<'a> RecordBuilder<'a> {
@@ -448,6 +547,10 @@ impl<'a> RecordBuilder<'a> {
   }
 
   fn into_records(self) -> Vec<UsageRecord> {
+    self.records.into_iter().map(|parsed| parsed.record).collect()
+  }
+
+  fn into_parsed_records(self) -> Vec<ParsedUsageRecord> {
     self.records
   }
 }
@@ -476,6 +579,7 @@ impl SessionVisitor for RecordBuilder<'_> {
     if !req.is_object() {
       return;
     }
+    let origin_key = session_request_origin_key(req, self.records.len());
     let req_ts_ms = req.get("timestamp").and_then(|v| v.as_i64()).or(self.creation_ms);
     let req_model_raw = req
       .pointer("/modelId")
@@ -573,37 +677,53 @@ impl SessionVisitor for RecordBuilder<'_> {
         .map(str::to_string)
     };
 
-    self.records.push(UsageRecord {
-      source: Source::Copilot,
-      session_id: self.session_id.clone(),
-      session_kind: crate::model::SessionKind::Root,
-      parent_session_id: None,
-      session_title: self.title.clone(),
-      project_cwd: self.project_cwd.clone(),
-      project_name: self.project_name.clone(),
-      provider,
-      model: req_model,
-      ts: req_ts_ms.map(ms_to_dt).unwrap_or_else(|| ms_to_dt(0)),
-      prompt: input_chars.div_ceil(4),
-      completion: output_exact.unwrap_or_else(|| output_chars.div_ceil(4)),
-      input_bytes,
-      output_bytes,
-      input_estimated: true,
-      output_estimated: output_exact.is_none(),
-      input_bytes_estimated: true,
-      output_bytes_estimated: true,
-      reasoning,
-      cache_read: 0,
-      cache_write: 0,
-      total_direct: None,
-      mode,
-      agent: req.pointer("/agent/id").and_then(|v| v.as_str()).map(str::to_string),
-      is_compaction,
-      rounds: 1,
-      calls: 1 + extra_turns,
-      cost_embedded: None,
+    self.records.push(ParsedUsageRecord {
+      origin_key,
+      record: UsageRecord {
+        source: Source::Copilot,
+        session_id: self.session_id.clone(),
+        session_kind: crate::model::SessionKind::Root,
+        parent_session_id: None,
+        session_title: self.title.clone(),
+        project_cwd: self.project_cwd.clone(),
+        project_name: self.project_name.clone(),
+        provider,
+        model: req_model,
+        ts: req_ts_ms.map(ms_to_dt).unwrap_or_else(|| ms_to_dt(0)),
+        prompt: input_chars.div_ceil(4),
+        completion: output_exact.unwrap_or_else(|| output_chars.div_ceil(4)),
+        input_bytes,
+        output_bytes,
+        input_estimated: true,
+        output_estimated: output_exact.is_none(),
+        input_bytes_estimated: true,
+        output_bytes_estimated: true,
+        reasoning,
+        cache_read: 0,
+        cache_write: 0,
+        total_direct: None,
+        mode,
+        agent: req.pointer("/agent/id").and_then(|v| v.as_str()).map(str::to_string),
+        is_compaction,
+        rounds: 1,
+        calls: 1 + extra_turns,
+        cost_embedded: None,
+      },
     });
   }
+}
+
+fn session_request_origin_key(request: &Value, ordinal: usize) -> String {
+  if let Some(request_id) = request
+    .get("requestId")
+    .and_then(|v| v.as_str())
+    .filter(|id| !id.is_empty())
+  {
+    return format!("request:{request_id}");
+  }
+
+  let timestamp = request.get("timestamp").and_then(|v| v.as_i64()).unwrap_or_default();
+  format!("request:anonymous:{timestamp}:{ordinal}")
 }
 
 fn dump_session(path: &Path) -> Result<Option<DumpedSession>> {
@@ -1013,7 +1133,7 @@ fn tool_result_spans(result: &Value) -> Vec<TextSpan<'static>> {
   spans
 }
 
-fn capture_requests_from_state(state: &Value, requests_by_id: &mut HashMap<String, Value>) {
+fn capture_requests_from_state(state: &Value, requests_by_id: &mut BTreeMap<String, Value>) {
   if let Some(requests) = state.get("requests").and_then(|v| v.as_array()) {
     for request in requests {
       capture_request(request, requests_by_id);
@@ -1021,7 +1141,7 @@ fn capture_requests_from_state(state: &Value, requests_by_id: &mut HashMap<Strin
   }
 }
 
-fn capture_request_patch(state: &Value, path_arr: &[Value], requests_by_id: &mut HashMap<String, Value>) {
+fn capture_request_patch(state: &Value, path_arr: &[Value], requests_by_id: &mut BTreeMap<String, Value>) {
   if path_arr.first().and_then(|v| v.as_str()) != Some("requests") {
     return;
   }
@@ -1037,7 +1157,7 @@ fn capture_request_patch(state: &Value, path_arr: &[Value], requests_by_id: &mut
   }
 }
 
-fn capture_request(request: &Value, requests_by_id: &mut HashMap<String, Value>) {
+fn capture_request(request: &Value, requests_by_id: &mut BTreeMap<String, Value>) {
   let Some(request_id) = request.get("requestId").and_then(|v| v.as_str()) else {
     return;
   };
@@ -1076,4 +1196,37 @@ fn file_stem_or(path: &Path, fallback: &str) -> String {
     .and_then(|s| s.to_str())
     .unwrap_or(fallback)
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::CopilotSource;
+  use std::path::Path;
+
+  #[test]
+  fn cache_parser_keys_chat_requests_by_request_id() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/fixtures/copilot/workspaceStorage/abc123/chatSessions/sess-cop-1.jsonl");
+
+    let parsed = CopilotSource::parse_cache_file(&path).expect("parse fixture");
+
+    assert!(parsed.complete);
+    let origin_keys: Vec<_> = parsed.records.iter().map(|record| record.origin_key.as_str()).collect();
+    assert_eq!(origin_keys, ["request:r1", "request:r2"]);
+  }
+
+  #[test]
+  fn cache_parser_keys_transcript_shutdown_by_event_and_model() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/fixtures/copilot_exact/workspaceStorage/ws1/GitHub.copilot-chat/transcripts/exact-session.jsonl");
+
+    let parsed = CopilotSource::parse_cache_file(&path).expect("parse fixture");
+
+    assert!(parsed.complete);
+    let origin_keys: Vec<_> = parsed.records.iter().map(|record| record.origin_key.as_str()).collect();
+    assert_eq!(
+      origin_keys,
+      ["event:shutdown-1:provider:github-copilot:model:gpt-5-mini"]
+    );
+  }
 }
