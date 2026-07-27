@@ -261,6 +261,20 @@ struct CachedSession {
   session_hash: Option<Vec<u8>>,
 }
 
+/// Values persisted for one session while reconciling a source file.
+///
+/// Keeping these together makes the insert and update paths use the same
+/// snapshot, so a schema change cannot accidentally update only one path.
+struct SessionWrite<'a> {
+  source: &'a str,
+  file_path: &'a str,
+  stamp: FileStamp,
+  record: &'a UsageRecord,
+  first_ts: &'a str,
+  last_ts: &'a str,
+  session_hash: &'a [u8],
+}
+
 #[derive(Serialize)]
 struct SessionFingerprint<'a> {
   source: Source,
@@ -503,34 +517,23 @@ impl CacheDb {
       let first = &session_records[0].record;
       let (first_ts, last_ts) = parsed_ts_range(&session_records);
       let session_hash = session_fingerprint(first, &first_ts, &last_ts)?;
+      let session = SessionWrite {
+        source,
+        file_path: file_path.as_ref(),
+        stamp,
+        record: first,
+        first_ts: &first_ts,
+        last_ts: &last_ts,
+        session_hash: &session_hash,
+      };
       let session_rowid = match existing_sessions.remove(&session_key) {
         Some(cached) => {
           if cached.session_hash.as_deref() != Some(session_hash.as_slice()) {
-            update_session(
-              &tx,
-              cached.rowid,
-              source,
-              file_path.as_ref(),
-              stamp,
-              first,
-              &first_ts,
-              &last_ts,
-              &session_hash,
-            )?;
+            update_session(&tx, cached.rowid, &session)?;
           }
           cached.rowid
         }
-        None => insert_session(
-          &tx,
-          file_id,
-          source,
-          file_path.as_ref(),
-          stamp,
-          first,
-          &first_ts,
-          &last_ts,
-          &session_hash,
-        )?,
+        None => insert_session(&tx, file_id, &session)?,
       };
       reconcile_session_records(&tx, session_rowid, &session_records)?;
     }
@@ -604,9 +607,7 @@ impl CacheDb {
   }
 }
 
-fn group_parsed_by_session<'a>(
-  records: &'a [ParsedUsageRecord],
-) -> Result<HashMap<SessionKey, Vec<&'a ParsedUsageRecord>>> {
+fn group_parsed_by_session(records: &[ParsedUsageRecord]) -> Result<HashMap<SessionKey, Vec<&ParsedUsageRecord>>> {
   let mut grouped = HashMap::new();
   let mut origin_keys = HashSet::new();
   for parsed in records {
@@ -701,17 +702,16 @@ fn replace_file_snapshot(
     let first = &session_records[0].record;
     let (first_ts, last_ts) = parsed_ts_range(session_records);
     let session_hash = session_fingerprint(first, &first_ts, &last_ts)?;
-    let session_rowid = insert_session(
-      tx,
-      file_id,
+    let session = SessionWrite {
       source,
       file_path,
       stamp,
-      first,
-      &first_ts,
-      &last_ts,
-      &session_hash,
-    )?;
+      record: first,
+      first_ts: &first_ts,
+      last_ts: &last_ts,
+      session_hash: &session_hash,
+    };
+    let session_rowid = insert_session(tx, file_id, &session)?;
     reconcile_session_records(tx, session_rowid, session_records)?;
   }
   Ok(())
@@ -775,51 +775,31 @@ fn load_active_sessions(tx: &Transaction<'_>, file_id: i64) -> Result<HashMap<Se
   Ok(sessions)
 }
 
-fn insert_session(
-  tx: &Transaction<'_>,
-  file_id: i64,
-  source: &str,
-  file_path: &str,
-  stamp: FileStamp,
-  record: &UsageRecord,
-  first_ts: &str,
-  last_ts: &str,
-  session_hash: &[u8],
-) -> Result<i64> {
+fn insert_session(tx: &Transaction<'_>, file_id: i64, session: &SessionWrite<'_>) -> Result<i64> {
   tx.execute(
     "INSERT INTO sessions (source, session_id, session_kind, parent_session_id, session_title, project_cwd, project_name, \
                           file_path, first_ts, last_ts, file_mtime, pruned, file_id, session_hash) \
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, ?13)",
     params![
-      source,
-      record.session_id.as_str(),
-      record.session_kind.as_str(),
-      record.parent_session_id.as_deref(),
-      record.session_title.as_deref(),
-      record.project_cwd.as_deref(),
-      record.project_name.as_deref(),
-      file_path,
-      first_ts,
-      last_ts,
-      stamp.mtime_ns.div_euclid(1_000_000_000),
+      session.source,
+      session.record.session_id.as_str(),
+      session.record.session_kind.as_str(),
+      session.record.parent_session_id.as_deref(),
+      session.record.session_title.as_deref(),
+      session.record.project_cwd.as_deref(),
+      session.record.project_name.as_deref(),
+      session.file_path,
+      session.first_ts,
+      session.last_ts,
+      session.stamp.mtime_ns.div_euclid(1_000_000_000),
       file_id,
-      session_hash,
+      session.session_hash,
     ],
   )?;
   Ok(tx.last_insert_rowid())
 }
 
-fn update_session(
-  tx: &Transaction<'_>,
-  rowid: i64,
-  source: &str,
-  file_path: &str,
-  stamp: FileStamp,
-  record: &UsageRecord,
-  first_ts: &str,
-  last_ts: &str,
-  session_hash: &[u8],
-) -> Result<()> {
+fn update_session(tx: &Transaction<'_>, rowid: i64, session: &SessionWrite<'_>) -> Result<()> {
   tx.execute(
     "UPDATE sessions SET \
        source = ?1, session_id = ?2, session_kind = ?3, parent_session_id = ?4, session_title = ?5, \
@@ -827,18 +807,18 @@ fn update_session(
        session_hash = ?12 \
      WHERE id = ?13",
     params![
-      source,
-      record.session_id.as_str(),
-      record.session_kind.as_str(),
-      record.parent_session_id.as_deref(),
-      record.session_title.as_deref(),
-      record.project_cwd.as_deref(),
-      record.project_name.as_deref(),
-      file_path,
-      first_ts,
-      last_ts,
-      stamp.mtime_ns.div_euclid(1_000_000_000),
-      session_hash,
+      session.source,
+      session.record.session_id.as_str(),
+      session.record.session_kind.as_str(),
+      session.record.parent_session_id.as_deref(),
+      session.record.session_title.as_deref(),
+      session.record.project_cwd.as_deref(),
+      session.record.project_name.as_deref(),
+      session.file_path,
+      session.first_ts,
+      session.last_ts,
+      session.stamp.mtime_ns.div_euclid(1_000_000_000),
+      session.session_hash,
       rowid,
     ],
   )?;

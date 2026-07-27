@@ -715,26 +715,29 @@ where
     debug!(source, file = %file.display(), summary = %parsed_file_summary(&parsed), "file summary");
 
     let stamp_after = FileStamp::from_path(&file);
-    if parsed.complete && stamp_before.is_some() && stamp_before == stamp_after {
-      match cache.upsert_file(&file, stamp_before.expect("checked above"), source, &parsed) {
-        Ok(()) => {
-          if was_known.is_some() {
-            stats.updated += 1;
-          } else {
-            stats.added += 1;
+    match (parsed.complete, stamp_before, stamp_after) {
+      (true, Some(stamp_before), Some(stamp_after)) if stamp_before == stamp_after => {
+        match cache.upsert_file(&file, stamp_before, source, &parsed) {
+          Ok(()) => {
+            if was_known.is_some() {
+              stats.updated += 1;
+            } else {
+              stats.added += 1;
+            }
+          }
+          Err(error) => {
+            debug!(source, file = %file.display(), error = %error, "cache reconciliation failed; reporting parsed file");
           }
         }
-        Err(error) => {
-          debug!(source, file = %file.display(), error = %error, "cache reconciliation failed; reporting parsed file");
-        }
       }
-    } else {
-      debug!(
-        source,
-        file = %file.display(),
-        complete = parsed.complete,
-        "not caching an incomplete or concurrently modified file"
-      );
+      _ => {
+        debug!(
+          source,
+          file = %file.display(),
+          complete = parsed.complete,
+          "not caching an incomplete or concurrently modified file"
+        );
+      }
     }
     out.extend(parsed.into_usage_records());
   }
@@ -819,26 +822,29 @@ fn collect_opencode_with_cache(
   debug!(source = "opencode", file = %file.display(), summary = %parsed_file_summary(&parsed), "file summary");
 
   let stamp_after = FileStamp::from_sqlite_database(&file);
-  if parsed.complete && stamp_before.is_some() && stamp_before == stamp_after {
-    match cache.upsert_file(&file, stamp_before.expect("checked above"), "opencode", &parsed) {
-      Ok(()) => {
-        if was_known.is_some() {
-          stats.updated = 1;
-        } else {
-          stats.added = 1;
+  match (parsed.complete, stamp_before, stamp_after) {
+    (true, Some(stamp_before), Some(stamp_after)) if stamp_before == stamp_after => {
+      match cache.upsert_file(&file, stamp_before, "opencode", &parsed) {
+        Ok(()) => {
+          if was_known.is_some() {
+            stats.updated = 1;
+          } else {
+            stats.added = 1;
+          }
+        }
+        Err(error) => {
+          debug!(source = "opencode", file = %file.display(), error = %error, "cache reconciliation failed; reporting parsed file");
         }
       }
-      Err(error) => {
-        debug!(source = "opencode", file = %file.display(), error = %error, "cache reconciliation failed; reporting parsed file");
-      }
     }
-  } else {
-    debug!(
-      source = "opencode",
-      file = %file.display(),
-      complete = parsed.complete,
-      "not caching an incomplete or concurrently modified file"
-    );
+    _ => {
+      debug!(
+        source = "opencode",
+        file = %file.display(),
+        complete = parsed.complete,
+        "not caching an incomplete or concurrently modified file"
+      );
+    }
   }
   out = parsed.into_usage_records();
   Ok((out, stats))
