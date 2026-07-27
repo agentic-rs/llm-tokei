@@ -293,6 +293,65 @@ fn cache_prune_reclaims_existing_free_pages() {
 }
 
 #[test]
+fn restricted_source_scan_preserves_unseen_cache_entries() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let cache_home = temp_cache_home("cache-restricted-root");
+
+  let populate = Command::new(bin())
+    .env("XDG_CACHE_HOME", &cache_home)
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().expect("fixture path"),
+      "--format",
+      "json",
+    ])
+    .output()
+    .expect("populate cache");
+  assert!(
+    populate.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&populate.stderr)
+  );
+
+  let cache_path = cache_home.join("llm-tokei.db");
+  let cached_records: i64 = rusqlite::Connection::open(&cache_path)
+    .expect("open populated cache")
+    .query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))
+    .expect("count cached records");
+  assert!(cached_records > 0);
+
+  let empty_root = cache_home.join("empty-codex-root");
+  std::fs::create_dir_all(&empty_root).expect("create empty source root");
+  let restricted = Command::new(bin())
+    .env("XDG_CACHE_HOME", &cache_home)
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      empty_root.to_str().expect("empty root path"),
+      "--format",
+      "json",
+    ])
+    .output()
+    .expect("scan restricted root");
+  assert!(
+    restricted.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&restricted.stderr)
+  );
+
+  let records_after_restricted_scan: i64 = rusqlite::Connection::open(&cache_path)
+    .expect("open cache after restricted scan")
+    .query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))
+    .expect("count retained cache records");
+  assert_eq!(records_after_restricted_scan, cached_records);
+
+  let _ = std::fs::remove_dir_all(cache_home);
+}
+
+#[test]
 fn codex_fixture_parses_last_total() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
   let (mut cmd, cache_home) = isolated_cmd("codex-total");

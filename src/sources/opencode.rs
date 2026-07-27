@@ -1,10 +1,10 @@
-use crate::model::{Source, UsageRecord};
+use crate::model::{ParsedUsageFile, ParsedUsageRecord, Source, UsageRecord};
 use crate::sources::{ms_to_dt, summarize_records, UsageSource};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::debug;
 
 pub struct OpenCodeSource {
@@ -30,6 +30,125 @@ impl OpenCodeSource {
           .map(|p| p.join(".local/share/opencode"))
       })?;
     Some(base.join("opencode.db"))
+  }
+
+  /// Parse an OpenCode database into cache records keyed by the source message
+  /// identifier. SQLite rows are ordered deterministically so round counting
+  /// and fallback rowid identities are stable across reads.
+  pub fn parse_cache_file(path: &Path) -> Result<ParsedUsageFile> {
+    if !path.exists() {
+      return Ok(ParsedUsageFile::new(true, Vec::new()));
+    }
+
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI)
+      .with_context(|| format!("opening {}", path.display()))?;
+
+    // Pre-load session and project metadata for joins.
+    let session_meta = load_session_meta(&conn).unwrap_or_default();
+
+    let mut stmt = conn.prepare(
+      "SELECT rowid, id, session_id, time_created, data FROM message \
+             WHERE data LIKE '%\"role\":\"assistant\"%' \
+             ORDER BY time_created, rowid",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+      let rowid: i64 = row.get(0)?;
+      let message_id: Option<String> = row.get(1)?;
+      let session_id: String = row.get(2)?;
+      let time_created: i64 = row.get(3)?;
+      let data: String = row.get(4)?;
+      Ok((rowid, message_id, session_id, time_created, data))
+    })?;
+
+    let mut complete = true;
+    let mut records = Vec::new();
+    let mut seen_parent_ids: HashSet<String> = HashSet::new();
+    for row in rows {
+      let (rowid, message_id, session_id, time_created, data) = match row {
+        Ok(value) => value,
+        Err(_) => {
+          complete = false;
+          continue;
+        }
+      };
+      let parsed: AssistantMessage = match serde_json::from_str(&data) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+          complete = false;
+          continue;
+        }
+      };
+      if parsed.role.as_deref() != Some("assistant") {
+        continue;
+      }
+      let tokens = match parsed.tokens {
+        Some(tokens) => tokens,
+        None => continue,
+      };
+      let cache = tokens.cache.unwrap_or_default();
+      // OpenCode uses ms epoch.
+      let ts_ms = parsed
+        .time
+        .as_ref()
+        .and_then(|time| time.completed.or(time.created))
+        .unwrap_or(time_created);
+      let ts = ms_to_dt(ts_ms);
+
+      let meta = session_meta.get(&session_id).cloned().unwrap_or_default();
+      let cwd = parsed
+        .path
+        .as_ref()
+        .and_then(|path| path.cwd.clone())
+        .or(meta.directory.clone());
+
+      let is_new_round = parsed
+        .parent_id
+        .as_deref()
+        .is_none_or(|parent_id| seen_parent_ids.insert(parent_id.to_string()));
+      let rounds = if is_new_round { 1 } else { 0 };
+      let origin_key = message_id
+        .filter(|id| !id.is_empty())
+        .map(|id| format!("message:{id}"))
+        .unwrap_or_else(|| format!("rowid:{rowid}"));
+
+      records.push(ParsedUsageRecord {
+        origin_key,
+        record: UsageRecord {
+          source: Source::OpenCode,
+          session_id,
+          session_kind: crate::model::SessionKind::Root,
+          parent_session_id: None,
+          session_title: meta.title.clone(),
+          project_cwd: cwd,
+          project_name: meta.project_name.clone(),
+          provider: parsed.provider_id,
+          model: parsed.model_id,
+          ts,
+          // Keep `input` as uncached prompt tokens only.
+          prompt: tokens.input,
+          completion: tokens.output,
+          input_bytes: 0,
+          output_bytes: 0,
+          input_estimated: false,
+          output_estimated: false,
+          input_bytes_estimated: true,
+          output_bytes_estimated: true,
+          reasoning: tokens.reasoning,
+          cache_read: cache.read,
+          cache_write: cache.write,
+          total_direct: None,
+          mode: None,
+          agent: None,
+          is_compaction: false,
+          rounds,
+          calls: 1,
+          cost_embedded: parsed.cost.filter(|cost| *cost > 0.0),
+        },
+      });
+    }
+
+    Ok(ParsedUsageFile::new(complete, records))
   }
 }
 
@@ -106,99 +225,7 @@ impl UsageSource for OpenCodeSource {
       return Ok(Vec::new());
     }
     debug!(source = "opencode", file = %self.db_path.display(), "processing file");
-    let conn = Connection::open_with_flags(
-      &self.db_path,
-      OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-    )
-    .with_context(|| format!("opening {}", self.db_path.display()))?;
-
-    // Pre-load session and project metadata for joins.
-    let session_meta = load_session_meta(&conn).unwrap_or_default();
-
-    let mut stmt = conn.prepare(
-      "SELECT session_id, time_created, data FROM message \
-             WHERE data LIKE '%\"role\":\"assistant\"%'",
-    )?;
-
-    let rows = stmt.query_map([], |row| {
-      let session_id: String = row.get(0)?;
-      let time_created: i64 = row.get(1)?;
-      let data: String = row.get(2)?;
-      Ok((session_id, time_created, data))
-    })?;
-
-    let mut records = Vec::new();
-    let mut seen_parent_ids: HashSet<String> = HashSet::new();
-    for r in rows {
-      let (session_id, time_created, data) = match r {
-        Ok(v) => v,
-        Err(_) => continue,
-      };
-      let parsed: AssistantMessage = match serde_json::from_str(&data) {
-        Ok(p) => p,
-        Err(_) => continue,
-      };
-      if parsed.role.as_deref() != Some("assistant") {
-        continue;
-      }
-      let tokens = match parsed.tokens {
-        Some(t) => t,
-        None => continue,
-      };
-      let cache = tokens.cache.unwrap_or_default();
-      // OpenCode uses ms epoch.
-      let ts_ms = parsed
-        .time
-        .as_ref()
-        .and_then(|t| t.completed.or(t.created))
-        .unwrap_or(time_created);
-      let ts = ms_to_dt(ts_ms);
-
-      let meta = session_meta.get(&session_id).cloned().unwrap_or_default();
-      let cwd = parsed
-        .path
-        .as_ref()
-        .and_then(|p| p.cwd.clone())
-        .or(meta.directory.clone());
-
-      let is_new_round = parsed
-        .parent_id
-        .as_deref()
-        .is_none_or(|pid| seen_parent_ids.insert(pid.to_string()));
-      let rounds = if is_new_round { 1 } else { 0 };
-
-      records.push(UsageRecord {
-        source: Source::OpenCode,
-        session_id,
-        session_kind: crate::model::SessionKind::Root,
-        parent_session_id: None,
-        session_title: meta.title.clone(),
-        project_cwd: cwd,
-        project_name: meta.project_name.clone(),
-        provider: parsed.provider_id,
-        model: parsed.model_id,
-        ts,
-        // Keep `input` as uncached prompt tokens only.
-        prompt: tokens.input,
-        completion: tokens.output,
-        input_bytes: 0,
-        output_bytes: 0,
-        input_estimated: false,
-        output_estimated: false,
-        input_bytes_estimated: true,
-        output_bytes_estimated: true,
-        reasoning: tokens.reasoning,
-        cache_read: cache.read,
-        cache_write: cache.write,
-        total_direct: None,
-        mode: None,
-        agent: None,
-        is_compaction: false,
-        rounds,
-        calls: 1,
-        cost_embedded: parsed.cost.filter(|c| *c > 0.0),
-      });
-    }
+    let records = Self::parse_cache_file(&self.db_path)?.into_usage_records();
     debug!(
       source = "opencode",
       file = %self.db_path.display(),
@@ -247,4 +274,61 @@ fn load_session_meta(conn: &Connection) -> Result<HashMap<String, SessionMeta>> 
     );
   }
   Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::OpenCodeSource;
+  use rusqlite::{params, Connection};
+  use std::time::{SystemTime, UNIX_EPOCH};
+
+  #[test]
+  fn cache_parser_uses_message_ids_and_stable_message_order() {
+    let unique = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .expect("clock after epoch")
+      .as_nanos();
+    let path = std::env::temp_dir().join(format!("llm-tokei-opencode-cache-{unique}.db"));
+
+    {
+      let conn = Connection::open(&path).expect("create sqlite fixture");
+      conn
+        .execute_batch(
+          "
+          CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT);
+          CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, directory TEXT, title TEXT);
+          CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+          INSERT INTO project VALUES ('project-1', 'fixture-project');
+          INSERT INTO session VALUES ('session-1', 'project-1', '/tmp/fixture', 'Fixture session');
+          ",
+        )
+        .expect("create schema");
+      let first = r#"{"role":"assistant","parentID":"parent-1","tokens":{"input":3,"output":5},"modelID":"model-1","providerID":"provider-1"}"#;
+      let second = r#"{"role":"assistant","parentID":"parent-1","tokens":{"input":7,"output":11},"modelID":"model-1","providerID":"provider-1"}"#;
+      // Insert out of chronological order to ensure the parser's ORDER BY is
+      // what determines round counting and output order.
+      conn
+        .execute(
+          "INSERT INTO message (id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+          params!["message-2", "session-1", 2000_i64, second],
+        )
+        .expect("insert second message");
+      conn
+        .execute(
+          "INSERT INTO message (id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+          params!["message-1", "session-1", 1000_i64, first],
+        )
+        .expect("insert first message");
+    }
+
+    let parsed = OpenCodeSource::parse_cache_file(&path).expect("parse fixture");
+
+    assert!(parsed.complete);
+    let origin_keys: Vec<_> = parsed.records.iter().map(|record| record.origin_key.as_str()).collect();
+    assert_eq!(origin_keys, ["message:message-1", "message:message-2"]);
+    assert_eq!(parsed.records[0].record.rounds, 1);
+    assert_eq!(parsed.records[1].record.rounds, 0);
+
+    std::fs::remove_file(path).expect("remove sqlite fixture");
+  }
 }

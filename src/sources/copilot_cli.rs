@@ -1,16 +1,16 @@
-use crate::model::{Source, UsageRecord};
+use crate::model::{ParsedUsageFile, ParsedUsageRecord, Source, UsageRecord};
 use crate::sources::copilot_shutdown::{
   normalize_copilot_model, records_from_shutdown_model_metrics, timestamp_from_event, ShutdownRecordArgs,
 };
 use crate::sources::dump::{DumpRecord, DumpSink, DumpedSession};
-use crate::sources::{read_jsonl_collect, summarize_records, UsageSource};
+use crate::sources::{read_jsonl_collect, read_jsonl_collect_with_status, summarize_records, JsonlEntry, UsageSource};
 use crate::text_count::{
   all_strings, json_serialized_or_string, SpanSink, StatsSink, StringSink, TextSpan, TokenSpan, TokenStatsSink,
   TokenUsageStats,
 };
 use anyhow::Result;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::debug;
 use walkdir::WalkDir;
@@ -61,58 +61,18 @@ impl CopilotCliSource {
 
   pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     let events = read_jsonl_collect::<Value>(path)?;
-    if events.is_empty() {
-      return Ok(None);
-    }
-    let session_id = find_session_id(&events);
-
-    // Always walk events to estimate bytes and count rounds/calls
-    // (even when shutdown metrics exist).
-    let mut bytes_collector = BytesCollector::default();
-    walk_events(&events, &mut bytes_collector);
-
-    // Shutdown metrics provide exact tokens per model when present.
-    let mut shutdown: Vec<UsageRecord> = events
-      .iter()
-      .flat_map(|event| {
-        records_from_shutdown_model_metrics(ShutdownRecordArgs {
-          source: Source::CopilotCli,
-          source_path: path,
-          session_id: session_id.clone(),
-          project_cwd: None,
-          project_name: None,
-          event,
-        })
-      })
-      .collect();
-    if !shutdown.is_empty() {
-      let total_input_bytes = bytes_collector.input_bytes;
-      let total_output_bytes = bytes_collector.output_bytes;
-      // Distribute bytes proportionally across shutdown records.
-      let token_total: u64 = shutdown
-        .iter()
-        .map(|r| r.prompt.saturating_add(r.completion).saturating_add(r.reasoning))
-        .sum();
-      for record in &mut shutdown {
-        if token_total > 0 {
-          let share = record
-            .prompt
-            .saturating_add(record.completion)
-            .saturating_add(record.reasoning) as f64
-            / token_total as f64;
-          record.input_bytes = (total_input_bytes as f64 * share).round() as u64;
-          record.output_bytes = (total_output_bytes as f64 * share).round() as u64;
-        }
-        record.rounds = bytes_collector.rounds;
-        record.calls = bytes_collector.calls;
-      }
-      return Ok(Some(shutdown));
-    }
-
-    let mut builder = RecordBuilder::new(path, session_id);
-    walk_events(&events, &mut builder);
-    let records = builder.into_records();
+    let records = parse_event_records(path, &events);
     Ok(if records.is_empty() { None } else { Some(records) })
+  }
+
+  /// Parse a cacheable event stream into records with stable source-event
+  /// identities. Invalid JSONL entries retain valid records but mark the
+  /// result incomplete, so cache reconciliation cannot remove missing rows.
+  pub fn parse_cache_file(path: &Path) -> Result<ParsedUsageFile> {
+    let jsonl = read_jsonl_collect_with_status::<Value>(path)?;
+    let complete = jsonl.complete;
+    let records = parse_cache_event_records(path, &jsonl.entries);
+    Ok(ParsedUsageFile::new(complete, records))
   }
 
   pub fn dump_session_messages(path: &Path) -> Result<Option<DumpedSession>> {
@@ -148,6 +108,173 @@ impl UsageSource for CopilotCliSource {
     }
     Ok(out)
   }
+}
+
+fn parse_event_records(path: &Path, events: &[Value]) -> Vec<UsageRecord> {
+  if events.is_empty() {
+    return Vec::new();
+  }
+  let session_id = find_session_id(events);
+
+  // Always walk events to estimate bytes and count rounds/calls, even when
+  // shutdown metrics provide the exact token totals.
+  let mut bytes_collector = BytesCollector::default();
+  walk_events(events, &mut bytes_collector);
+
+  let mut shutdown = shutdown_records(path, events, session_id.clone());
+  if !shutdown.is_empty() {
+    apply_shutdown_byte_estimates(&mut shutdown, &bytes_collector);
+    return shutdown;
+  }
+
+  let mut builder = RecordBuilder::new(path, session_id);
+  walk_events(events, &mut builder);
+  builder.into_records()
+}
+
+fn parse_cache_event_records(path: &Path, entries: &[JsonlEntry<Value>]) -> Vec<ParsedUsageRecord> {
+  if entries.is_empty() {
+    return Vec::new();
+  }
+
+  let session_id = find_session_id(entries.iter().map(|entry| &entry.value));
+  let mut bytes_collector = BytesCollector::default();
+  walk_events(entries.iter().map(|entry| &entry.value), &mut bytes_collector);
+
+  let mut shutdown_records = Vec::new();
+  let mut shutdown_origin_keys = Vec::new();
+  let mut origin_key_counts = HashMap::new();
+  for entry in entries {
+    let mut event_records = records_from_shutdown_model_metrics(ShutdownRecordArgs {
+      source: Source::CopilotCli,
+      source_path: path,
+      session_id: session_id.clone(),
+      project_cwd: None,
+      project_name: None,
+      event: &entry.value,
+    });
+    event_records.sort_by(|a, b| a.provider.cmp(&b.provider).then_with(|| a.model.cmp(&b.model)));
+    for record in event_records {
+      let provider = record.provider.as_deref().unwrap_or("unknown");
+      let model = record.model.as_deref().unwrap_or("unknown");
+      let origin_key = unique_event_origin_key(
+        format!("{}:shutdown:provider:{provider}:model:{model}", event_origin_key(entry)),
+        &mut origin_key_counts,
+      );
+      shutdown_origin_keys.push(origin_key);
+      shutdown_records.push(record);
+    }
+  }
+
+  if !shutdown_records.is_empty() {
+    apply_shutdown_byte_estimates(&mut shutdown_records, &bytes_collector);
+    return shutdown_origin_keys
+      .into_iter()
+      .zip(shutdown_records)
+      .map(|(origin_key, record)| ParsedUsageRecord { origin_key, record })
+      .collect();
+  }
+
+  let mut builder = RecordBuilder::new(path, session_id);
+  walk_events(entries.iter().map(|entry| &entry.value), &mut builder);
+  let records = builder.into_records();
+  let origin_keys = fallback_record_origin_keys(entries);
+  debug_assert_eq!(records.len(), origin_keys.len());
+  records
+    .into_iter()
+    .zip(origin_keys)
+    .map(|(record, origin_key)| ParsedUsageRecord { origin_key, record })
+    .collect()
+}
+
+fn shutdown_records(path: &Path, events: &[Value], session_id: Option<String>) -> Vec<UsageRecord> {
+  events
+    .iter()
+    .flat_map(|event| {
+      records_from_shutdown_model_metrics(ShutdownRecordArgs {
+        source: Source::CopilotCli,
+        source_path: path,
+        session_id: session_id.clone(),
+        project_cwd: None,
+        project_name: None,
+        event,
+      })
+    })
+    .collect()
+}
+
+fn apply_shutdown_byte_estimates(records: &mut [UsageRecord], bytes_collector: &BytesCollector) {
+  let token_total: u64 = records
+    .iter()
+    .map(|record| {
+      record
+        .prompt
+        .saturating_add(record.completion)
+        .saturating_add(record.reasoning)
+    })
+    .sum();
+  for record in records {
+    if token_total > 0 {
+      let share = record
+        .prompt
+        .saturating_add(record.completion)
+        .saturating_add(record.reasoning) as f64
+        / token_total as f64;
+      record.input_bytes = (bytes_collector.input_bytes as f64 * share).round() as u64;
+      record.output_bytes = (bytes_collector.output_bytes as f64 * share).round() as u64;
+    }
+    record.rounds = bytes_collector.rounds;
+    record.calls = bytes_collector.calls;
+  }
+}
+
+fn fallback_record_origin_keys(entries: &[JsonlEntry<Value>]) -> Vec<String> {
+  let mut origin_keys = Vec::new();
+  let mut counts = HashMap::new();
+  for entry in entries {
+    let slot = match entry.value.get("type").and_then(|value| value.as_str()) {
+      Some("assistant.message") => Some("assistant"),
+      Some("session.compaction_complete") if entry.value.pointer("/data/compactionTokensUsed").is_some() => {
+        Some("compaction")
+      }
+      _ => None,
+    };
+    if let Some(slot) = slot {
+      origin_keys.push(unique_event_origin_key(
+        format!("{}:{slot}", event_origin_key(entry)),
+        &mut counts,
+      ));
+    }
+  }
+  origin_keys
+}
+
+fn event_origin_key(entry: &JsonlEntry<Value>) -> String {
+  let event = &entry.value;
+  let id = event
+    .get("id")
+    .and_then(|value| value.as_str())
+    .filter(|id| !id.is_empty())
+    .map(|id| format!("event:{id}"))
+    .or_else(|| {
+      event
+        .pointer("/data/messageId")
+        .and_then(|value| value.as_str())
+        .filter(|id| !id.is_empty())
+        .map(|id| format!("message:{id}"))
+    });
+  id.unwrap_or_else(|| format!("offset:{}", entry.position.byte_offset))
+}
+
+fn unique_event_origin_key(base: String, counts: &mut HashMap<String, usize>) -> String {
+  let count = counts.entry(base.clone()).or_default();
+  let origin_key = if *count == 0 {
+    base
+  } else {
+    format!("{base}:duplicate:{count}")
+  };
+  *count += 1;
+  origin_key
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +324,11 @@ trait EventsVisitor {
   fn compaction_complete(&mut self, _event: &Value) {}
 }
 
-fn walk_events<V: EventsVisitor>(events: &[Value], visitor: &mut V) {
+fn walk_events<'a, V, I>(events: I, visitor: &mut V)
+where
+  V: EventsVisitor,
+  I: IntoIterator<Item = &'a Value>,
+{
   for event in events {
     if let Some(ts) = timestamp_from_event_opt(event) {
       visitor.timestamp(ts);
@@ -234,8 +365,11 @@ fn timestamp_from_event_opt(event: &Value) -> Option<chrono::DateTime<chrono::Ut
     .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
-fn find_session_id(events: &[Value]) -> Option<String> {
-  events.iter().find_map(|event| {
+fn find_session_id<'a, I>(events: I) -> Option<String>
+where
+  I: IntoIterator<Item = &'a Value>,
+{
+  events.into_iter().find_map(|event| {
     if event.get("type").and_then(|v| v.as_str()) == Some("session.start") {
       event
         .pointer("/data/sessionId")
@@ -592,4 +726,40 @@ fn fallback_session_id(path: &Path) -> String {
     .and_then(|s| s.to_str())
     .unwrap_or("unknown")
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::CopilotCliSource;
+  use std::path::Path;
+
+  #[test]
+  fn cache_parser_uses_event_ids_and_slots() {
+    let path =
+      Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/copilot_cli/session-state/session1/events.jsonl");
+
+    let parsed = CopilotCliSource::parse_cache_file(&path).expect("parse fixture");
+
+    assert!(parsed.complete);
+    let origin_keys: Vec<_> = parsed.records.iter().map(|record| record.origin_key.as_str()).collect();
+    assert_eq!(origin_keys, ["event:a1:assistant", "event:c1:compaction"]);
+  }
+
+  #[test]
+  fn cache_parser_keys_shutdown_metrics_by_event_offset_and_model() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/fixtures/copilot_cli_shutdown/session-state/session2/events.jsonl");
+
+    let parsed = CopilotCliSource::parse_cache_file(&path).expect("parse fixture");
+
+    assert!(parsed.complete);
+    assert_eq!(parsed.records.len(), 1);
+    assert!(
+      parsed.records[0]
+        .origin_key
+        .ends_with(":shutdown:provider:github-copilot:model:gpt-5-mini"),
+      "unexpected key: {}",
+      parsed.records[0].origin_key
+    );
+  }
 }

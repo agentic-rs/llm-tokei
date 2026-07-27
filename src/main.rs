@@ -18,20 +18,20 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 use crate::activity::{render_activity, ActivityRenderOptions};
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
-use crate::cache::{CacheDb, CacheStats};
+use crate::cache::{CacheDb, CacheStats, FileStamp};
 use crate::cli::{Args, CacheCmd, Cmd, ConfigCmd, Format, GraphChart, Unit};
 use crate::format::{
   json::render_json,
   svg::render_svg_terminal,
   table::{render_table, TableOpts},
 };
-use crate::model::UsageRecord;
+use crate::model::{ParsedUsageFile, UsageRecord};
 use crate::pricing::{update_cached_prices, PricingTable};
 use crate::sources::{
   claude::ClaudeSource, codex::CodexSource, copilot::CopilotSource, copilot_cli::CopilotCliSource,
@@ -99,7 +99,13 @@ fn main() -> Result<()> {
       let src = CodexSource::new(p);
       let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_mut() {
-        collect_one_record_source_with_cache(c, "codex", src.discover_files(), CodexSource::parse_file, progress)
+        collect_one_record_source_with_cache(
+          c,
+          "codex",
+          src.discover_files(),
+          CodexSource::parse_cache_file,
+          progress,
+        )
       } else {
         collect_one_record_source_direct("codex", src.discover_files(), CodexSource::parse_file, progress)
       };
@@ -129,7 +135,7 @@ fn main() -> Result<()> {
           c,
           "copilot-cli",
           src.discover_files(),
-          CopilotCliSource::parse_file,
+          CopilotCliSource::parse_cache_file,
           progress,
         )
       } else {
@@ -193,7 +199,13 @@ fn main() -> Result<()> {
       let src = PiAgentSource::new(p);
       let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_mut() {
-        collect_one_record_source_with_cache(c, "pi-agent", src.discover_files(), PiAgentSource::parse_file, progress)
+        collect_one_record_source_with_cache(
+          c,
+          "pi-agent",
+          src.discover_files(),
+          PiAgentSource::parse_cache_file,
+          progress,
+        )
       } else {
         collect_one_record_source_direct("pi-agent", src.discover_files(), PiAgentSource::parse_file, progress)
       };
@@ -216,7 +228,13 @@ fn main() -> Result<()> {
       let src = ClaudeSource::new(p);
       let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_mut() {
-        collect_one_record_source_with_cache(c, "claude", src.discover_files(), ClaudeSource::parse_file, progress)
+        collect_one_record_source_with_cache(
+          c,
+          "claude",
+          src.discover_files(),
+          ClaudeSource::parse_cache_file,
+          progress,
+        )
       } else {
         collect_one_record_source_direct("claude", src.discover_files(), ClaudeSource::parse_file, progress)
       };
@@ -239,7 +257,13 @@ fn main() -> Result<()> {
       let src = CopilotSource::new(roots);
       let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_mut() {
-        collect_one_record_source_with_cache(c, "copilot", src.discover_files(), CopilotSource::parse_file, progress)
+        collect_one_record_source_with_cache(
+          c,
+          "copilot",
+          src.discover_files(),
+          CopilotSource::parse_cache_file,
+          progress,
+        )
       } else {
         collect_one_record_source_direct("copilot", src.discover_files(), CopilotSource::parse_file, progress)
       };
@@ -643,6 +667,18 @@ mod processing_progress_tests {
 
     assert!(!revealed.load(std::sync::atomic::Ordering::SeqCst));
   }
+
+  #[test]
+  fn unique_files_keeps_each_discovered_path_once() {
+    assert_eq!(
+      unique_files(vec![
+        PathBuf::from("/cache/one.jsonl"),
+        PathBuf::from("/cache/two.jsonl"),
+        PathBuf::from("/cache/one.jsonl"),
+      ]),
+      vec![PathBuf::from("/cache/one.jsonl"), PathBuf::from("/cache/two.jsonl")]
+    );
+  }
 }
 
 fn collect_one_record_source_with_cache<F>(
@@ -653,65 +689,54 @@ fn collect_one_record_source_with_cache<F>(
   mut progress: ProcessingProgress,
 ) -> Result<(Vec<UsageRecord>, CacheStats)>
 where
-  F: Fn(&Path) -> Result<Option<Vec<UsageRecord>>>,
+  F: Fn(&Path) -> Result<ParsedUsageFile>,
 {
   let mut out = Vec::new();
   let mut stats = CacheStats::new();
+  let files = unique_files(files);
   stats.scanned = files.len();
 
-  let known = cache.file_mtimes_for(source)?;
-  let mut seen: HashSet<PathBuf> = HashSet::new();
-
+  let known = cache.file_stamps_for(source)?;
   for file in files {
-    seen.insert(file.clone());
-    let mtime = file_mtime_secs(&file).unwrap_or(0);
+    let stamp_before = FileStamp::from_path(&file);
     let was_known = known.get(&file).copied();
 
-    if was_known == Some(mtime) {
+    if stamp_before.is_some_and(|stamp| was_known == Some(stamp)) {
       let mut cached = cache.load_active_for_file(source, &file)?;
-      if cached.is_empty() {
-        debug!(source, file = %file.display(), "processing file");
-        progress.show(source, &file);
-        let parsed = parse_file(&file);
-        let parsed = parsed?.unwrap_or_default();
-        debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
-        if let Some(prev) = was_known {
-          if prev == mtime {
-            stats.updated += 1;
-          }
-        }
-        cache.upsert_file(&file, mtime, source, &parsed)?;
-        out.extend(parsed);
-      } else {
-        stats.cached += 1;
-        debug!(source, file = %file.display(), summary = %file_summary(&cached), "file summary");
-        out.append(&mut cached);
-      }
+      stats.cached += 1;
+      debug!(source, file = %file.display(), summary = %file_summary(&cached), "file summary");
+      out.append(&mut cached);
       continue;
     }
 
     debug!(source, file = %file.display(), "processing file");
     progress.show(source, &file);
-    let parsed = parse_file(&file);
-    let parsed = parsed?.unwrap_or_default();
-    debug!(source, file = %file.display(), summary = %file_summary(&parsed), "file summary");
-    if was_known.is_some() {
-      stats.updated += 1;
-    } else {
-      stats.added += 1;
-    }
-    cache.upsert_file(&file, mtime, source, &parsed)?;
-    out.extend(parsed);
-  }
+    let parsed = parse_file(&file)?;
+    debug!(source, file = %file.display(), summary = %parsed_file_summary(&parsed), "file summary");
 
-  let to_prune: Vec<PathBuf> = cache
-    .active_file_paths(source)?
-    .into_iter()
-    .filter(|p| !seen.contains(p))
-    .collect();
-  if !to_prune.is_empty() {
-    let _ = cache.prune_files(source, &to_prune)?;
-    stats.pruned = to_prune.len();
+    let stamp_after = FileStamp::from_path(&file);
+    if parsed.complete && stamp_before.is_some() && stamp_before == stamp_after {
+      match cache.upsert_file(&file, stamp_before.expect("checked above"), source, &parsed) {
+        Ok(()) => {
+          if was_known.is_some() {
+            stats.updated += 1;
+          } else {
+            stats.added += 1;
+          }
+        }
+        Err(error) => {
+          debug!(source, file = %file.display(), error = %error, "cache reconciliation failed; reporting parsed file");
+        }
+      }
+    } else {
+      debug!(
+        source,
+        file = %file.display(),
+        complete = parsed.complete,
+        "not caching an incomplete or concurrently modified file"
+      );
+    }
+    out.extend(parsed.into_usage_records());
   }
 
   Ok((out, stats))
@@ -728,6 +753,7 @@ where
 {
   let mut out = Vec::new();
   let mut stats = CacheStats::new();
+  let files = unique_files(files);
   stats.scanned = files.len();
 
   for file in files {
@@ -742,6 +768,11 @@ where
   }
 
   Ok((out, stats))
+}
+
+fn unique_files(files: Vec<PathBuf>) -> Vec<PathBuf> {
+  let mut seen = HashSet::new();
+  files.into_iter().filter(|file| seen.insert(file.clone())).collect()
 }
 
 fn period_since(args: &Args) -> Option<anyhow::Result<chrono::DateTime<chrono::Utc>>> {
@@ -768,81 +799,98 @@ fn collect_opencode_with_cache(
   let file = src.db_path.clone();
 
   if !file.exists() {
-    let to_prune = cache.active_file_paths("opencode")?;
-    if !to_prune.is_empty() {
-      let _ = cache.prune_files("opencode", &to_prune)?;
-      stats.pruned = to_prune.len();
-    }
     return Ok((out, stats));
   }
 
   stats.scanned = 1;
-  let mtime = file_mtime_secs(&file).unwrap_or(0);
-  let known = cache.file_mtimes_for("opencode")?;
+  let stamp_before = FileStamp::from_sqlite_database(&file);
+  let known = cache.file_stamps_for("opencode")?;
   let was_known = known.get(&file).copied();
 
-  if was_known == Some(mtime) {
+  if stamp_before.is_some_and(|stamp| was_known == Some(stamp)) {
     out = cache.load_active_for_file("opencode", &file)?;
-    if !out.is_empty() {
-      stats.cached = 1;
-      return Ok((out, stats));
-    }
+    stats.cached = 1;
+    return Ok((out, stats));
   }
 
   debug!(source = "opencode", file = %file.display(), "processing file");
   progress.show("opencode", &file);
-  let collected = src.collect();
-  out = collected?;
-  debug!(source = "opencode", file = %file.display(), summary = %file_summary(&out), "file summary");
-  if was_known.is_some() {
-    stats.updated = 1;
-  } else {
-    stats.added = 1;
-  }
-  cache.upsert_file(&file, mtime, "opencode", &out)?;
-  Ok((out, stats))
-}
+  let parsed = OpenCodeSource::parse_cache_file(&file)?;
+  debug!(source = "opencode", file = %file.display(), summary = %parsed_file_summary(&parsed), "file summary");
 
-fn file_mtime_secs(path: &Path) -> Option<i64> {
-  let meta = std::fs::metadata(path).ok()?;
-  let modified = meta.modified().ok()?;
-  let dur = modified.duration_since(UNIX_EPOCH).ok()?;
-  Some(dur.as_secs() as i64)
+  let stamp_after = FileStamp::from_sqlite_database(&file);
+  if parsed.complete && stamp_before.is_some() && stamp_before == stamp_after {
+    match cache.upsert_file(&file, stamp_before.expect("checked above"), "opencode", &parsed) {
+      Ok(()) => {
+        if was_known.is_some() {
+          stats.updated = 1;
+        } else {
+          stats.added = 1;
+        }
+      }
+      Err(error) => {
+        debug!(source = "opencode", file = %file.display(), error = %error, "cache reconciliation failed; reporting parsed file");
+      }
+    }
+  } else {
+    debug!(
+      source = "opencode",
+      file = %file.display(),
+      complete = parsed.complete,
+      "not caching an incomplete or concurrently modified file"
+    );
+  }
+  out = parsed.into_usage_records();
+  Ok((out, stats))
 }
 
 fn format_cache_stats(source: &str, unit: &str, stats: &CacheStats) -> String {
   if stats.scanned == 0 {
     return format!("{source}: 0 {unit}");
   }
-  if stats.cached == 0 && stats.added == 0 && stats.updated == 0 && stats.pruned == 0 {
+  if stats.cached == 0 && stats.added == 0 && stats.updated == 0 {
     return format!("{source}: {} {unit}", stats.scanned);
   }
-  if stats.pruned > 0 {
-    format!(
-      "{source}: {} {unit}, {} cached, {} added, {} updated, {} pruned",
-      stats.scanned, stats.cached, stats.added, stats.updated, stats.pruned
-    )
-  } else {
-    format!(
-      "{source}: {} {unit}, {} cached, {} added, {} updated",
-      stats.scanned, stats.cached, stats.added, stats.updated
-    )
-  }
+  format!(
+    "{source}: {} {unit}, {} cached, {} added, {} updated",
+    stats.scanned, stats.cached, stats.added, stats.updated
+  )
 }
 
 fn file_summary(records: &[UsageRecord]) -> String {
-  let input: u64 = records.iter().map(UsageRecord::display_input).sum();
-  let output: u64 = records.iter().map(UsageRecord::display_output).sum();
-  let reasoning: u64 = records.iter().map(|r| r.reasoning).sum();
-  let cache_read: u64 = records.iter().map(|r| r.cache_read).sum();
-  let cache_write: u64 = records.iter().map(|r| r.cache_write).sum();
-  let calls: u64 = records.iter().map(|r| r.calls).sum();
-  let rounds: u64 = records.iter().map(|r| r.rounds).sum();
-  let input_est = records.iter().any(|r| r.input_estimated);
-  let output_est = records.iter().any(|r| r.output_estimated);
+  file_summary_iter(records.iter())
+}
+
+fn parsed_file_summary(parsed: &ParsedUsageFile) -> String {
+  file_summary_iter(parsed.records.iter().map(|parsed| &parsed.record))
+}
+
+fn file_summary_iter<'a>(records: impl Iterator<Item = &'a UsageRecord>) -> String {
+  let mut input = 0;
+  let mut output = 0;
+  let mut reasoning = 0;
+  let mut cache_read = 0;
+  let mut cache_write = 0;
+  let mut calls = 0;
+  let mut rounds = 0;
+  let mut input_est = false;
+  let mut output_est = false;
+  let mut count = 0;
+  for record in records {
+    count += 1;
+    input += record.display_input();
+    output += record.display_output();
+    reasoning += record.reasoning;
+    cache_read += record.cache_read;
+    cache_write += record.cache_write;
+    calls += record.calls;
+    rounds += record.rounds;
+    input_est |= record.input_estimated;
+    output_est |= record.output_estimated;
+  }
   format!(
     "records={}, input={}, output={}, reasoning={}, cache_r={}, cache_w={}, calls={}, rounds={}",
-    records.len(),
+    count,
     fmt_est(input, input_est),
     fmt_est(output, output_est),
     reasoning,

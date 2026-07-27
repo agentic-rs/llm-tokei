@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Source {
@@ -46,7 +47,7 @@ impl SessionKind {
   }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UsageRecord {
   pub source: Source,
   pub session_id: String,
@@ -83,6 +84,59 @@ pub struct UsageRecord {
   pub cost_embedded: Option<f64>,
 }
 
+/// A normalized usage record together with its stable source-file identity.
+///
+/// `origin_key` is not user-facing output. It allows the cache to distinguish
+/// two equal usage records that originated from different source events.
+#[derive(Debug, Clone)]
+pub struct ParsedUsageRecord {
+  pub origin_key: String,
+  pub record: UsageRecord,
+}
+
+/// The result of parsing one cacheable source file.
+///
+/// `complete` is false when a JSONL reader encountered an invalid line. Such
+/// a parse can still produce displayable records, but must not remove cached
+/// records that were absent from the partial read.
+#[derive(Debug, Clone)]
+pub struct ParsedUsageFile {
+  pub complete: bool,
+  pub records: Vec<ParsedUsageRecord>,
+}
+
+impl ParsedUsageFile {
+  pub fn new(complete: bool, mut records: Vec<ParsedUsageRecord>) -> Self {
+    ensure_unique_origin_keys(&mut records);
+    Self { complete, records }
+  }
+
+  pub fn into_usage_records(self) -> Vec<UsageRecord> {
+    self.records.into_iter().map(|parsed| parsed.record).collect()
+  }
+}
+
+fn ensure_unique_origin_keys(records: &mut [ParsedUsageRecord]) {
+  let mut occurrences = HashMap::<String, usize>::new();
+  let mut used = HashSet::new();
+  for parsed in records {
+    let base = parsed.origin_key.clone();
+    let occurrence = occurrences.entry(base.clone()).or_default();
+    loop {
+      let candidate = if *occurrence == 0 {
+        base.clone()
+      } else {
+        format!("{base}:duplicate:{occurrence}")
+      };
+      *occurrence += 1;
+      if used.insert(candidate.clone()) {
+        parsed.origin_key = candidate;
+        break;
+      }
+    }
+  }
+}
+
 impl UsageRecord {
   /// Displayed input includes prompt and cache traffic.
   pub fn display_input(&self) -> u64 {
@@ -100,5 +154,74 @@ impl UsageRecord {
   /// Display total uses the displayed input/output columns as-is.
   pub fn total(&self) -> u64 {
     self.display_input().saturating_add(self.display_output())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use chrono::TimeZone;
+
+  fn record() -> UsageRecord {
+    UsageRecord {
+      source: Source::Codex,
+      session_id: "session".to_string(),
+      session_kind: SessionKind::Root,
+      parent_session_id: None,
+      session_title: None,
+      project_cwd: None,
+      project_name: None,
+      provider: None,
+      model: None,
+      ts: Utc.timestamp_opt(0, 0).single().expect("epoch timestamp"),
+      prompt: 0,
+      completion: 0,
+      input_bytes: 0,
+      output_bytes: 0,
+      input_estimated: false,
+      output_estimated: false,
+      input_bytes_estimated: false,
+      output_bytes_estimated: false,
+      reasoning: 0,
+      cache_read: 0,
+      cache_write: 0,
+      total_direct: None,
+      mode: None,
+      agent: None,
+      is_compaction: false,
+      rounds: 0,
+      calls: 0,
+      cost_embedded: None,
+    }
+  }
+
+  #[test]
+  fn parsed_usage_file_disambiguates_duplicate_origin_keys() {
+    let parsed = ParsedUsageFile::new(
+      true,
+      vec![
+        ParsedUsageRecord {
+          origin_key: "event".to_string(),
+          record: record(),
+        },
+        ParsedUsageRecord {
+          origin_key: "event".to_string(),
+          record: record(),
+        },
+        ParsedUsageRecord {
+          origin_key: "event:duplicate:1".to_string(),
+          record: record(),
+        },
+      ],
+    );
+
+    assert_eq!(
+      parsed
+        .records
+        .iter()
+        .map(|record| record.origin_key.as_str())
+        .collect::<Vec<_>>(),
+      ["event", "event:duplicate:1", "event:duplicate:1:duplicate:1"]
+    );
   }
 }

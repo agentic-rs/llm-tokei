@@ -1,10 +1,8 @@
-use crate::model::{Source, UsageRecord};
-use crate::sources::UsageSource;
+use crate::model::{ParsedUsageFile, ParsedUsageRecord, Source, UsageRecord};
+use crate::sources::{read_jsonl_with_status, JsonlPosition, UsageSource};
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tracing::debug;
 use walkdir::WalkDir;
@@ -47,6 +45,11 @@ impl ClaudeSource {
   }
 
   pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
+    let records = Self::parse_cache_file(path)?.into_usage_records();
+    Ok(if records.is_empty() { None } else { Some(records) })
+  }
+
+  pub fn parse_cache_file(path: &Path) -> Result<ParsedUsageFile> {
     parse_session(path)
   }
 }
@@ -60,6 +63,10 @@ struct Line {
   #[serde(default, rename = "sessionId")]
   session_id: Option<String>,
   #[serde(default)]
+  uuid: Option<String>,
+  #[serde(default)]
+  id: Option<String>,
+  #[serde(default)]
   cwd: Option<String>,
   #[serde(default)]
   message: Option<MessageObj>,
@@ -67,6 +74,8 @@ struct Line {
 
 #[derive(Debug, Deserialize)]
 struct MessageObj {
+  #[serde(default)]
+  id: Option<String>,
   #[serde(default)]
   #[allow(dead_code)]
   role: Option<String>,
@@ -123,18 +132,14 @@ impl UsageSource for ClaudeSource {
   }
 }
 
-fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
-  let f = File::open(path)?;
-  let reader = BufReader::new(f);
-
+fn parse_session(path: &Path) -> Result<ParsedUsageFile> {
   let mut session_id: Option<String> = None;
   let mut cwd: Option<String> = None;
 
-  // Per-turn records emitted as we encounter each assistant message with usage.
-  let mut records: Vec<UsageRecord> = Vec::new();
   // We can't construct the final record until we've resolved session_id/cwd
   // (they may appear on later lines). Stash raw turn data and finalize at end.
   struct PendingTurn {
+    origin_key: String,
     ts: Option<DateTime<Utc>>,
     model: Option<String>,
     input: u64,
@@ -146,19 +151,7 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   let mut pending: Vec<PendingTurn> = Vec::new();
   let mut user_rounds: u64 = 0;
 
-  for line in reader.lines() {
-    let line = match line {
-      Ok(l) => l,
-      Err(_) => continue,
-    };
-    if line.trim().is_empty() {
-      continue;
-    }
-    let parsed: Line = match serde_json::from_str(&line) {
-      Ok(p) => p,
-      Err(_) => continue,
-    };
-
+  let complete = read_jsonl_with_status::<Line, _>(path, |parsed, position| {
     let ts = parsed
       .timestamp
       .as_deref()
@@ -166,12 +159,12 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
       .map(|dt| dt.with_timezone(&Utc));
 
     if session_id.is_none() {
-      if let Some(s) = parsed.session_id {
+      if let Some(s) = parsed.session_id.clone() {
         session_id = Some(s);
       }
     }
     if cwd.is_none() {
-      if let Some(c) = parsed.cwd {
+      if let Some(c) = parsed.cwd.clone() {
         cwd = Some(c);
       }
     }
@@ -197,6 +190,11 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
           };
           let cw = if cw == 0 { u.cache_creation_input_tokens } else { cw };
           pending.push(PendingTurn {
+            origin_key: origin_key(
+              parsed.uuid.as_deref().or(parsed.id.as_deref()).or(msg.id.as_deref()),
+              position,
+              0,
+            ),
             ts,
             model: msg.model.filter(|m| !m.is_empty()),
             input: u.input_tokens,
@@ -208,10 +206,10 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
         }
       }
     }
-  }
+  })?;
 
   if pending.is_empty() {
-    return Ok(None);
+    return Ok(ParsedUsageFile::new(complete, Vec::new()));
   }
 
   let sid = session_id.unwrap_or_else(|| {
@@ -227,7 +225,8 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
   // each round, 0 to subsequent calls in the same round, so the sum equals
   // total user rounds.
   let mut last_round_seen: u64 = 0;
-  for turn in pending.into_iter() {
+  let mut records = Vec::with_capacity(pending.len());
+  for turn in pending {
     let rounds_this = if turn.rounds_at != last_round_seen {
       last_round_seen = turn.rounds_at;
       1
@@ -239,46 +238,56 @@ fn parse_session(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
     let ts = turn
       .ts
       .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_else(Utc::now));
-    records.push(UsageRecord {
-      source: Source::Claude,
-      session_id: sid.clone(),
-      session_kind: crate::model::SessionKind::Root,
-      parent_session_id: None,
-      session_title: None,
-      project_cwd: cwd.clone(),
-      project_name: None,
-      provider: Some("anthropic".to_string()),
-      model: turn.model,
-      ts,
-      prompt,
-      completion,
-      input_bytes: 0,
-      output_bytes: 0,
-      input_estimated: false,
-      output_estimated: false,
-      input_bytes_estimated: true,
-      output_bytes_estimated: true,
-      reasoning: 0,
-      cache_read: turn.cache_read,
-      cache_write: turn.cache_write,
-      total_direct: None,
-      mode: None,
-      agent: None,
-      is_compaction: false,
-      rounds: rounds_this,
-      calls: 1,
-      cost_embedded: None,
+    records.push(ParsedUsageRecord {
+      origin_key: turn.origin_key,
+      record: UsageRecord {
+        source: Source::Claude,
+        session_id: sid.clone(),
+        session_kind: crate::model::SessionKind::Root,
+        parent_session_id: None,
+        session_title: None,
+        project_cwd: cwd.clone(),
+        project_name: None,
+        provider: Some("anthropic".to_string()),
+        model: turn.model,
+        ts,
+        prompt,
+        completion,
+        input_bytes: 0,
+        output_bytes: 0,
+        input_estimated: false,
+        output_estimated: false,
+        input_bytes_estimated: true,
+        output_bytes_estimated: true,
+        reasoning: 0,
+        cache_read: turn.cache_read,
+        cache_write: turn.cache_write,
+        total_direct: None,
+        mode: None,
+        agent: None,
+        is_compaction: false,
+        rounds: rounds_this,
+        calls: 1,
+        cost_embedded: None,
+      },
     });
   }
 
   // Ensure at least one record carries rounds=1 even if no `user` line was seen.
-  if records.iter().all(|r| r.rounds == 0) {
+  if records.iter().all(|record| record.record.rounds == 0) {
     if let Some(first) = records.first_mut() {
-      first.rounds = 1;
+      first.record.rounds = 1;
     }
   }
 
-  Ok(Some(records))
+  Ok(ParsedUsageFile::new(complete, records))
+}
+
+fn origin_key(event_id: Option<&str>, position: JsonlPosition, emitted_slot: usize) -> String {
+  match event_id.filter(|id| !id.is_empty()) {
+    Some(id) => format!("event:{id}:slot:{emitted_slot}"),
+    None => format!("offset:{}:slot:{emitted_slot}", position.byte_offset),
+  }
 }
 
 /// Returns true if the message content is a tool-result injection
@@ -340,4 +349,49 @@ fn summarize(records: &[UsageRecord]) -> String {
     cache_read,
     cache_write
   )
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn cache_parser_uses_stable_offset_keys_when_events_have_no_id() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/projects/-home-me-proj/abc123.jsonl");
+
+    let parsed = ClaudeSource::parse_cache_file(&path).expect("parse fixture");
+    let keys = parsed
+      .records
+      .iter()
+      .map(|record| record.origin_key.clone())
+      .collect::<Vec<_>>();
+
+    assert!(parsed.complete);
+    assert_eq!(keys.len(), 2);
+    assert!(keys.iter().all(|key| key.starts_with("offset:")));
+    assert_eq!(
+      keys,
+      ClaudeSource::parse_cache_file(&path)
+        .expect("reparse fixture")
+        .records
+        .iter()
+        .map(|record| record.origin_key.clone())
+        .collect::<Vec<_>>()
+    );
+  }
+
+  #[test]
+  fn origin_key_prefers_a_source_event_id() {
+    assert_eq!(
+      origin_key(
+        Some("assistant-event"),
+        JsonlPosition {
+          byte_offset: 42,
+          line_number: 3,
+        },
+        0,
+      ),
+      "event:assistant-event:slot:0"
+    );
+  }
 }
