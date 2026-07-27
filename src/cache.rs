@@ -1,7 +1,7 @@
 use crate::model::{SessionKind, Source, UsageRecord};
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags, Transaction};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -105,6 +105,11 @@ pub struct CacheStats {
   pub added: usize,
   pub updated: usize,
   pub pruned: usize,
+}
+
+pub struct CachePruneStats {
+  pub sessions: i64,
+  pub records: i64,
 }
 
 impl CacheStats {
@@ -213,22 +218,29 @@ impl CacheDb {
     Ok(rows.filter_map(|r| r.ok()).collect())
   }
 
-  pub fn upsert_file(&self, file_path: &Path, mtime: i64, source: &str, records: &[UsageRecord]) -> Result<()> {
+  pub fn upsert_file(&mut self, file_path: &Path, mtime: i64, source: &str, records: &[UsageRecord]) -> Result<()> {
     let fp_str = file_path.to_string_lossy();
-    self.conn.execute(
-      "UPDATE sessions SET pruned = 1 WHERE file_path = ?1 AND source = ?2 AND pruned = 0",
-      params![fp_str.as_ref(), source],
-    )?;
-
     let grouped = group_by_session(records);
-    for (_, session_records) in grouped {
-      let first = session_records.first().expect("session group is non-empty");
-      let (first_ts, last_ts) = ts_range(&session_records);
-      self.conn.execute(
+    let tx = self.conn.transaction()?;
+    delete_file_rows(&tx, source, fp_str.as_ref())?;
+
+    {
+      let mut insert_session = tx.prepare(
         "INSERT INTO sessions (source, session_id, session_kind, parent_session_id, session_title, project_cwd, project_name, \
                               file_path, first_ts, last_ts, file_mtime, pruned) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0)",
-        params![
+      )?;
+      let mut insert_record = tx.prepare(
+        "INSERT INTO records (session_rowid, provider, model, ts, prompt, completion, input_bytes, output_bytes, \
+                             input_estimated, output_estimated, input_bytes_estimated, output_bytes_estimated, \
+                             reasoning, cache_read, cache_write, total, mode, agent, is_compaction, rounds, calls, \
+                             cost_embedded) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+      )?;
+      for (_, session_records) in grouped {
+        let first = session_records.first().expect("session group is non-empty");
+        let (first_ts, last_ts) = ts_range(&session_records);
+        insert_session.execute(params![
           source,
           first.session_id,
           first.session_kind.as_str(),
@@ -240,60 +252,78 @@ impl CacheDb {
           first_ts,
           last_ts,
           mtime,
-        ],
-      )?;
-      let sid = self.conn.last_insert_rowid();
-      let mut insert_record = self.conn.prepare(
-        "INSERT INTO records (session_rowid, provider, model, ts, prompt, completion, input_bytes, output_bytes, \
-                             input_estimated, output_estimated, input_bytes_estimated, output_bytes_estimated, \
-                             reasoning, cache_read, cache_write, total, mode, agent, is_compaction, rounds, calls, \
-                             cost_embedded) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
-      )?;
-      for record in session_records {
-        insert_record.execute(params![
-          sid,
-          record.provider,
-          record.model,
-          record.ts.to_rfc3339(),
-          to_sql_i64(record.prompt),
-          to_sql_i64(record.completion),
-          to_sql_i64(record.input_bytes),
-          to_sql_i64(record.output_bytes),
-          if record.input_estimated { 1 } else { 0 },
-          if record.output_estimated { 1 } else { 0 },
-          if record.input_bytes_estimated { 1 } else { 0 },
-          if record.output_bytes_estimated { 1 } else { 0 },
-          to_sql_i64(record.reasoning),
-          to_sql_i64(record.cache_read),
-          to_sql_i64(record.cache_write),
-          record.total_direct.map(to_sql_i64),
-          record.mode,
-          record.agent,
-          if record.is_compaction { 1 } else { 0 },
-          to_sql_i64(record.rounds),
-          to_sql_i64(record.calls),
-          record.cost_embedded,
         ])?;
+        let sid = tx.last_insert_rowid();
+        for record in session_records {
+          insert_record.execute(params![
+            sid,
+            record.provider,
+            record.model,
+            record.ts.to_rfc3339(),
+            to_sql_i64(record.prompt),
+            to_sql_i64(record.completion),
+            to_sql_i64(record.input_bytes),
+            to_sql_i64(record.output_bytes),
+            if record.input_estimated { 1 } else { 0 },
+            if record.output_estimated { 1 } else { 0 },
+            if record.input_bytes_estimated { 1 } else { 0 },
+            if record.output_bytes_estimated { 1 } else { 0 },
+            to_sql_i64(record.reasoning),
+            to_sql_i64(record.cache_read),
+            to_sql_i64(record.cache_write),
+            record.total_direct.map(to_sql_i64),
+            record.mode,
+            record.agent,
+            if record.is_compaction { 1 } else { 0 },
+            to_sql_i64(record.rounds),
+            to_sql_i64(record.calls),
+            record.cost_embedded,
+          ])?;
+        }
       }
     }
-
+    tx.commit()?;
     Ok(())
   }
 
-  pub fn prune_files(&self, source: &str, file_paths: &[PathBuf]) -> Result<usize> {
+  pub fn prune_files(&mut self, source: &str, file_paths: &[PathBuf]) -> Result<usize> {
     if file_paths.is_empty() {
       return Ok(0);
     }
+    let tx = self.conn.transaction()?;
     let mut total = 0;
     for fp in file_paths {
       let fp_str = fp.to_string_lossy();
-      total += self.conn.execute(
-        "UPDATE sessions SET pruned = 1 WHERE file_path = ?1 AND source = ?2 AND pruned = 0",
-        params![fp_str.as_ref(), source],
-      )?;
+      total += delete_file_rows(&tx, source, fp_str.as_ref())?;
     }
+    tx.commit()?;
     Ok(total)
+  }
+
+  pub fn prune(&mut self) -> Result<CachePruneStats> {
+    let tx = self.conn.transaction()?;
+    let sessions = tx.query_row("SELECT COUNT(*) FROM sessions WHERE pruned != 0", [], |row| row.get(0))?;
+    let records = tx.query_row(
+      "SELECT COUNT(*) FROM records WHERE session_rowid IN (SELECT id FROM sessions WHERE pruned != 0)",
+      [],
+      |row| row.get(0),
+    )?;
+    tx.execute(
+      "DELETE FROM records WHERE session_rowid IN (SELECT id FROM sessions WHERE pruned != 0)",
+      [],
+    )?;
+    tx.execute("DELETE FROM sessions WHERE pruned != 0", [])?;
+    tx.commit()?;
+
+    let free_pages: i64 = self.conn.pragma_query_value(None, "freelist_count", |row| row.get(0))?;
+    if free_pages > 0 {
+      self.conn.execute_batch("VACUUM").with_context(|| {
+        format!(
+          "removed {sessions} obsolete cache sessions and {records} records, but could not compact the cache file"
+        )
+      })?;
+    }
+    Ok(CachePruneStats { sessions, records })
   }
 
   pub fn active_file_paths(&self, source: &str) -> Result<Vec<PathBuf>> {
@@ -306,6 +336,17 @@ impl CacheDb {
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
   }
+}
+
+fn delete_file_rows(tx: &Transaction<'_>, source: &str, file_path: &str) -> Result<usize> {
+  tx.execute(
+    "DELETE FROM records WHERE session_rowid IN (SELECT id FROM sessions WHERE source = ?1 AND file_path = ?2)",
+    params![source, file_path],
+  )?;
+  Ok(tx.execute(
+    "DELETE FROM sessions WHERE source = ?1 AND file_path = ?2",
+    params![source, file_path],
+  )?)
 }
 
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
@@ -410,4 +451,204 @@ fn to_sql_i64(value: u64) -> i64 {
 
 fn from_sql_i64(value: i64) -> u64 {
   u64::try_from(value).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn cache() -> CacheDb {
+    let conn = Connection::open_in_memory().expect("open in-memory cache");
+    conn.execute_batch(SCHEMA).expect("create cache schema");
+    CacheDb { conn }
+  }
+
+  fn record(session_id: &str, second: i64, prompt: u64) -> UsageRecord {
+    UsageRecord {
+      source: Source::Codex,
+      session_id: session_id.to_string(),
+      session_kind: SessionKind::Root,
+      parent_session_id: None,
+      session_title: None,
+      project_cwd: None,
+      project_name: None,
+      provider: Some("openai".to_string()),
+      model: Some("gpt-5.6-sol".to_string()),
+      ts: Utc
+        .timestamp_opt(1_700_000_000 + second, 0)
+        .single()
+        .expect("valid timestamp"),
+      prompt,
+      completion: 0,
+      input_bytes: 0,
+      output_bytes: 0,
+      input_estimated: false,
+      output_estimated: false,
+      input_bytes_estimated: false,
+      output_bytes_estimated: false,
+      reasoning: 0,
+      cache_read: 0,
+      cache_write: 0,
+      total_direct: None,
+      mode: None,
+      agent: None,
+      is_compaction: false,
+      rounds: 1,
+      calls: 1,
+      cost_embedded: None,
+    }
+  }
+
+  fn count(conn: &Connection, table: &str) -> i64 {
+    conn
+      .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+      .expect("count table rows")
+  }
+
+  fn pruned_sessions(conn: &Connection) -> i64 {
+    conn
+      .query_row("SELECT COUNT(*) FROM sessions WHERE pruned != 0", [], |row| row.get(0))
+      .expect("count pruned sessions")
+  }
+
+  fn orphan_records(conn: &Connection) -> i64 {
+    conn
+      .query_row(
+        "SELECT COUNT(*) FROM records r LEFT JOIN sessions s ON s.id = r.session_rowid WHERE s.id IS NULL",
+        [],
+        |row| row.get(0),
+      )
+      .expect("count orphan records")
+  }
+
+  #[test]
+  fn upsert_replaces_previous_and_legacy_rows_for_a_file() {
+    let mut db = cache();
+    let target = Path::new("/cache/target.jsonl");
+    let keep = Path::new("/cache/keep.jsonl");
+    db.upsert_file(target, 1, "codex", &[record("old-a", 1, 10), record("old-b", 2, 20)])
+      .expect("seed target cache");
+    db.upsert_file(keep, 1, "codex", &[record("keep", 3, 30)])
+      .expect("seed independent cache");
+    db.conn
+      .execute(
+        "UPDATE sessions SET pruned = 1 WHERE source = 'codex' AND file_path = '/cache/target.jsonl'",
+        [],
+      )
+      .expect("simulate legacy cache history");
+
+    db.upsert_file(target, 2, "codex", &[record("fresh", 4, 40), record("fresh", 5, 50)])
+      .expect("replace target cache");
+
+    assert_eq!(count(&db.conn, "sessions"), 2);
+    assert_eq!(count(&db.conn, "records"), 3);
+    assert_eq!(pruned_sessions(&db.conn), 0);
+    assert_eq!(orphan_records(&db.conn), 0);
+
+    let mut prompts = db
+      .load_active_for_file("codex", target)
+      .expect("load target cache")
+      .into_iter()
+      .map(|record| record.prompt)
+      .collect::<Vec<_>>();
+    prompts.sort_unstable();
+    assert_eq!(prompts, [40, 50]);
+    assert_eq!(
+      db.load_active_for_file("codex", keep).expect("load kept cache").len(),
+      1
+    );
+    assert_eq!(
+      db.file_mtimes_for("codex").expect("load cache mtimes").get(target),
+      Some(&2)
+    );
+  }
+
+  #[test]
+  fn replacement_rolls_back_when_writing_the_new_snapshot_fails() {
+    let mut db = cache();
+    let target = Path::new("/cache/target.jsonl");
+    db.upsert_file(target, 1, "codex", &[record("old", 1, 10)])
+      .expect("seed target cache");
+    db.conn
+      .execute_batch("CREATE TRIGGER fail_record_insert BEFORE INSERT ON records BEGIN SELECT RAISE(ABORT, 'injected failure'); END;")
+      .expect("install failure trigger");
+
+    assert!(db.upsert_file(target, 2, "codex", &[record("new", 2, 20)]).is_err());
+
+    assert_eq!(count(&db.conn, "sessions"), 1);
+    assert_eq!(count(&db.conn, "records"), 1);
+    assert_eq!(pruned_sessions(&db.conn), 0);
+    assert_eq!(orphan_records(&db.conn), 0);
+    assert_eq!(
+      db.load_active_for_file("codex", target)
+        .expect("load rolled-back cache")[0]
+        .prompt,
+      10
+    );
+  }
+
+  #[test]
+  fn prune_files_removes_sessions_and_records_for_missing_files() {
+    let mut db = cache();
+    let removed = Path::new("/cache/removed.jsonl");
+    let keep = Path::new("/cache/keep.jsonl");
+    db.upsert_file(
+      removed,
+      1,
+      "codex",
+      &[record("removed-a", 1, 10), record("removed-b", 2, 20)],
+    )
+    .expect("seed removable cache");
+    db.upsert_file(keep, 1, "codex", &[record("keep", 3, 30)])
+      .expect("seed independent cache");
+
+    assert_eq!(
+      db.prune_files("codex", &[removed.to_path_buf()])
+        .expect("prune removed file"),
+      2
+    );
+
+    assert_eq!(count(&db.conn, "sessions"), 1);
+    assert_eq!(count(&db.conn, "records"), 1);
+    assert_eq!(pruned_sessions(&db.conn), 0);
+    assert_eq!(orphan_records(&db.conn), 0);
+    assert!(db
+      .load_active_for_file("codex", removed)
+      .expect("load removed cache")
+      .is_empty());
+    assert_eq!(
+      db.load_active_for_file("codex", keep).expect("load kept cache").len(),
+      1
+    );
+  }
+
+  #[test]
+  fn prune_removes_legacy_history_and_preserves_active_rows() {
+    let mut db = cache();
+    let legacy = Path::new("/cache/legacy.jsonl");
+    let active = Path::new("/cache/active.jsonl");
+    db.upsert_file(legacy, 1, "codex", &[record("legacy", 1, 10)])
+      .expect("seed legacy cache");
+    db.upsert_file(active, 1, "codex", &[record("active", 2, 20)])
+      .expect("seed active cache");
+    db.conn
+      .execute(
+        "UPDATE sessions SET pruned = 1 WHERE source = 'codex' AND file_path = '/cache/legacy.jsonl'",
+        [],
+      )
+      .expect("simulate legacy pruned row");
+
+    let stats = db.prune().expect("prune legacy cache");
+
+    assert_eq!(stats.sessions, 1);
+    assert_eq!(stats.records, 1);
+    assert_eq!(count(&db.conn, "sessions"), 1);
+    assert_eq!(count(&db.conn, "records"), 1);
+    assert_eq!(pruned_sessions(&db.conn), 0);
+    assert_eq!(orphan_records(&db.conn), 0);
+    assert_eq!(
+      db.load_active_for_file("codex", active).expect("load active cache")[0].prompt,
+      20
+    );
+  }
 }

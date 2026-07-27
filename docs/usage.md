@@ -504,12 +504,21 @@ llm-tokei --source pi-agent --provider deepseek --group-by model
 
 By default, parsed records are cached under your OS cache directory as
 `llm-tokei.db`. The cache is keyed by source file path and modification time.
+Changed files replace their prior cached records atomically.
 
 Use `--no-cache` to force a full re-parse:
 
 ```sh
 llm-tokei --no-cache
 ```
+
+To remove obsolete entries from an older cache and reclaim disk space:
+
+```sh
+llm-tokei cache prune
+```
+
+This affects only derived cache data, never the original session files.
 
 Verbose mode prints cache stats:
 

@@ -133,6 +133,166 @@ fn cached_files_are_skipped_without_processing_output() {
 }
 
 #[test]
+fn cache_prune_removes_legacy_rows() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let cache_home = temp_cache_home("cache-prune");
+
+  let populate = Command::new(bin())
+    .env("XDG_CACHE_HOME", &cache_home)
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--format",
+      "json",
+    ])
+    .output()
+    .expect("populate cache");
+  assert!(
+    populate.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&populate.stderr)
+  );
+
+  let cache_path = cache_home.join("llm-tokei.db");
+  let (sessions, records) = {
+    let conn = rusqlite::Connection::open(&cache_path).expect("open populated cache");
+    let sessions = conn
+      .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get::<_, i64>(0))
+      .expect("count cached sessions");
+    let records = conn
+      .query_row("SELECT COUNT(*) FROM records", [], |row| row.get::<_, i64>(0))
+      .expect("count cached records");
+    assert!(sessions > 0);
+    assert!(records > 0);
+    conn
+      .execute("UPDATE sessions SET pruned = 1", [])
+      .expect("simulate legacy rows");
+    (sessions, records)
+  };
+
+  let pruned = Command::new(bin())
+    .env("XDG_CACHE_HOME", &cache_home)
+    .args(["cache", "prune"])
+    .output()
+    .expect("prune legacy cache");
+  assert!(
+    pruned.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&pruned.stderr)
+  );
+  assert_eq!(
+    String::from_utf8_lossy(&pruned.stderr).trim(),
+    format!("pruned cache: {sessions} sessions, {records} records")
+  );
+
+  let conn = rusqlite::Connection::open(&cache_path).expect("open pruned cache");
+  assert_eq!(
+    conn
+      .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get::<_, i64>(0))
+      .expect("count pruned sessions"),
+    0
+  );
+  assert_eq!(
+    conn
+      .query_row("SELECT COUNT(*) FROM records", [], |row| row.get::<_, i64>(0))
+      .expect("count pruned records"),
+    0
+  );
+
+  let _ = std::fs::remove_dir_all(cache_home);
+}
+
+#[test]
+fn cache_prune_reclaims_existing_free_pages() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let cache_home = temp_cache_home("cache-prune-freelist");
+
+  let populate = Command::new(bin())
+    .env("XDG_CACHE_HOME", &cache_home)
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--format",
+      "json",
+    ])
+    .output()
+    .expect("populate cache");
+  assert!(
+    populate.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&populate.stderr)
+  );
+
+  let cache_path = cache_home.join("llm-tokei.db");
+  let active_records = {
+    let mut conn = rusqlite::Connection::open(&cache_path).expect("open populated cache");
+    let session_rowid = conn
+      .query_row("SELECT id FROM sessions LIMIT 1", [], |row| row.get::<_, i64>(0))
+      .expect("read active session");
+    let payload = "x".repeat(128 * 1024);
+    let tx = conn.transaction().expect("start filler transaction");
+    for _ in 0..16 {
+      tx.execute(
+        "INSERT INTO records (session_rowid, provider, model, ts, prompt, completion, input_bytes, output_bytes, \
+                             input_estimated, output_estimated, input_bytes_estimated, output_bytes_estimated, \
+                             reasoning, cache_read, cache_write, total, mode, agent, is_compaction, rounds, calls, \
+                             cost_embedded) \
+         VALUES (?1, 'openai', ?2, '2026-01-01T00:00:00+00:00', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, NULL, 0, 1, 1, NULL)",
+        rusqlite::params![session_rowid, payload],
+      )
+      .expect("insert filler record");
+    }
+    tx.commit().expect("commit filler records");
+    conn
+      .execute("DELETE FROM records WHERE model = ?1", rusqlite::params![payload])
+      .expect("delete filler records");
+
+    let free_pages = conn
+      .pragma_query_value(None, "freelist_count", |row| row.get::<_, i64>(0))
+      .expect("read freelist count");
+    assert!(free_pages > 0, "expected deleted records to leave free pages");
+    conn
+      .query_row("SELECT COUNT(*) FROM records", [], |row| row.get::<_, i64>(0))
+      .expect("count active records")
+  };
+
+  let pruned = Command::new(bin())
+    .env("XDG_CACHE_HOME", &cache_home)
+    .args(["cache", "prune"])
+    .output()
+    .expect("compact cache");
+  assert!(
+    pruned.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&pruned.stderr)
+  );
+  assert_eq!(
+    String::from_utf8_lossy(&pruned.stderr).trim(),
+    "pruned cache: 0 sessions, 0 records"
+  );
+
+  let conn = rusqlite::Connection::open(&cache_path).expect("open compacted cache");
+  assert_eq!(
+    conn
+      .pragma_query_value(None, "freelist_count", |row| row.get::<_, i64>(0))
+      .expect("read compacted freelist count"),
+    0
+  );
+  assert_eq!(
+    conn
+      .query_row("SELECT COUNT(*) FROM records", [], |row| row.get::<_, i64>(0))
+      .expect("count active records after compaction"),
+    active_records
+  );
+
+  let _ = std::fs::remove_dir_all(cache_home);
+}
+
+#[test]
 fn codex_fixture_parses_last_total() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
   let (mut cmd, cache_home) = isolated_cmd("codex-total");

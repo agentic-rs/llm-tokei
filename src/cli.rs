@@ -327,6 +327,12 @@ pub enum Cmd {
     cmd: ConfigCmd,
   },
 
+  /// Remove obsolete usage-cache entries and reclaim disk space.
+  Cache {
+    #[command(subcommand)]
+    cmd: CacheCmd,
+  },
+
   /// Fetch current models.dev prices into the runtime price cache.
   Update {
     /// Print help.
@@ -376,6 +382,16 @@ pub enum ConfigCmd {
     /// Clear saved main-flag defaults from the config file.
     #[arg(long)]
     reset: bool,
+    /// Print help.
+    #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics")]
+    help: Option<bool>,
+  },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CacheCmd {
+  /// Remove obsolete cache entries and reclaim disk space.
+  Prune {
     /// Print help.
     #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics")]
     help: Option<bool>,

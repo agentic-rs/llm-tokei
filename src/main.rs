@@ -25,7 +25,7 @@ use tracing_subscriber::EnvFilter;
 use crate::activity::{render_activity, ActivityRenderOptions};
 use crate::aggregate::{aggregate, sort_aggs, Filters, GroupDim, SortKey};
 use crate::cache::{CacheDb, CacheStats};
-use crate::cli::{Args, Cmd, ConfigCmd, Format, GraphChart, Unit};
+use crate::cli::{Args, CacheCmd, Cmd, ConfigCmd, Format, GraphChart, Unit};
 use crate::format::{
   json::render_json,
   svg::render_svg_terminal,
@@ -61,7 +61,7 @@ fn main() -> Result<()> {
   }
 
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
-  let cache = if args.no_cache {
+  let mut cache = if args.no_cache {
     None
   } else {
     match CacheDb::open() {
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
     if let Some(p) = path {
       let src = CodexSource::new(p);
       let progress = ProcessingProgress::new(args.format, args.verbose);
-      let result = if let Some(c) = cache.as_ref() {
+      let result = if let Some(c) = cache.as_mut() {
         collect_one_record_source_with_cache(c, "codex", src.discover_files(), CodexSource::parse_file, progress)
       } else {
         collect_one_record_source_direct("codex", src.discover_files(), CodexSource::parse_file, progress)
@@ -124,7 +124,7 @@ fn main() -> Result<()> {
     if !roots.is_empty() {
       let src = CopilotCliSource::new(roots);
       let progress = ProcessingProgress::new(args.format, args.verbose);
-      let result = if let Some(c) = cache.as_ref() {
+      let result = if let Some(c) = cache.as_mut() {
         collect_one_record_source_with_cache(
           c,
           "copilot-cli",
@@ -161,7 +161,7 @@ fn main() -> Result<()> {
     if let Some(p) = path {
       let src = OpenCodeSource::new(p);
       let mut progress = ProcessingProgress::new(args.format, args.verbose);
-      let result = if let Some(c) = cache.as_ref() {
+      let result = if let Some(c) = cache.as_mut() {
         collect_opencode_with_cache(c, &src, progress)
       } else {
         if src.db_path.exists() {
@@ -192,7 +192,7 @@ fn main() -> Result<()> {
     if let Some(p) = path {
       let src = PiAgentSource::new(p);
       let progress = ProcessingProgress::new(args.format, args.verbose);
-      let result = if let Some(c) = cache.as_ref() {
+      let result = if let Some(c) = cache.as_mut() {
         collect_one_record_source_with_cache(c, "pi-agent", src.discover_files(), PiAgentSource::parse_file, progress)
       } else {
         collect_one_record_source_direct("pi-agent", src.discover_files(), PiAgentSource::parse_file, progress)
@@ -215,7 +215,7 @@ fn main() -> Result<()> {
     if let Some(p) = path {
       let src = ClaudeSource::new(p);
       let progress = ProcessingProgress::new(args.format, args.verbose);
-      let result = if let Some(c) = cache.as_ref() {
+      let result = if let Some(c) = cache.as_mut() {
         collect_one_record_source_with_cache(c, "claude", src.discover_files(), ClaudeSource::parse_file, progress)
       } else {
         collect_one_record_source_direct("claude", src.discover_files(), ClaudeSource::parse_file, progress)
@@ -238,7 +238,7 @@ fn main() -> Result<()> {
     if !roots.is_empty() {
       let src = CopilotSource::new(roots);
       let progress = ProcessingProgress::new(args.format, args.verbose);
-      let result = if let Some(c) = cache.as_ref() {
+      let result = if let Some(c) = cache.as_mut() {
         collect_one_record_source_with_cache(c, "copilot", src.discover_files(), CopilotSource::parse_file, progress)
       } else {
         collect_one_record_source_direct("copilot", src.discover_files(), CopilotSource::parse_file, progress)
@@ -646,7 +646,7 @@ mod processing_progress_tests {
 }
 
 fn collect_one_record_source_with_cache<F>(
-  cache: &CacheDb,
+  cache: &mut CacheDb,
   source: &str,
   files: Vec<PathBuf>,
   parse_file: F,
@@ -759,7 +759,7 @@ fn period_since(args: &Args) -> Option<anyhow::Result<chrono::DateTime<chrono::U
 }
 
 fn collect_opencode_with_cache(
-  cache: &CacheDb,
+  cache: &mut CacheDb,
   src: &OpenCodeSource,
   mut progress: ProcessingProgress,
 ) -> Result<(Vec<UsageRecord>, CacheStats)> {
@@ -873,6 +873,7 @@ fn init_tracing(verbose: bool) {
 fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
   match cmd {
     Cmd::Graph { .. } => unreachable!("graph is rendered after collecting usage records"),
+    Cmd::Cache { cmd } => run_cache(cmd),
     Cmd::Dump {
       copilot,
       copilot_cli,
@@ -884,6 +885,17 @@ fn run_subcommand(cmd: &Cmd, args: &Args) -> Result<()> {
     Cmd::Update { .. } => run_update(),
     Cmd::Config { cmd } => run_config(cmd, args),
   }
+}
+
+fn run_cache(cmd: &CacheCmd) -> Result<()> {
+  match cmd {
+    CacheCmd::Prune { .. } => {
+      let mut cache = CacheDb::open()?;
+      let stats = cache.prune()?;
+      eprintln!("pruned cache: {} sessions, {} records", stats.sessions, stats.records);
+    }
+  }
+  Ok(())
 }
 
 fn run_update() -> Result<()> {
