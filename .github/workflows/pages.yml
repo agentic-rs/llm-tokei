@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "npm/model-catalog/**"
       - "npm/model-price-history/**"
       - "site/**"
       - ".github/workflows/pages.yml"
@@ -77,10 +78,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install site dependencies
         run: pnpm install --frozen-lockfile
-      - name: Resolve price history generator revision
+      - name: Resolve data generator revisions
         id: price_history_generator
         working-directory: .
-        run: echo "revision=$(git rev-parse HEAD:npm/model-price-history)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "revision=$(git rev-parse HEAD:npm/model-price-history)" >> "$GITHUB_OUTPUT"
+          echo "catalog_revision=$(git rev-parse HEAD:npm/model-catalog)" >> "$GITHUB_OUTPUT"
       - name: Restore deployed price history
         id: price_history_base
         working-directory: .
@@ -99,9 +102,11 @@ jobs:
           BASE_AVAILABLE: ${{ steps.price_history_base.outputs.available }}
           BASE_COMMIT_SHA: ${{ steps.price_history_base.outputs.base_commit_sha }}
           BASE_CSV_PATH: ${{ steps.price_history_base.outputs.base_csv_path }}
+          CATALOG_REVISION: ${{ steps.price_history_generator.outputs.catalog_revision }}
           GENERATOR_REVISION: ${{ steps.price_history_generator.outputs.revision }}
         run: |
           pnpm --dir npm/model-price-history build
+          source_commit=$(git -C .cache/models.dev.git rev-parse dev)
           base_arguments=()
           if [[ "$BASE_AVAILABLE" == "true" ]]; then
             base_arguments+=(
@@ -111,11 +116,17 @@ jobs:
           fi
           price_csv=$(node npm/model-price-history/dist/cli.js changes \
             --repo .cache/models.dev.git \
-            --ref dev \
+            --ref "$source_commit" \
             --out-dir site/public/price-history \
             "${base_arguments[@]}")
+          families_csv=$(node npm/model-price-history/dist/cli.js families \
+            --repo .cache/models.dev.git \
+            --ref "$source_commit" \
+            --out-dir site/public/price-history)
           node site/scripts/write-price-history-manifest.mjs \
             --csv "$price_csv" \
+            --families-csv "$families_csv" \
+            --catalog-revision "$CATALOG_REVISION" \
             --generator-revision "$GENERATOR_REVISION" \
             --source-repository "https://github.com/anomalyco/models.dev" \
             --source-ref dev

@@ -26,12 +26,16 @@ type CatalogRoute = {
   provider: string;
 };
 
+type CsvArtifact = {
+  bytes: number;
+  path: string;
+  sha256: string;
+};
+
 type PriceManifest = {
-  csv: {
-    bytes: number;
-    path: string;
-    sha256: string;
-  };
+  catalog_revision: string;
+  csv: CsvArtifact;
+  families?: CsvArtifact;
   generator_revision: string;
   generated_at: string;
   schema_version: number;
@@ -143,6 +147,18 @@ const sourceCommit = requiredElement<HTMLAnchorElement>(
 const eventCount = requiredElement<HTMLElement>(app, "[data-event-count]");
 const routeCount = requiredElement<HTMLElement>(app, "[data-route-count]");
 const downloadSize = requiredElement<HTMLElement>(app, "[data-download-size]");
+const priceDownload = requiredElement<HTMLAnchorElement>(
+  app,
+  "[data-price-download]",
+);
+const familyDownload = requiredElement<HTMLAnchorElement>(
+  app,
+  "[data-family-download]",
+);
+const familyDownloadSize = requiredElement<HTMLElement>(
+  app,
+  "[data-family-download-size]",
+);
 const emptyTitle = requiredElement<HTMLElement>(app, "[data-empty-title]");
 const emptyDetail = requiredElement<HTMLElement>(app, "[data-empty-detail]");
 
@@ -231,7 +247,7 @@ async function loadPriceHistory(): Promise<void> {
         "price history manifest has an invalid generated_at value",
       );
     }
-    setProvenance(manifest);
+    setProvenance(manifest, manifestUrl);
 
     worker = new Worker(
       new URL("../workers/price-history.ts", import.meta.url),
@@ -810,10 +826,24 @@ function destroyCharts(): void {
   chartsContainer.replaceChildren();
 }
 
-function setProvenance(priceManifest: PriceManifest): void {
+function setProvenance(
+  priceManifest: PriceManifest,
+  manifestUrl: URL,
+): void {
   sourceCommit.textContent = priceManifest.source_commit_sha.slice(0, 12);
   sourceCommit.href = `${priceManifest.source_repository}/commit/${priceManifest.source_commit_sha}`;
   downloadSize.textContent = formatBytes(priceManifest.csv.bytes);
+  priceDownload.href = new URL(priceManifest.csv.path, manifestUrl).toString();
+  if (priceManifest.families) {
+    familyDownload.href = new URL(
+      priceManifest.families.path,
+      manifestUrl,
+    ).toString();
+    familyDownloadSize.textContent = formatBytes(priceManifest.families.bytes);
+    familyDownload.hidden = false;
+  } else {
+    familyDownload.hidden = true;
+  }
 }
 
 function showFailure(message: string): void {

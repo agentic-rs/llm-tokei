@@ -75,6 +75,7 @@ test("rejects a change stream with the wrong checksum", async (t) => {
 function createManifest() {
   return {
     schema_version: 1,
+    catalog_revision: "c".repeat(40),
     generator_revision: GENERATOR_REVISION,
     generated_at: "2026-07-28T00:00:00.000Z",
     source_repository: "https://github.com/anomalyco/models.dev",
@@ -84,6 +85,11 @@ function createManifest() {
       path: `changes.${COMMIT_SHA}.csv`,
       bytes: CSV.length,
       sha256: createHash("sha256").update(CSV).digest("hex"),
+    },
+    families: {
+      path: `families.${COMMIT_SHA}.csv`,
+      bytes: 0,
+      sha256: createHash("sha256").update("").digest("hex"),
     },
   };
 }
