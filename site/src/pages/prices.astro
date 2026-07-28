@@ -41,21 +41,58 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
           <span>Provider</span>
           <select data-provider aria-label="Provider"></select>
         </label>
-        <label>
-          <span>Model route</span>
-          <input
-            data-model
-            list="price-models"
-            type="text"
-            autocomplete="off"
-            aria-label="Model route"
-          />
-          <datalist id="price-models" data-model-list></datalist>
-        </label>
         <fieldset data-fields>
           <legend>Price dimensions</legend>
         </fieldset>
       </div>
+
+      <section
+        class="model-legend"
+        data-model-legend
+        aria-labelledby="model-legend-title"
+        hidden
+      >
+        <div class="model-legend__header">
+          <div>
+            <span class="eyebrow">Model legend</span>
+            <h3 id="model-legend-title">Click models to show or hide lines</h3>
+            <p data-model-summary></p>
+          </div>
+          <div class="model-legend__actions">
+            <label>
+              <span>Filter models</span>
+              <input
+                data-model-filter
+                type="search"
+                autocomplete="off"
+                placeholder="Filter model names"
+              />
+            </label>
+            <button
+              class="model-legend__filter"
+              data-eventful-models
+              type="button"
+              aria-pressed="false"
+              aria-label="Show only models with more than one history event"
+            >
+              Events &gt; 1
+            </button>
+            <button
+              data-recent-models
+              type="button"
+              aria-label="Plot the five newest models in the current filter"
+            >
+              Show recent 5
+            </button>
+          </div>
+        </div>
+        <div
+          class="model-options"
+          data-model-options
+          role="group"
+          aria-label="Models to plot"
+        ></div>
+      </section>
 
       <div class="chart-shell" data-chart-shell hidden>
         <div class="chart-heading">
@@ -63,29 +100,23 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
             <p class="chart-route mono" data-route></p>
             <p class="chart-range" data-range></p>
           </div>
-          <div class="legend" data-legend aria-label="Chart legend"></div>
         </div>
-        <div class="canvas-wrap">
-          <canvas
-            data-chart
-            height="430"
-            role="img"
-            aria-label="Historical token price step chart"
-          ></canvas>
-          <div class="tooltip" data-tooltip hidden></div>
-        </div>
+        <div class="metric-charts" data-charts></div>
         <div class="chart-footer">
           <p data-summary></p>
           <p>
-            Step lines change at the commit timestamp. Missing values are not
-            assumed to be zero.
+            Filled dots start a price, rings mark changes, and × marks removal.
+            Panels share time, use independent scales, and show missing values
+            as gaps.
           </p>
         </div>
       </div>
 
       <div class="empty-state" data-empty hidden>
-        <strong>Price history is not available in this build.</strong>
-        <span>The scheduled Pages build generates it without committing the CSV to Git.</span>
+        <strong data-empty-title>Price history is not available in this build.</strong>
+        <span data-empty-detail>
+          The scheduled Pages build generates it without committing the CSV to Git.
+        </span>
       </div>
     </section>
 
@@ -116,6 +147,10 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
   </div>
 
   <style>
+    [hidden] {
+      display: none !important;
+    }
+
     .prices-page {
       display: grid;
       gap: clamp(3rem, 7vw, 5rem);
@@ -204,7 +239,7 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
 
     .controls {
       display: grid;
-      grid-template-columns: minmax(10rem, 0.6fr) minmax(16rem, 1fr) minmax(20rem, 1.4fr);
+      grid-template-columns: minmax(10rem, 0.5fr) minmax(28rem, 2fr);
       gap: 1rem;
       padding: 1rem clamp(1rem, 3vw, 1.5rem);
       border-bottom: 1px solid var(--line);
@@ -221,7 +256,7 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       border: 0;
     }
 
-    .controls label > span,
+    .controls label > span:first-child,
     .controls legend {
       color: var(--ink-muted);
       font-family: var(--font-mono);
@@ -276,6 +311,188 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       opacity: 0.42;
     }
 
+    .model-legend {
+      padding: 1rem clamp(1rem, 3vw, 1.5rem);
+      border-bottom: 1px solid var(--line);
+      background: rgba(244, 239, 227, 0.72);
+    }
+
+    .model-legend__header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 1.5rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .model-legend__header > div:first-child {
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .model-legend h3,
+    .model-legend p {
+      margin: 0;
+    }
+
+    .model-legend h3 {
+      font-size: 1rem;
+    }
+
+    .model-legend p {
+      color: var(--ink-muted);
+      font: 0.72rem var(--font-mono);
+    }
+
+    .model-legend__actions {
+      display: flex;
+      align-items: end;
+      gap: 0.5rem;
+    }
+
+    .model-legend__actions label {
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .model-legend__actions label span {
+      color: var(--ink-muted);
+      font: 800 0.65rem var(--font-mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .model-legend__actions input,
+    .model-legend__actions button {
+      height: 2.25rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      font: 0.75rem var(--font-mono);
+    }
+
+    .model-legend__actions input {
+      width: min(15rem, 35vw);
+      padding: 0 0.65rem;
+      color: var(--ink);
+      background: var(--panel);
+    }
+
+    .model-legend__actions button {
+      padding: 0 0.75rem;
+      color: var(--panel);
+      background: var(--ink);
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .model-legend__actions button:hover {
+      background: var(--green-deep);
+    }
+
+    .model-legend__actions button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .model-legend__actions .model-legend__filter {
+      color: var(--ink);
+      background: var(--panel);
+    }
+
+    .model-legend__actions .model-legend__filter:hover,
+    .model-legend__actions .model-legend__filter[aria-pressed="true"] {
+      border-color: var(--green-deep);
+      color: var(--panel);
+      background: var(--green-deep);
+    }
+
+    .model-options {
+      display: flex;
+      max-height: 12rem;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      overflow: auto;
+      scrollbar-gutter: stable;
+    }
+
+    :global(.model-option) {
+      display: inline-flex;
+      min-width: 0;
+      max-width: min(100%, 23rem);
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.36rem 0.55rem;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      color: var(--ink-muted);
+      background: rgba(255, 250, 240, 0.55);
+      font: 0.72rem var(--font-mono);
+      cursor: pointer;
+    }
+
+    :global(.model-option:hover) {
+      border-color: var(--model-color);
+      color: var(--ink);
+    }
+
+    :global(.model-option[aria-pressed="true"]) {
+      border-color: var(--model-color);
+      color: var(--ink);
+      background: var(--panel);
+      box-shadow: inset 3px 0 0 var(--model-color);
+      font-weight: 800;
+    }
+
+    :global(.model-option:focus-visible) {
+      outline: 3px solid var(--amber);
+      outline-offset: 1px;
+    }
+
+    :global(.model-option__swatch) {
+      width: 0.72rem;
+      height: 0.72rem;
+      flex: 0 0 auto;
+      border: 2px solid var(--model-color);
+      border-radius: 50%;
+      background: transparent;
+    }
+
+    :global(.model-option[aria-pressed="true"] .model-option__swatch) {
+      background: var(--model-color);
+    }
+
+    :global(.model-option__name) {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    :global(.model-option__state) {
+      flex: 0 0 auto;
+      color: var(--ink-muted);
+      font-size: 0.62rem;
+    }
+
+    :global(.model-option__count) {
+      display: inline-grid;
+      width: 1.55rem;
+      height: 1.55rem;
+      flex: 0 0 auto;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--ink-soft);
+      background: var(--paper-deep);
+      font-size: 0.62rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    :global(.model-options__empty) {
+      color: var(--ink-muted);
+      font: 0.75rem var(--font-mono);
+    }
+
     .chart-shell {
       padding: clamp(1rem, 3vw, 1.5rem);
     }
@@ -304,52 +521,114 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       font-size: 0.85rem;
     }
 
-    .legend {
+    .metric-charts {
+      display: grid;
+      gap: 1rem;
+    }
+
+    :global(.metric-chart) {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    :global(.metric-chart__heading) {
       display: flex;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      gap: 0.5rem 0.85rem;
-    }
-
-    :global(.legend__item) {
-      display: inline-flex;
+      min-height: 3.4rem;
       align-items: center;
-      gap: 0.38rem;
-      font: 0.76rem var(--font-mono);
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.7rem 0.9rem;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-cool);
     }
 
-    :global(.legend__swatch) {
-      width: 0.75rem;
-      height: 0.75rem;
-      border-radius: 2px;
-      background: var(--legend-color);
+    :global(.metric-chart__heading > div) {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: baseline;
+      gap: 0.55rem;
     }
 
-    .canvas-wrap {
-      position: relative;
-      min-height: 26rem;
+    :global(.metric-chart__heading h3) {
+      margin: 0;
+      font-size: 1rem;
     }
 
-    canvas {
-      display: block;
-      width: 100%;
-      height: 26rem;
-      outline: none;
+    :global(.metric-chart__heading span),
+    :global(.metric-chart__detail) {
+      color: var(--ink-muted);
+      font: 0.7rem/1.45 var(--font-mono);
     }
 
-    .tooltip {
+    :global(.metric-chart__detail) {
+      margin: 0;
+      text-align: right;
+    }
+
+    :global(.metric-chart__detail a) {
+      color: var(--blue);
+      font-weight: 800;
+    }
+
+    :global(.metric-chart__plot) {
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    :global(.metric-chart__plot .uplot) {
+      font-family: var(--font-mono);
+    }
+
+    :global(.metric-chart__plot .u-cursor-x) {
+      border-right: 1px dashed var(--ink-muted);
+    }
+
+    :global(.change-marker) {
       position: absolute;
-      z-index: 2;
-      min-width: 11rem;
-      max-width: min(18rem, calc(100% - 1rem));
-      padding: 0.65rem 0.75rem;
-      border: 1px solid var(--ink);
-      border-radius: 5px;
-      color: #f4f7f4;
-      background: rgba(16, 20, 24, 0.95);
-      box-shadow: 4px 4px 0 rgba(23, 23, 23, 0.18);
-      font: 0.75rem/1.5 var(--font-mono);
-      pointer-events: none;
+      z-index: 4;
+      width: 0.68rem;
+      height: 0.68rem;
+      padding: 0;
+      border: 2px solid var(--marker-color);
+      border-radius: 50%;
+      color: var(--marker-color);
+      background: var(--panel);
+      box-shadow: 0 0 0 2px rgba(255, 250, 240, 0.75);
+      transform: translate(-50%, -50%);
+      cursor: help;
+    }
+
+    :global(.change-marker--start) {
+      background: var(--marker-color);
+    }
+
+    :global(.change-marker--remove) {
+      display: grid;
+      width: 0.9rem;
+      height: 0.9rem;
+      border: 0;
+      border-radius: 0;
+      place-items: center;
+      background: var(--panel);
+      box-shadow: none;
+      font: 900 1rem/0.9 var(--font-sans);
+    }
+
+    :global(.change-marker:focus-visible) {
+      outline: 3px solid var(--amber);
+      outline-offset: 2px;
+    }
+
+    :global(.chart-empty) {
+      display: grid;
+      min-height: 16rem;
+      margin: 0;
+      place-items: center;
+      color: var(--ink-muted);
+      font: 0.85rem var(--font-mono);
     }
 
     .chart-footer {
@@ -439,10 +718,6 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       .controls {
         grid-template-columns: 1fr 1.5fr;
       }
-
-      .controls fieldset {
-        grid-column: 1 / -1;
-      }
     }
 
     @media (max-width: 620px) {
@@ -470,8 +745,31 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
-      .legend {
-        justify-content: flex-start;
+      .model-legend__header,
+      .model-legend__actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .model-legend__actions input {
+        width: 100%;
+      }
+
+      .model-options {
+        max-height: 16rem;
+      }
+
+      :global(.model-option) {
+        max-width: 100%;
+      }
+
+      :global(.metric-chart__heading) {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      :global(.metric-chart__detail) {
+        text-align: left;
       }
 
       .provenance__facts {
@@ -491,502 +789,6 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
   </style>
 
   <script>
-    const PRICE_FIELDS = [
-      "input",
-      "output",
-      "reasoning",
-      "cache_read",
-      "cache_write",
-      "input_audio",
-      "output_audio"
-    ] as const;
-
-    type PriceField = (typeof PRICE_FIELDS)[number];
-
-    type CatalogRoute = {
-      provider: string;
-      model: string;
-      fields: PriceField[];
-      last_ts: number;
-    };
-
-    type PricePoint = {
-      ts: number;
-      plot_ts: number;
-      values: Partial<Record<PriceField, number | null>>;
-    };
-
-    type PriceManifest = {
-      schema_version: number;
-      generated_at: string;
-      source_repository: string;
-      source_ref: string;
-      source_commit_sha: string;
-      csv: {
-        path: string;
-        bytes: number;
-        sha256: string;
-      };
-    };
-
-    const FIELD_LABELS: Record<PriceField, string> = {
-      input: "Input",
-      output: "Output",
-      reasoning: "Reasoning",
-      cache_read: "Cache read",
-      cache_write: "Cache write",
-      input_audio: "Audio input",
-      output_audio: "Audio output"
-    };
-
-    const FIELD_COLORS: Record<PriceField, string> = {
-      input: "#23735e",
-      output: "#8d3326",
-      reasoning: "#7656a8",
-      cache_read: "#2d5d89",
-      cache_write: "#9d5f16",
-      input_audio: "#bd4f86",
-      output_audio: "#2f7f88"
-    };
-
-    const app = document.querySelector<HTMLElement>("[data-price-app]");
-    if (!app) throw new Error("price history root is missing");
-
-    const status = requiredElement<HTMLElement>(app, "[data-status]");
-    const controls = requiredElement<HTMLElement>(app, "[data-controls]");
-    const providerSelect = requiredElement<HTMLSelectElement>(app, "[data-provider]");
-    const modelInput = requiredElement<HTMLInputElement>(app, "[data-model]");
-    const modelList = requiredElement<HTMLDataListElement>(app, "[data-model-list]");
-    const fieldSet = requiredElement<HTMLFieldSetElement>(app, "[data-fields]");
-    const chartShell = requiredElement<HTMLElement>(app, "[data-chart-shell]");
-    const canvas = requiredElement<HTMLCanvasElement>(app, "[data-chart]");
-    const tooltip = requiredElement<HTMLElement>(app, "[data-tooltip]");
-    const routeLabel = requiredElement<HTMLElement>(app, "[data-route]");
-    const rangeLabel = requiredElement<HTMLElement>(app, "[data-range]");
-    const legend = requiredElement<HTMLElement>(app, "[data-legend]");
-    const summary = requiredElement<HTMLElement>(app, "[data-summary]");
-    const emptyState = requiredElement<HTMLElement>(app, "[data-empty]");
-    const sourceCommit = requiredElement<HTMLAnchorElement>(app, "[data-source-commit]");
-    const eventCount = requiredElement<HTMLElement>(app, "[data-event-count]");
-    const routeCount = requiredElement<HTMLElement>(app, "[data-route-count]");
-    const downloadSize = requiredElement<HTMLElement>(app, "[data-download-size]");
-
-    let catalog: CatalogRoute[] = [];
-    let visibleRoutes: CatalogRoute[] = [];
-    let currentPoints: PricePoint[] = [];
-    let selectedFields: PriceField[] = ["input", "output"];
-    let requestId = 0;
-    let latestRequestId = 0;
-    let worker: Worker | undefined;
-
-    for (const field of PRICE_FIELDS) {
-      const label = document.createElement("label");
-      label.className = "field-toggle";
-      label.dataset.fieldLabel = field;
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.value = field;
-      input.checked = field === "input" || field === "output";
-      input.addEventListener("change", requestSeries);
-      label.append(input, document.createTextNode(FIELD_LABELS[field]));
-      fieldSet.append(label);
-    }
-
-    providerSelect.addEventListener("change", () => {
-      populateModels(providerSelect.value);
-      requestSeries();
-    });
-    modelInput.addEventListener("change", requestSeries);
-    modelInput.addEventListener("input", () => {
-      if (visibleRoutes.some((route) => route.model === modelInput.value)) requestSeries();
-    });
-    window.addEventListener("resize", () => drawChart(currentPoints, selectedFields));
-    canvas.addEventListener("pointermove", showTooltip);
-    canvas.addEventListener("pointerleave", () => {
-      tooltip.hidden = true;
-    });
-
-    void loadPriceHistory();
-
-    async function loadPriceHistory(): Promise<void> {
-      const dataBaseUrl = app?.dataset.dataBaseUrl;
-      if (!dataBaseUrl) throw new Error("price history data URL is missing");
-
-      try {
-        const response = await fetch(`${dataBaseUrl}manifest.json`);
-        if (!response.ok) throw new Error(`manifest request failed with HTTP ${response.status}`);
-        const manifest = (await response.json()) as PriceManifest;
-        if (manifest.schema_version !== 1) {
-          throw new Error(`unsupported price history schema ${manifest.schema_version}`);
-        }
-        setProvenance(manifest);
-
-        worker = new Worker(new URL("../workers/price-history.ts", import.meta.url), {
-          type: "module"
-        });
-        worker.addEventListener("message", handleWorkerMessage);
-        worker.addEventListener("error", (event) => showFailure(event.message));
-        worker.postMessage({
-          type: "load",
-          csv_url: new URL(manifest.csv.path, dataBaseUrl).toString()
-        });
-      } catch (error) {
-        showFailure(error instanceof Error ? error.message : String(error));
-      }
-    }
-
-    function handleWorkerMessage(event: MessageEvent): void {
-      const message = event.data;
-      if (message.type === "error") {
-        showFailure(message.message);
-      } else if (message.type === "loaded") {
-        catalog = message.catalog;
-        eventCount.textContent = formatCount(message.event_count);
-        routeCount.textContent = formatCount(message.route_count);
-        populateProviders();
-        controls.hidden = false;
-        chartShell.hidden = false;
-        status.textContent = `${formatCount(message.event_count)} changes indexed`;
-        requestSeries();
-      } else if (message.type === "series" && message.request_id === latestRequestId) {
-        currentPoints = message.points;
-        drawChart(currentPoints, selectedFields);
-      }
-    }
-
-    function populateProviders(): void {
-      const providers = Array.from(new Set(catalog.map((route) => route.provider))).sort();
-      providerSelect.replaceChildren(
-        ...providers.map((provider) => new Option(provider, provider))
-      );
-      providerSelect.value = providers.includes("openai") ? "openai" : (providers[0] ?? "");
-      populateModels(providerSelect.value);
-    }
-
-    function populateModels(provider: string): void {
-      visibleRoutes = catalog.filter((route) => route.provider === provider);
-      modelList.replaceChildren(
-        ...visibleRoutes.map((route) => {
-          const option = document.createElement("option");
-          option.value = route.model;
-          return option;
-        })
-      );
-
-      const preferred = visibleRoutes.find((route) => route.model === "gpt-5")
-        ?? visibleRoutes.toSorted((left, right) => right.last_ts - left.last_ts)[0];
-      modelInput.value = preferred?.model ?? "";
-      updateAvailableFields(preferred);
-    }
-
-    function updateAvailableFields(route: CatalogRoute | undefined): void {
-      const available = new Set(route?.fields ?? []);
-      for (const label of fieldSet.querySelectorAll<HTMLElement>("[data-field-label]")) {
-        const field = label.dataset.fieldLabel as PriceField;
-        const input = requiredElement<HTMLInputElement>(label, "input");
-        input.disabled = !available.has(field);
-        label.dataset.unavailable = String(input.disabled);
-        if (input.disabled) input.checked = false;
-      }
-
-      const checked = checkedFields();
-      if (checked.length === 0) {
-        const fallback = (["input", "output", ...PRICE_FIELDS] as PriceField[])
-          .find((field) => available.has(field));
-        if (fallback) {
-          const input = fieldSet.querySelector<HTMLInputElement>(`input[value="${fallback}"]`);
-          if (input) input.checked = true;
-        }
-      }
-    }
-
-    function requestSeries(): void {
-      const route = visibleRoutes.find((candidate) => candidate.model === modelInput.value);
-      if (!route || !worker) {
-        status.textContent = "Choose a model route from the list";
-        return;
-      }
-
-      updateAvailableFields(route);
-      selectedFields = checkedFields();
-      latestRequestId = ++requestId;
-      routeLabel.textContent = `${route.provider} / ${route.model}`;
-      status.textContent = "Rendering route…";
-      worker.postMessage({
-        type: "series",
-        request_id: latestRequestId,
-        provider: route.provider,
-        model: route.model,
-        fields: selectedFields
-      });
-    }
-
-    function checkedFields(): PriceField[] {
-      return Array.from(fieldSet.querySelectorAll<HTMLInputElement>("input:checked"))
-        .map((input) => input.value as PriceField);
-    }
-
-    function drawChart(points: PricePoint[], fields: PriceField[]): void {
-      status.textContent = points.length === 0
-        ? "No recorded price changes for this route"
-        : `${formatCount(points.length)} route changes`;
-      legend.replaceChildren(...fields.map(createLegendItem));
-      tooltip.hidden = true;
-
-      const context = canvas.getContext("2d");
-      if (!context) return;
-      const bounds = canvas.getBoundingClientRect();
-      const ratio = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.floor(bounds.width * ratio));
-      canvas.height = Math.max(1, Math.floor(bounds.height * ratio));
-      context.setTransform(ratio, 0, 0, ratio, 0, 0);
-      context.clearRect(0, 0, bounds.width, bounds.height);
-
-      const values = points.flatMap((point) =>
-        fields.flatMap((field) => {
-          const value = point.values[field];
-          return typeof value === "number" && Number.isFinite(value) ? [value] : [];
-        })
-      );
-      if (points.length === 0 || values.length === 0) {
-        drawEmptyChart(context, bounds.width, bounds.height);
-        rangeLabel.textContent = "";
-        summary.textContent = "No scalar price values are available for this selection.";
-        return;
-      }
-
-      const padding = { top: 24, right: 20, bottom: 42, left: 68 };
-      const plotWidth = Math.max(1, bounds.width - padding.left - padding.right);
-      const plotHeight = Math.max(1, bounds.height - padding.top - padding.bottom);
-      const firstTs = Math.min(...points.map((point) => point.plot_ts));
-      const lastTs = Math.max(...points.map((point) => point.plot_ts));
-      const day = 24 * 60 * 60 * 1000;
-      const minTs = firstTs === lastTs ? firstTs - day : firstTs;
-      const maxTs = firstTs === lastTs ? lastTs + day : lastTs;
-      const maxValue = Math.max(...values);
-      const yMax = niceMaximum(maxValue);
-      const x = (ts: number): number =>
-        padding.left + ((ts - minTs) / (maxTs - minTs)) * plotWidth;
-      const y = (value: number): number =>
-        padding.top + plotHeight - (value / yMax) * plotHeight;
-
-      drawGrid(context, bounds.width, padding, plotHeight, yMax, y);
-      drawXAxis(context, padding, plotHeight, minTs, maxTs, x);
-
-      for (const field of fields) {
-        context.beginPath();
-        context.strokeStyle = FIELD_COLORS[field];
-        context.lineWidth = 2.25;
-        context.lineJoin = "round";
-        let active = false;
-        let previousValue: number | null = null;
-        for (const point of points) {
-          const value = point.values[field];
-          if (typeof value !== "number" || !Number.isFinite(value)) {
-            active = false;
-            previousValue = null;
-            continue;
-          }
-          const pointX = x(point.plot_ts);
-          const pointY = y(value);
-          if (!active || previousValue === null) {
-            context.moveTo(pointX, pointY);
-            active = true;
-          } else {
-            context.lineTo(pointX, y(previousValue));
-            context.lineTo(pointX, pointY);
-          }
-          previousValue = value;
-        }
-        context.stroke();
-      }
-
-      canvas.dataset.minTs = String(minTs);
-      canvas.dataset.maxTs = String(maxTs);
-      canvas.dataset.plotLeft = String(padding.left);
-      canvas.dataset.plotWidth = String(plotWidth);
-      rangeLabel.textContent = `${formatDate(firstTs)} – ${formatDate(lastTs)}`;
-      summary.textContent =
-        `${points.length} recorded changes. Latest: ${latestValues(points, fields)}.`;
-    }
-
-    function drawGrid(
-      context: CanvasRenderingContext2D,
-      width: number,
-      padding: { top: number; right: number; bottom: number; left: number },
-      plotHeight: number,
-      yMax: number,
-      y: (value: number) => number
-    ): void {
-      context.font = "11px SFMono-Regular, Consolas, monospace";
-      context.textAlign = "right";
-      context.textBaseline = "middle";
-      for (let tick = 0; tick <= 4; tick += 1) {
-        const value = (yMax / 4) * tick;
-        const pointY = y(value);
-        context.beginPath();
-        context.strokeStyle = "#d5cab7";
-        context.lineWidth = 1;
-        context.moveTo(padding.left, pointY);
-        context.lineTo(width - padding.right, pointY);
-        context.stroke();
-        context.fillStyle = "#74786f";
-        context.fillText(formatPrice(value), padding.left - 10, pointY);
-      }
-
-      context.save();
-      context.translate(15, padding.top + plotHeight / 2);
-      context.rotate(-Math.PI / 2);
-      context.fillStyle = "#74786f";
-      context.textAlign = "center";
-      context.fillText("USD / 1M tokens", 0, 0);
-      context.restore();
-    }
-
-    function drawXAxis(
-      context: CanvasRenderingContext2D,
-      padding: { top: number; right: number; bottom: number; left: number },
-      plotHeight: number,
-      minTs: number,
-      maxTs: number,
-      x: (ts: number) => number
-    ): void {
-      context.font = "11px SFMono-Regular, Consolas, monospace";
-      context.fillStyle = "#74786f";
-      context.textBaseline = "top";
-      for (let tick = 0; tick <= 3; tick += 1) {
-        const ts = minTs + ((maxTs - minTs) / 3) * tick;
-        context.textAlign = tick === 0 ? "left" : tick === 3 ? "right" : "center";
-        context.fillText(formatDate(ts), x(ts), padding.top + plotHeight + 13);
-      }
-    }
-
-    function drawEmptyChart(
-      context: CanvasRenderingContext2D,
-      width: number,
-      height: number
-    ): void {
-      context.fillStyle = "#74786f";
-      context.font = "14px SFMono-Regular, Consolas, monospace";
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillText("No price values to plot", width / 2, height / 2);
-    }
-
-    function showTooltip(event: PointerEvent): void {
-      if (currentPoints.length === 0) return;
-      const minTs = Number(canvas.dataset.minTs);
-      const maxTs = Number(canvas.dataset.maxTs);
-      const plotLeft = Number(canvas.dataset.plotLeft);
-      const plotWidth = Number(canvas.dataset.plotWidth);
-      if (![minTs, maxTs, plotLeft, plotWidth].every(Number.isFinite)) return;
-
-      const bounds = canvas.getBoundingClientRect();
-      const localX = Math.min(plotLeft + plotWidth, Math.max(plotLeft, event.clientX - bounds.left));
-      const targetTs = minTs + ((localX - plotLeft) / plotWidth) * (maxTs - minTs);
-      const point = currentPoints.reduce((nearest, candidate) =>
-        Math.abs(candidate.plot_ts - targetTs) < Math.abs(nearest.plot_ts - targetTs) ? candidate : nearest
-      );
-
-      const lines = selectedFields.map((field) => {
-        const value = point.values[field];
-        return `${FIELD_LABELS[field]}: ${typeof value === "number" ? `$${formatPrice(value)}` : "not specified"}`;
-      });
-      tooltip.textContent = `${formatDateTime(point.ts)}\n${lines.join("\n")}`;
-      tooltip.style.whiteSpace = "pre-line";
-      tooltip.hidden = false;
-
-      const tooltipWidth = tooltip.offsetWidth;
-      const left = Math.min(bounds.width - tooltipWidth - 6, Math.max(6, localX + 12));
-      tooltip.style.left = `${left}px`;
-      tooltip.style.top = "12px";
-    }
-
-    function createLegendItem(field: PriceField): HTMLElement {
-      const item = document.createElement("span");
-      item.className = "legend__item";
-      const swatch = document.createElement("span");
-      swatch.className = "legend__swatch";
-      swatch.style.setProperty("--legend-color", FIELD_COLORS[field]);
-      item.append(swatch, document.createTextNode(FIELD_LABELS[field]));
-      return item;
-    }
-
-    function latestValues(points: PricePoint[], fields: PriceField[]): string {
-      const latest = points.at(-1);
-      if (!latest) return "none";
-      return fields
-        .map((field) => {
-          const value = latest.values[field];
-          return `${FIELD_LABELS[field]} ${typeof value === "number" ? `$${formatPrice(value)}` : "n/a"}`;
-        })
-        .join(", ");
-    }
-
-    function setProvenance(manifest: PriceManifest): void {
-      sourceCommit.textContent = manifest.source_commit_sha.slice(0, 12);
-      sourceCommit.href =
-        `${manifest.source_repository}/commit/${manifest.source_commit_sha}`;
-      downloadSize.textContent = formatBytes(manifest.csv.bytes);
-    }
-
-    function showFailure(message: string): void {
-      status.textContent = "Dataset unavailable";
-      controls.hidden = true;
-      chartShell.hidden = true;
-      emptyState.hidden = false;
-      console.warn(`Price history: ${message}`);
-    }
-
-    function requiredElement<T extends Element>(root: ParentNode, selector: string): T {
-      const element = root.querySelector<T>(selector);
-      if (!element) throw new Error(`missing element ${selector}`);
-      return element;
-    }
-
-    function niceMaximum(value: number): number {
-      if (value <= 0) return 1;
-      const magnitude = 10 ** Math.floor(Math.log10(value));
-      const normalized = value / magnitude;
-      const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-      return nice * magnitude;
-    }
-
-    function formatPrice(value: number): string {
-      return value.toLocaleString("en-US", {
-        maximumFractionDigits: value < 1 ? 4 : 2
-      });
-    }
-
-    function formatDate(ts: number): string {
-      return new Intl.DateTimeFormat("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC"
-      }).format(ts);
-    }
-
-    function formatDateTime(ts: number): string {
-      return new Intl.DateTimeFormat("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "UTC",
-        timeZoneName: "short"
-      }).format(ts);
-    }
-
-    function formatCount(value: number): string {
-      return value.toLocaleString("en-US");
-    }
-
-    function formatBytes(value: number): string {
-      if (value < 1024) return `${value} B`;
-      if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KiB`;
-      return `${(value / 1024 ** 2).toFixed(1)} MiB`;
-    }
+    import "../scripts/price-history";
   </script>
 </BaseLayout>
