@@ -32,6 +32,7 @@ type PriceManifest = {
     path: string;
     sha256: string;
   };
+  generator_revision: string;
   generated_at: string;
   schema_version: number;
   source_commit_sha: string;
