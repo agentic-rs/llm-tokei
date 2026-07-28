@@ -120,9 +120,9 @@ const modelFilter = requiredElement<HTMLInputElement>(
 );
 const modelOptions = requiredElement<HTMLElement>(app, "[data-model-options]");
 const modelSummary = requiredElement<HTMLElement>(app, "[data-model-summary]");
-const resetModelsButton = requiredElement<HTMLButtonElement>(
+const recentModelsButton = requiredElement<HTMLButtonElement>(
   app,
-  "[data-reset-models]",
+  "[data-recent-models]",
 );
 const eventfulModelsButton = requiredElement<HTMLButtonElement>(
   app,
@@ -179,13 +179,22 @@ modelFilter.addEventListener("input", renderModelLegend);
 eventfulModelsButton.addEventListener("click", () => {
   eventfulModelsOnly = !eventfulModelsOnly;
   eventfulModelsButton.setAttribute("aria-pressed", String(eventfulModelsOnly));
+  if (eventfulModelsOnly) {
+    const eventfulRoutes = visibleRoutes.filter(
+      (route) => route.event_count > 1,
+    );
+    const eventfulModels = new Set(eventfulRoutes.map((route) => route.model));
+    selectedModels = selectedModels.filter((model) =>
+      eventfulModels.has(model),
+    );
+    if (selectedModels.length === 0) selectRecentModels(eventfulRoutes);
+    updateAvailableFields();
+    requestSeries();
+  }
   renderModelLegend();
 });
-resetModelsButton.addEventListener("click", () => {
-  modelFilter.value = "";
-  eventfulModelsOnly = false;
-  eventfulModelsButton.setAttribute("aria-pressed", "false");
-  selectRecentModels();
+recentModelsButton.addEventListener("click", () => {
+  selectRecentModels(filteredVisibleRoutes());
   renderModelLegend();
   updateAvailableFields();
   requestSeries();
@@ -293,10 +302,8 @@ function selectProvider(provider: string): void {
   updateAvailableFields();
 }
 
-function selectRecentModels(): void {
-  const activeRoutes = visibleRoutes.filter((route) => route.is_active);
-  const inactiveRoutes = visibleRoutes.filter((route) => !route.is_active);
-  selectedModels = [...activeRoutes, ...inactiveRoutes]
+function selectRecentModels(routes: CatalogRoute[] = visibleRoutes): void {
+  selectedModels = routes
     .slice(0, DEFAULT_MODEL_COUNT)
     .map((route) => route.model);
 }
@@ -317,12 +324,13 @@ function toggleModel(model: string): void {
 }
 
 function renderModelLegend(): void {
-  const query = modelFilter.value.trim().toLocaleLowerCase("en-US");
-  const filteredRoutes = visibleRoutes.filter(
-    (route) =>
-      (!eventfulModelsOnly || route.event_count > 1) &&
-      (!query || route.model.toLocaleLowerCase("en-US").includes(query)),
-  );
+  const filteredRoutes = filteredVisibleRoutes();
+  recentModelsButton.disabled = filteredRoutes.length === 0;
+  recentModelsButton.title =
+    filteredRoutes.length === visibleRoutes.length
+      ? "Plot the five newest models for this provider"
+      : "Plot the five newest models in the current filter";
+  const query = modelFilter.value.trim();
   const listing =
     filteredRoutes.length === visibleRoutes.length
       ? `${visibleRoutes.length} total`
@@ -369,20 +377,27 @@ function renderModelLegend(): void {
       const name = document.createElement("span");
       name.className = "model-option__name";
       name.textContent = route.model;
-      const events = document.createElement("span");
-      events.className = "model-option__events";
-      events.textContent =
-        `${formatCount(route.event_count)} ` +
-        pluralize("event", route.event_count);
+      const count = document.createElement("span");
+      count.className = "model-option__count";
+      count.textContent = formatCount(route.event_count);
       const state = document.createElement("span");
       state.className = "model-option__state";
       state.textContent = route.is_active
         ? formatShortDate(route.last_ts)
         : "removed";
-      button.append(swatch, name, events, state);
+      button.append(swatch, name, count, state);
       button.addEventListener("click", () => toggleModel(route.model));
       return button;
     }),
+  );
+}
+
+function filteredVisibleRoutes(): CatalogRoute[] {
+  const query = modelFilter.value.trim().toLocaleLowerCase("en-US");
+  return visibleRoutes.filter(
+    (route) =>
+      (!eventfulModelsOnly || route.event_count > 1) &&
+      (!query || route.model.toLocaleLowerCase("en-US").includes(query)),
   );
 }
 
@@ -472,8 +487,20 @@ function renderComparison(routes: RouteSeries[], fields: PriceField[]): void {
     asOfTs,
     ...allChanges.map((change) => change.plot_ts),
   );
+  const segmentEndTimestamps = allChanges
+    .filter((change) =>
+      change.changed_fields.some(
+        (field) =>
+          change.previous_values[field] != null && change.values[field] == null,
+      ),
+    )
+    .map((change) => change.plot_ts - 1);
   const xValues = Array.from(
-    new Set([...allChanges.map((change) => change.plot_ts), lastPlotTs]),
+    new Set([
+      ...allChanges.map((change) => change.plot_ts),
+      ...segmentEndTimestamps,
+      lastPlotTs,
+    ]),
   ).sort((left, right) => left - right);
 
   for (const [index, field] of fields.entries()) {

@@ -77,7 +77,13 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
             >
               Events &gt; 1
             </button>
-            <button data-reset-models type="button">Show recent 5</button>
+            <button
+              data-recent-models
+              type="button"
+              aria-label="Plot the five newest models in the current filter"
+            >
+              Show recent 5
+            </button>
           </div>
         </div>
         <div
@@ -379,6 +385,11 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       background: var(--green-deep);
     }
 
+    .model-legend__actions button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
     .model-legend__actions .model-legend__filter {
       color: var(--ink);
       background: var(--panel);
@@ -459,13 +470,18 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       font-size: 0.62rem;
     }
 
-    :global(.model-option__events) {
+    :global(.model-option__count) {
+      display: inline-grid;
+      width: 1.55rem;
+      height: 1.55rem;
       flex: 0 0 auto;
-      padding: 0.08rem 0.3rem;
-      border-radius: 999px;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 50%;
       color: var(--ink-soft);
       background: var(--paper-deep);
       font-size: 0.62rem;
+      font-variant-numeric: tabular-nums;
     }
 
     :global(.model-options__empty) {
