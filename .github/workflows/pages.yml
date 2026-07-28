@@ -67,9 +67,14 @@ jobs:
             --source-ref dev
       - run: pnpm check
       - run: pnpm build
+      - name: Prepare custom-domain artifact
+        run: |
+          mkdir -p pages/llm-tokei
+          cp -R pages-root/. pages/
+          cp -R dist/. pages/llm-tokei/
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: site/dist
+          path: site/pages
 
   deploy:
     environment:
