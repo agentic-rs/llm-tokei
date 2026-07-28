@@ -84,8 +84,10 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       </div>
 
       <div class="empty-state" data-empty hidden>
-        <strong>Price history is not available in this build.</strong>
-        <span>The scheduled Pages build generates it without committing the CSV to Git.</span>
+        <strong data-empty-title>Price history is not available in this build.</strong>
+        <span data-empty-detail>
+          The scheduled Pages build generates it without committing the CSV to Git.
+        </span>
       </div>
     </section>
 
@@ -570,6 +572,8 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
     const eventCount = requiredElement<HTMLElement>(app, "[data-event-count]");
     const routeCount = requiredElement<HTMLElement>(app, "[data-route-count]");
     const downloadSize = requiredElement<HTMLElement>(app, "[data-download-size]");
+    const emptyTitle = requiredElement<HTMLElement>(app, "[data-empty-title]");
+    const emptyDetail = requiredElement<HTMLElement>(app, "[data-empty-detail]");
 
     let catalog: CatalogRoute[] = [];
     let visibleRoutes: CatalogRoute[] = [];
@@ -613,7 +617,11 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       if (!dataBaseUrl) throw new Error("price history data URL is missing");
 
       try {
-        const response = await fetch(`${dataBaseUrl}manifest.json`);
+        const manifestUrl = new URL(
+          "manifest.json",
+          new URL(dataBaseUrl, window.location.origin)
+        );
+        const response = await fetch(manifestUrl);
         if (!response.ok) throw new Error(`manifest request failed with HTTP ${response.status}`);
         const manifest = (await response.json()) as PriceManifest;
         if (manifest.schema_version !== 1) {
@@ -628,7 +636,7 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
         worker.addEventListener("error", (event) => showFailure(event.message));
         worker.postMessage({
           type: "load",
-          csv_url: new URL(manifest.csv.path, dataBaseUrl).toString()
+          csv_url: new URL(manifest.csv.path, manifestUrl).toString()
         });
       } catch (error) {
         showFailure(error instanceof Error ? error.message : String(error));
@@ -931,7 +939,14 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
     }
 
     function showFailure(message: string): void {
-      status.textContent = "Dataset unavailable";
+      const datasetMissing = /request failed with HTTP 404\b/.test(message);
+      status.textContent = datasetMissing ? "Dataset unavailable" : "Price history failed to load";
+      emptyTitle.textContent = datasetMissing
+        ? "Price history is not available in this build."
+        : "Price history could not be loaded.";
+      emptyDetail.textContent = datasetMissing
+        ? "The scheduled Pages build generates it without committing the CSV to Git."
+        : "Reload the page to try again. The browser console contains the technical error.";
       controls.hidden = true;
       chartShell.hidden = true;
       emptyState.hidden = false;
