@@ -657,7 +657,7 @@ const recipes = [
       const tabs = Array.from(installBox.querySelectorAll("[data-install-tab]"));
       const panels = Array.from(installBox.querySelectorAll("[data-install-panel]"));
 
-      const selectInstallTab = (id) => {
+      const selectInstallTab = (id: string | null) => {
         for (const tab of tabs) {
           tab.setAttribute("aria-selected", tab.getAttribute("data-install-tab") === id ? "true" : "false");
         }

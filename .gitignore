@@ -1,6 +1,7 @@
 target/
 Cargo.lock
 .cache/
+site/public/price-history/
 
 .DS_Store
 dist/

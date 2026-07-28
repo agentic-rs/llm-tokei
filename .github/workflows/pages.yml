@@ -5,7 +5,11 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "npm/model-price-history/**"
       - "site/**"
+      - ".github/workflows/pages.yml"
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -27,16 +31,41 @@ jobs:
         working-directory: site
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/checkout@v6
+        with:
+          repository: anomalyco/models.dev
+          ref: dev
+          fetch-depth: 0
+          path: .cache/models.dev
       - uses: pnpm/action-setup@v6
         with:
-          version: 10
-          cache: true
-          cache_dependency_path: site/pnpm-lock.yaml
+          version: 10.30.3
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            npm/model-price-history/pnpm-lock.yaml
+            site/pnpm-lock.yaml
       - uses: actions/configure-pages@v6
-      - run: pnpm install --frozen-lockfile
+      - name: Install price history dependencies
+        working-directory: npm/model-price-history
+        run: pnpm install --frozen-lockfile
+      - name: Install site dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate price history artifact
+        working-directory: .
+        run: |
+          pnpm --dir npm/model-price-history build
+          price_csv=$(node npm/model-price-history/dist/cli.js changes \
+            --repo .cache/models.dev \
+            --ref HEAD \
+            --out-dir site/public/price-history)
+          node site/scripts/write-price-history-manifest.mjs \
+            --csv "$price_csv" \
+            --source-repository "https://github.com/anomalyco/models.dev" \
+            --source-ref dev
+      - run: pnpm check
       - run: pnpm build
       - uses: actions/upload-pages-artifact@v5
         with:
