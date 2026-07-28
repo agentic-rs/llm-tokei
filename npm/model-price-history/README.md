@@ -28,6 +28,12 @@ output directory so generated filenames retain that source commit.
 
 ```sh
 model-price-history changes --repo ../models.dev --ref dev --out-dir ./prices
+model-price-history changes \
+  --repo ../models.dev \
+  --ref dev \
+  --out-dir ./prices \
+  --base-csv ./previous/changes.<commit>.csv \
+  --base-commit <commit>
 model-price-history daily --repo ../models.dev --ref dev --out-dir ./prices/daily
 model-price-history latest --repo ../models.dev --ref dev --out-dir ./prices
 ```
@@ -50,6 +56,14 @@ upsert,2026-07-15T10:12:00.000Z,abc123...,42,openai,gpt-5,1.25,10,10,0.125,,,
 not rely on timestamp order alone. An `upsert` carries the complete scalar
 price state; a `delete` has blank price fields and means that price record is
 no longer resolved at that commit.
+
+`--base-csv` and `--base-commit` resume from an existing change stream. The
+scanner reconstructs its dependency state from the base commit's tree, then
+replays only newer first-parent commits and continues the existing sequence.
+If the checkpoint CSV is invalid or its commit is not on the target's
+first-parent history, the CLI reports the reason and performs a complete
+rebuild. Library callers can use `writeIncrementalChangesCsv` when they prefer
+to handle checkpoint failures themselves.
 
 ### Daily snapshots
 
@@ -86,11 +100,7 @@ Its rows use the same `ts` column, sourced from the resolved tip commit.
 ## Library
 
 ```ts
-import {
-  getLatestPriceSnapshot,
-  iteratePriceChanges,
-  writeDailySnapshotCsvs
-} from "@tokn-ai/model-price-history";
+import { getLatestPriceSnapshot, iteratePriceChanges, writeDailySnapshotCsvs } from "@tokn-ai/model-price-history";
 
 for await (const change of iteratePriceChanges({
   repository_path: "../models.dev",
@@ -104,10 +114,7 @@ const latest = await getLatestPriceSnapshot({
   ref: "dev"
 });
 
-await writeDailySnapshotCsvs(
-  { repository_path: "../models.dev", ref: "dev" },
-  "./prices/daily"
-);
+await writeDailySnapshotCsvs({ repository_path: "../models.dev", ref: "dev" }, "./prices/daily");
 ```
 
 ## Source compatibility

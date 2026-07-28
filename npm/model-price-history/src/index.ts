@@ -2,6 +2,7 @@ export {
   getLatestPriceSnapshot,
   iterateDailyPriceSnapshots,
   iteratePriceChanges,
+  iteratePriceChangesSince,
   resolveHistoryCommit
 } from "./history.js";
 export {
@@ -10,11 +11,14 @@ export {
   latestSnapshotFilename,
   writeChangesCsv,
   writeDailySnapshotCsvs,
+  writeIncrementalChangesCsv,
   writeLatestSnapshotCsv
 } from "./write.js";
 export type {
+  ChangeHistoryCheckpoint,
   DailyPriceSnapshot,
   DailySnapshotOptions,
+  IncrementalChangesOptions,
   PriceChange,
   PriceField,
   PriceProvenance,

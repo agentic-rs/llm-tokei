@@ -19,6 +19,31 @@ export function changeCsvHeader(): string {
   return csvLine(CHANGE_COLUMNS);
 }
 
+export function changeCsvLastSequence(source: string): number {
+  const rows = parseCsvRows(source);
+  const header = rows.next().value;
+  if (!header || !sameCells(header, CHANGE_COLUMNS)) {
+    throw new Error("base changes CSV has an unsupported header");
+  }
+
+  let lastSequence = 0;
+  for (let next = rows.next(); !next.done; next = rows.next()) {
+    const row = next.value;
+    if (row.length !== CHANGE_COLUMNS.length) {
+      throw new Error(`base changes CSV row ${lastSequence + 2} has ${row.length} columns`);
+    }
+    const sequence = Number(row[3]);
+    if (!Number.isSafeInteger(sequence) || sequence !== lastSequence + 1) {
+      throw new Error(`base changes CSV row ${lastSequence + 2} has invalid sequence ${JSON.stringify(row[3])}`);
+    }
+    lastSequence = sequence;
+  }
+  if (!source.endsWith("\n")) {
+    throw new Error("base changes CSV must end with a newline");
+  }
+  return lastSequence;
+}
+
 export function snapshotCsvHeader(): string {
   return csvLine(SNAPSHOT_COLUMNS);
 }
@@ -69,4 +94,46 @@ function csvCell(value: string | number | undefined): string {
   if (value === undefined) return "";
   const text = String(value);
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function* parseCsvRows(source: string): Generator<string[]> {
+  let cell = "";
+  let quoted = false;
+  let row: string[] = [];
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quoted) {
+      if (character === '"' && source[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else if (character === '"') {
+        quoted = false;
+      } else {
+        cell += character;
+      }
+    } else if (character === '"' && cell.length === 0) {
+      quoted = true;
+    } else if (character === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (character === "\n") {
+      row.push(cell.endsWith("\r") ? cell.slice(0, -1) : cell);
+      yield row;
+      cell = "";
+      row = [];
+    } else {
+      cell += character;
+    }
+  }
+
+  if (quoted) throw new Error("base changes CSV ends inside a quoted cell");
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell.endsWith("\r") ? cell.slice(0, -1) : cell);
+    yield row;
+  }
+}
+
+function sameCells(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }

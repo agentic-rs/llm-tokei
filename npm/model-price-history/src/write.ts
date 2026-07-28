@@ -1,32 +1,57 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { finished } from "node:stream/promises";
 
-import { changeCsvHeader, changeCsvLine, snapshotCsvLines } from "./csv.js";
+import { changeCsvHeader, changeCsvLastSequence, changeCsvLine, snapshotCsvLines } from "./csv.js";
 import {
   getLatestPriceSnapshot,
   iterateDailyPriceSnapshots,
   iteratePriceChanges,
+  iteratePriceChangesSince,
   resolveHistoryCommit
 } from "./history.js";
 import type {
   DailySnapshotOptions,
+  IncrementalChangesOptions,
   RepositoryOptions,
   WrittenChanges,
   WrittenDailySnapshot,
   WrittenSnapshot
 } from "./types.js";
 
-export async function writeChangesCsv(
-  options: RepositoryOptions,
-  outputDirectory: string
-): Promise<WrittenChanges> {
+export async function writeChangesCsv(options: RepositoryOptions, outputDirectory: string): Promise<WrittenChanges> {
   const commitSha = resolveHistoryCommit(options);
   const path = pathJoin(outputDirectory, changesFilename(commitSha));
   await mkdir(outputDirectory, { recursive: true });
   await writeAtomically(path, changeLines({ ...options, ref: commitSha }));
+  return { commit_sha: commitSha, path };
+}
+
+export async function writeIncrementalChangesCsv(
+  options: IncrementalChangesOptions,
+  outputDirectory: string
+): Promise<WrittenChanges> {
+  const commitSha = resolveHistoryCommit(options);
+  const baseCsv = await readFile(options.base_csv_path, "utf8");
+  const sequence = changeCsvLastSequence(baseCsv);
+  const path = pathJoin(outputDirectory, changesFilename(commitSha));
+  await mkdir(outputDirectory, { recursive: true });
+  await writeAtomically(
+    path,
+    incrementalChangeLines(
+      {
+        repository_path: options.repository_path,
+        ref: commitSha
+      },
+      {
+        commit_sha: options.base_commit_sha,
+        sequence
+      },
+      baseCsv
+    )
+  );
   return { commit_sha: commitSha, path };
 }
 
@@ -82,6 +107,20 @@ async function* changeLines(options: RepositoryOptions): AsyncGenerator<string> 
   for await (const change of iteratePriceChanges(options)) yield changeCsvLine(change);
 }
 
+async function* incrementalChangeLines(
+  options: RepositoryOptions,
+  checkpoint: {
+    commit_sha: string;
+    sequence: number;
+  },
+  baseCsv: string
+): AsyncGenerator<string> {
+  yield baseCsv;
+  for await (const change of iteratePriceChangesSince(options, checkpoint)) {
+    yield changeCsvLine(change);
+  }
+}
+
 async function writeLines(filePath: string, lines: AsyncIterable<string> | Iterable<string>): Promise<void> {
   const stream = createWriteStream(filePath, { encoding: "utf8" });
   const completion = finished(stream);
@@ -119,10 +158,7 @@ async function waitForDrain(stream: ReturnType<typeof createWriteStream>): Promi
   });
 }
 
-async function writeAtomically(
-  filePath: string,
-  lines: AsyncIterable<string> | Iterable<string>
-): Promise<void> {
+async function writeAtomically(filePath: string, lines: AsyncIterable<string> | Iterable<string>): Promise<void> {
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeLines(temporaryPath, lines);
