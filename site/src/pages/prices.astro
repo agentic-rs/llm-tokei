@@ -139,8 +139,15 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
           <dd data-route-count>—</dd>
         </div>
         <div>
-          <dt>Download size</dt>
-          <dd data-download-size>—</dd>
+          <dt>Downloads</dt>
+          <dd class="provenance__downloads">
+            <a data-price-download href={dataBaseUrl} download>
+              Prices <span data-download-size>—</span>
+            </a>
+            <a data-family-download href={dataBaseUrl} download hidden>
+              Model families <span data-family-download-size>—</span>
+            </a>
+          </dd>
         </div>
       </dl>
     </section>
@@ -703,6 +710,12 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
 
     .provenance__facts a {
       color: var(--blue);
+    }
+
+    .provenance__downloads {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 1rem;
     }
 
     @media (max-width: 900px) {
