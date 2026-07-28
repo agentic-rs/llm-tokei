@@ -1,0 +1,43 @@
+{
+  "name": "@tokn-ai/model-price-history",
+  "version": "0.1.0",
+  "description": "Generate historical LLM provider price CSVs from a models.dev Git repository",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentic-rs/llm-tokei.git",
+    "directory": "npm/model-price-history"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "model-price-history": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "packageManager": "pnpm@10.30.3",
+  "dependencies": {
+    "smol-toml": "^1.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

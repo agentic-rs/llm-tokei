@@ -8,3 +8,4 @@ npm/**/bin/llm-tokei
 npm/**/bin/llm-tokei.exe
 npm/**/*.tgz
 npm/**/node_modules/
+.pnpm-store/

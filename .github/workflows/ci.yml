@@ -52,6 +52,25 @@ jobs:
       - run: pnpm test
       - run: pnpm pack --dry-run
 
+  model-price-history:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: npm/model-price-history
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.30.3
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: npm/model-price-history/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm pack --dry-run
+
   build-artifacts:
     strategy:
       fail-fast: false
