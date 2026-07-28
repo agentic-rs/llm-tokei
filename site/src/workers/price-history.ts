@@ -160,6 +160,7 @@ async function loadCsv(csvUrl: string): Promise<void> {
       provider: route.provider,
       model: route.model,
       fields: PRICE_FIELDS.filter((field) => route.fields.has(field)),
+      is_active: route.changes.at(-1)?.op !== "delete",
       last_ts: route.last_ts,
     }))
     .sort(

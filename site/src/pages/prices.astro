@@ -41,32 +41,43 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
           <span>Provider</span>
           <select data-provider aria-label="Provider"></select>
         </label>
-        <div class="model-control">
-          <label>
-            <span>Model routes · up to 5</span>
-            <span class="model-picker">
-              <input
-                data-model
-                list="price-models"
-                type="text"
-                autocomplete="off"
-                aria-label="Model route to compare"
-                placeholder="Choose another model"
-              />
-              <button data-add-model type="button">Add</button>
-            </span>
-            <datalist id="price-models" data-model-list></datalist>
-          </label>
-          <div
-            class="selected-models"
-            data-selected-models
-            aria-label="Selected model routes"
-          ></div>
-        </div>
         <fieldset data-fields>
           <legend>Price dimensions</legend>
         </fieldset>
       </div>
+
+      <section
+        class="model-legend"
+        data-model-legend
+        aria-labelledby="model-legend-title"
+        hidden
+      >
+        <div class="model-legend__header">
+          <div>
+            <span class="eyebrow">Model legend</span>
+            <h3 id="model-legend-title">Click models to show or hide lines</h3>
+            <p data-model-summary></p>
+          </div>
+          <div class="model-legend__actions">
+            <label>
+              <span>Filter models</span>
+              <input
+                data-model-filter
+                type="search"
+                autocomplete="off"
+                placeholder="Filter model names"
+              />
+            </label>
+            <button data-reset-models type="button">Show recent 5</button>
+          </div>
+        </div>
+        <div
+          class="model-options"
+          data-model-options
+          role="group"
+          aria-label="Models to plot"
+        ></div>
+      </section>
 
       <div class="chart-shell" data-chart-shell hidden>
         <div class="chart-heading">
@@ -74,7 +85,6 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
             <p class="chart-route mono" data-route></p>
             <p class="chart-range" data-range></p>
           </div>
-          <div class="legend" data-legend aria-label="Chart legend"></div>
         </div>
         <div class="metric-charts" data-charts></div>
         <div class="chart-footer">
@@ -210,7 +220,7 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
 
     .controls {
       display: grid;
-      grid-template-columns: minmax(10rem, 0.55fr) minmax(19rem, 1.25fr) minmax(20rem, 1.4fr);
+      grid-template-columns: minmax(10rem, 0.5fr) minmax(28rem, 2fr);
       gap: 1rem;
       padding: 1rem clamp(1rem, 3vw, 1.5rem);
       border-bottom: 1px solid var(--line);
@@ -218,8 +228,7 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
     }
 
     .controls label,
-    .controls fieldset,
-    .model-control {
+    .controls fieldset {
       display: grid;
       min-width: 0;
       gap: 0.4rem;
@@ -249,88 +258,6 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       color: var(--ink);
       background: var(--panel);
       font: 0.9rem var(--font-mono);
-    }
-
-    .model-picker {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .model-picker input {
-      border-radius: 6px 0 0 6px;
-    }
-
-    .model-picker button {
-      min-width: 3.8rem;
-      border: 1px solid var(--ink);
-      border-left: 0;
-      border-radius: 0 6px 6px 0;
-      color: var(--panel);
-      background: var(--ink);
-      font: 800 0.76rem var(--font-mono);
-      cursor: pointer;
-    }
-
-    .model-picker button:hover {
-      background: var(--green-deep);
-    }
-
-    .selected-models {
-      display: flex;
-      min-height: 1.7rem;
-      flex-wrap: wrap;
-      gap: 0.35rem;
-    }
-
-    :global(.model-chip) {
-      display: inline-flex;
-      min-width: 0;
-      align-items: center;
-      gap: 0.35rem;
-      padding: 0.22rem 0.25rem 0.22rem 0.45rem;
-      border: 1px solid var(--line-strong);
-      border-radius: 999px;
-      background: var(--panel);
-      font: 0.72rem var(--font-mono);
-    }
-
-    :global(.model-chip__swatch) {
-      width: 0.58rem;
-      height: 0.58rem;
-      flex: 0 0 auto;
-      border-radius: 50%;
-      background: var(--model-color);
-    }
-
-    :global(.model-chip__label) {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    :global(.model-chip__remove) {
-      display: grid;
-      width: 1.25rem;
-      height: 1.25rem;
-      padding: 0;
-      border: 0;
-      border-radius: 50%;
-      place-items: center;
-      color: var(--ink-muted);
-      background: transparent;
-      font: 1rem/1 var(--font-sans);
-      cursor: pointer;
-    }
-
-    :global(.model-chip__remove:hover:not(:disabled)) {
-      color: var(--panel);
-      background: var(--model-color);
-    }
-
-    :global(.model-chip__remove:disabled) {
-      opacity: 0.3;
-      cursor: not-allowed;
     }
 
     .controls fieldset {
@@ -365,6 +292,157 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       opacity: 0.42;
     }
 
+    .model-legend {
+      padding: 1rem clamp(1rem, 3vw, 1.5rem);
+      border-bottom: 1px solid var(--line);
+      background: rgba(244, 239, 227, 0.72);
+    }
+
+    .model-legend__header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 1.5rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .model-legend__header > div:first-child {
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .model-legend h3,
+    .model-legend p {
+      margin: 0;
+    }
+
+    .model-legend h3 {
+      font-size: 1rem;
+    }
+
+    .model-legend p {
+      color: var(--ink-muted);
+      font: 0.72rem var(--font-mono);
+    }
+
+    .model-legend__actions {
+      display: flex;
+      align-items: end;
+      gap: 0.5rem;
+    }
+
+    .model-legend__actions label {
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .model-legend__actions label span {
+      color: var(--ink-muted);
+      font: 800 0.65rem var(--font-mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .model-legend__actions input,
+    .model-legend__actions button {
+      height: 2.25rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      font: 0.75rem var(--font-mono);
+    }
+
+    .model-legend__actions input {
+      width: min(15rem, 35vw);
+      padding: 0 0.65rem;
+      color: var(--ink);
+      background: var(--panel);
+    }
+
+    .model-legend__actions button {
+      padding: 0 0.75rem;
+      color: var(--panel);
+      background: var(--ink);
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .model-legend__actions button:hover {
+      background: var(--green-deep);
+    }
+
+    .model-options {
+      display: flex;
+      max-height: 12rem;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      overflow: auto;
+      scrollbar-gutter: stable;
+    }
+
+    :global(.model-option) {
+      display: inline-flex;
+      min-width: 0;
+      max-width: min(100%, 23rem);
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.36rem 0.55rem;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      color: var(--ink-muted);
+      background: rgba(255, 250, 240, 0.55);
+      font: 0.72rem var(--font-mono);
+      cursor: pointer;
+    }
+
+    :global(.model-option:hover) {
+      border-color: var(--model-color);
+      color: var(--ink);
+    }
+
+    :global(.model-option[aria-pressed="true"]) {
+      border-color: var(--model-color);
+      color: var(--ink);
+      background: var(--panel);
+      box-shadow: inset 3px 0 0 var(--model-color);
+      font-weight: 800;
+    }
+
+    :global(.model-option:focus-visible) {
+      outline: 3px solid var(--amber);
+      outline-offset: 1px;
+    }
+
+    :global(.model-option__swatch) {
+      width: 0.72rem;
+      height: 0.72rem;
+      flex: 0 0 auto;
+      border: 2px solid var(--model-color);
+      border-radius: 50%;
+      background: transparent;
+    }
+
+    :global(.model-option[aria-pressed="true"] .model-option__swatch) {
+      background: var(--model-color);
+    }
+
+    :global(.model-option__name) {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    :global(.model-option__state) {
+      flex: 0 0 auto;
+      color: var(--ink-muted);
+      font-size: 0.62rem;
+    }
+
+    :global(.model-options__empty) {
+      color: var(--ink-muted);
+      font: 0.75rem var(--font-mono);
+    }
+
     .chart-shell {
       padding: clamp(1rem, 3vw, 1.5rem);
     }
@@ -391,28 +469,6 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       margin: 0.2rem 0 0;
       color: var(--ink-muted);
       font-size: 0.85rem;
-    }
-
-    .legend {
-      display: flex;
-      max-width: 55%;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      gap: 0.5rem 0.85rem;
-    }
-
-    :global(.legend__item) {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.38rem;
-      font: 0.76rem var(--font-mono);
-    }
-
-    :global(.legend__swatch) {
-      width: 0.75rem;
-      height: 0.75rem;
-      border-radius: 2px;
-      background: var(--legend-color);
     }
 
     .metric-charts {
@@ -612,10 +668,6 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       .controls {
         grid-template-columns: 1fr 1.5fr;
       }
-
-      .controls fieldset {
-        grid-column: 1 / -1;
-      }
     }
 
     @media (max-width: 620px) {
@@ -643,9 +695,22 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
-      .legend {
-        max-width: none;
-        justify-content: flex-start;
+      .model-legend__header,
+      .model-legend__actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .model-legend__actions input {
+        width: 100%;
+      }
+
+      .model-options {
+        max-height: 16rem;
+      }
+
+      :global(.model-option) {
+        max-width: 100%;
       }
 
       :global(.metric-chart__heading) {

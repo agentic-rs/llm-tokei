@@ -11,14 +11,7 @@ const PRICE_FIELDS = [
   "output_audio",
 ] as const;
 
-const MAX_MODELS = 5;
-const MODEL_COLORS = [
-  "#23735e",
-  "#8d3326",
-  "#2d5d89",
-  "#7656a8",
-  "#9d5f16",
-] as const;
+const DEFAULT_MODEL_COUNT = 5;
 
 type PriceField = (typeof PRICE_FIELDS)[number];
 type NumericPriceValues = Partial<Record<PriceField, number | null>>;
@@ -26,6 +19,7 @@ type MarkerKind = "change" | "remove" | "start";
 
 type CatalogRoute = {
   fields: PriceField[];
+  is_active: boolean;
   last_ts: number;
   model: string;
   provider: string;
@@ -87,7 +81,7 @@ type ChangeMarker = {
   display_value: number;
   kind: MarkerKind;
   model: string;
-  model_index: number;
+  model_color: string;
   new_value: number | null;
   plot_ts: number;
   previous_value: number | null;
@@ -118,25 +112,22 @@ const providerSelect = requiredElement<HTMLSelectElement>(
   app,
   "[data-provider]",
 );
-const modelInput = requiredElement<HTMLInputElement>(app, "[data-model]");
-const modelList = requiredElement<HTMLDataListElement>(
+const modelLegend = requiredElement<HTMLElement>(app, "[data-model-legend]");
+const modelFilter = requiredElement<HTMLInputElement>(
   app,
-  "[data-model-list]",
+  "[data-model-filter]",
 );
-const addModelButton = requiredElement<HTMLButtonElement>(
+const modelOptions = requiredElement<HTMLElement>(app, "[data-model-options]");
+const modelSummary = requiredElement<HTMLElement>(app, "[data-model-summary]");
+const resetModelsButton = requiredElement<HTMLButtonElement>(
   app,
-  "[data-add-model]",
-);
-const selectedModelList = requiredElement<HTMLElement>(
-  app,
-  "[data-selected-models]",
+  "[data-reset-models]",
 );
 const fieldSet = requiredElement<HTMLFieldSetElement>(app, "[data-fields]");
 const chartShell = requiredElement<HTMLElement>(app, "[data-chart-shell]");
 const chartsContainer = requiredElement<HTMLElement>(app, "[data-charts]");
 const routeLabel = requiredElement<HTMLElement>(app, "[data-route]");
 const rangeLabel = requiredElement<HTMLElement>(app, "[data-range]");
-const legend = requiredElement<HTMLElement>(app, "[data-legend]");
 const summary = requiredElement<HTMLElement>(app, "[data-summary]");
 const emptyState = requiredElement<HTMLElement>(app, "[data-empty]");
 const sourceCommit = requiredElement<HTMLAnchorElement>(
@@ -178,11 +169,13 @@ providerSelect.addEventListener("change", () => {
   selectProvider(providerSelect.value);
   requestSeries();
 });
-addModelButton.addEventListener("click", addModel);
-modelInput.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  addModel();
+modelFilter.addEventListener("input", renderModelLegend);
+resetModelsButton.addEventListener("click", () => {
+  modelFilter.value = "";
+  selectRecentModels();
+  renderModelLegend();
+  updateAvailableFields();
+  requestSeries();
 });
 window.addEventListener("beforeunload", () => {
   destroyCharts();
@@ -246,6 +239,7 @@ function handleWorkerMessage(event: MessageEvent<WorkerMessage>): void {
     routeCount.textContent = formatCount(message.route_count);
     populateProviders();
     controls.hidden = false;
+    modelLegend.hidden = false;
     chartShell.hidden = false;
     emptyState.hidden = true;
     status.textContent = `${formatCount(message.event_count)} changes indexed`;
@@ -270,70 +264,92 @@ function populateProviders(): void {
 }
 
 function selectProvider(provider: string): void {
-  visibleRoutes = catalog.filter((route) => route.provider === provider);
-  modelList.replaceChildren(
-    ...visibleRoutes.map((route) => new Option(route.model, route.model)),
-  );
-  const preferred =
-    visibleRoutes.find((route) => route.model === "gpt-5") ??
-    visibleRoutes.toSorted((left, right) => right.last_ts - left.last_ts)[0];
-  selectedModels = preferred ? [preferred.model] : [];
-  modelInput.value = "";
-  renderSelectedModels();
+  visibleRoutes = catalog
+    .filter((route) => route.provider === provider)
+    .sort(
+      (left, right) =>
+        Number(right.is_active) - Number(left.is_active) ||
+        right.last_ts - left.last_ts ||
+        left.model.localeCompare(right.model),
+    );
+  modelFilter.value = "";
+  selectRecentModels();
+  renderModelLegend();
   updateAvailableFields();
 }
 
-function addModel(): void {
-  const model = modelInput.value.trim();
-  if (!visibleRoutes.some((route) => route.model === model)) {
-    status.textContent = "Choose a model route from the list";
-    return;
-  }
-  if (selectedModels.includes(model)) {
-    modelInput.value = "";
-    status.textContent = `${model} is already selected`;
-    return;
-  }
-  if (selectedModels.length >= MAX_MODELS) {
-    status.textContent = `Compare up to ${MAX_MODELS} models at a time`;
-    return;
-  }
-
-  selectedModels.push(model);
-  modelInput.value = "";
-  renderSelectedModels();
-  updateAvailableFields();
-  requestSeries();
+function selectRecentModels(): void {
+  const activeRoutes = visibleRoutes.filter((route) => route.is_active);
+  const inactiveRoutes = visibleRoutes.filter((route) => !route.is_active);
+  selectedModels = [...activeRoutes, ...inactiveRoutes]
+    .slice(0, DEFAULT_MODEL_COUNT)
+    .map((route) => route.model);
 }
 
-function removeModel(model: string): void {
-  if (selectedModels.length <= 1) return;
-  selectedModels = selectedModels.filter((candidate) => candidate !== model);
-  renderSelectedModels();
+function toggleModel(model: string): void {
+  const selected = new Set(selectedModels);
+  if (selected.has(model)) {
+    selected.delete(model);
+  } else {
+    selected.add(model);
+  }
+  selectedModels = visibleRoutes
+    .filter((route) => selected.has(route.model))
+    .map((route) => route.model);
+  renderModelLegend();
   updateAvailableFields();
   requestSeries();
 }
 
-function renderSelectedModels(): void {
-  selectedModelList.replaceChildren(
-    ...selectedModels.map((model, index) => {
-      const item = document.createElement("span");
-      item.className = "model-chip";
-      item.style.setProperty("--model-color", MODEL_COLORS[index]);
+function renderModelLegend(): void {
+  const query = modelFilter.value.trim().toLocaleLowerCase("en-US");
+  const filteredRoutes = query
+    ? visibleRoutes.filter((route) =>
+        route.model.toLocaleLowerCase("en-US").includes(query),
+      )
+    : visibleRoutes;
+  modelSummary.textContent =
+    `${selectedModels.length} shown · ${visibleRoutes.length} total · ` +
+    "active models first, then newest updates";
+
+  if (filteredRoutes.length === 0) {
+    const message = document.createElement("span");
+    message.className = "model-options__empty";
+    message.textContent = "No model names match this filter.";
+    modelOptions.replaceChildren(message);
+    return;
+  }
+
+  modelOptions.replaceChildren(
+    ...filteredRoutes.map((route) => {
+      const selected = selectedModels.includes(route.model);
+      const color = modelColor(route.model);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "model-option";
+      button.style.setProperty("--model-color", color);
+      button.setAttribute("aria-pressed", String(selected));
+      button.setAttribute(
+        "aria-label",
+        `${selected ? "Hide" : "Show"} ${route.model}`,
+      );
+      button.title =
+        `${route.model} · ${route.is_active ? "active" : "removed"} · ` +
+        `updated ${formatDate(route.last_ts)}`;
+
       const swatch = document.createElement("span");
-      swatch.className = "model-chip__swatch";
-      const label = document.createElement("span");
-      label.className = "model-chip__label";
-      label.textContent = model;
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "model-chip__remove";
-      remove.disabled = selectedModels.length === 1;
-      remove.setAttribute("aria-label", `Remove ${model} from comparison`);
-      remove.textContent = "×";
-      remove.addEventListener("click", () => removeModel(model));
-      item.append(swatch, label, remove);
-      return item;
+      swatch.className = "model-option__swatch";
+      const name = document.createElement("span");
+      name.className = "model-option__name";
+      name.textContent = route.model;
+      const state = document.createElement("span");
+      state.className = "model-option__state";
+      state.textContent = route.is_active
+        ? formatShortDate(route.last_ts)
+        : "removed";
+      button.append(swatch, name, state);
+      button.addEventListener("click", () => toggleModel(route.model));
+      return button;
     }),
   );
 }
@@ -342,7 +358,9 @@ function updateAvailableFields(): void {
   const selectedRoutes = visibleRoutes.filter((route) =>
     selectedModels.includes(route.model),
   );
-  const available = new Set(selectedRoutes.flatMap((route) => route.fields));
+  const fieldRoutes =
+    selectedRoutes.length > 0 ? selectedRoutes : visibleRoutes;
+  const available = new Set(fieldRoutes.flatMap((route) => route.fields));
   for (const label of fieldSet.querySelectorAll<HTMLElement>(
     "[data-field-label]",
   )) {
@@ -364,8 +382,15 @@ function updateAvailableFields(): void {
 }
 
 function requestSeries(): void {
-  if (!worker || selectedModels.length === 0) {
-    status.textContent = "Choose at least one model route";
+  if (!worker) return;
+  if (selectedModels.length === 0) {
+    destroyCharts();
+    chartsContainer.replaceChildren(createEmptyChartMessage());
+    routeLabel.textContent = `${providerSelect.value} / no models shown`;
+    rangeLabel.textContent = "";
+    summary.textContent =
+      "Click a model in the legend to show its price history.";
+    status.textContent = "No models shown";
     return;
   }
   selectedFields = checkedFields();
@@ -394,11 +419,6 @@ function checkedFields(): PriceField[] {
 
 function renderComparison(routes: RouteSeries[], fields: PriceField[]): void {
   destroyCharts();
-  legend.replaceChildren(
-    ...routes.map((route, index) =>
-      createLegendItem(route.model, MODEL_COLORS[index]),
-    ),
-  );
 
   const allChanges = routes.flatMap((route) => route.changes);
   const activeRouteCount = routes.filter((route) => route.is_active).length;
@@ -569,7 +589,7 @@ function createPlotOptions(
     },
     series: [
       {},
-      ...routes.map((route, index) => ({
+      ...routes.map((route) => ({
         label: route.model,
         paths: uPlot.paths.stepped?.({
           align: 1,
@@ -578,7 +598,7 @@ function createPlotOptions(
         }),
         points: { show: false },
         spanGaps: false,
-        stroke: MODEL_COLORS[index],
+        stroke: modelColor(route.model),
         width: 2.25,
       })),
     ],
@@ -611,7 +631,7 @@ function buildMarkers(
   routes: RouteSeries[],
   field: PriceField,
 ): ChangeMarker[] {
-  return routes.flatMap((route, modelIndex) =>
+  return routes.flatMap((route) =>
     route.changes.flatMap((change) => {
       if (!change.changed_fields.includes(field)) return [];
       const previousValue = change.previous_values[field] ?? null;
@@ -629,7 +649,7 @@ function buildMarkers(
           display_value: newValue ?? previousValue ?? 0,
           kind,
           model: route.model,
-          model_index: modelIndex,
+          model_color: modelColor(route.model),
           new_value: newValue,
           plot_ts: change.plot_ts,
           previous_value: previousValue,
@@ -647,7 +667,7 @@ function createMarkerElement(
   const element = document.createElement("button");
   element.type = "button";
   element.className = `change-marker change-marker--${marker.kind}`;
-  element.style.setProperty("--marker-color", MODEL_COLORS[marker.model_index]);
+  element.style.setProperty("--marker-color", marker.model_color);
   element.setAttribute("aria-label", markerAriaLabel(marker));
   if (marker.kind === "remove") element.textContent = "×";
   element.addEventListener("mouseenter", () => setMarkerDetail(detail, marker));
@@ -703,16 +723,6 @@ function markerAriaLabel(marker: ChangeMarker): string {
   );
 }
 
-function createLegendItem(model: string, color: string): HTMLElement {
-  const item = document.createElement("span");
-  item.className = "legend__item";
-  const swatch = document.createElement("span");
-  swatch.className = "legend__swatch";
-  swatch.style.setProperty("--legend-color", color);
-  item.append(swatch, document.createTextNode(model));
-  return item;
-}
-
 function createEmptyChartMessage(): HTMLElement {
   const message = document.createElement("p");
   message.className = "chart-empty";
@@ -759,6 +769,7 @@ function showFailure(message: string): void {
     ? "The scheduled Pages build generates it without committing the CSV to Git."
     : "Reload the page to try again. The browser console contains the technical error.";
   controls.hidden = true;
+  modelLegend.hidden = true;
   chartShell.hidden = true;
   emptyState.hidden = false;
   console.warn(`Price history: ${message}`);
@@ -771,6 +782,15 @@ function requiredElement<T extends Element>(
   const element = root.querySelector<T>(selector);
   if (!element) throw new Error(`missing element ${selector}`);
   return element;
+}
+
+function modelColor(model: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < model.length; index += 1) {
+    hash ^= model.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `hsl(${(hash >>> 0) % 360} 58% 36%)`;
 }
 
 function niceMaximum(value: number): number {
@@ -802,6 +822,14 @@ function formatDate(ts: number): string {
     month: "short",
     timeZone: "UTC",
     year: "numeric",
+  }).format(ts);
+}
+
+function formatShortDate(ts: number): string {
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
   }).format(ts);
 }
 
