@@ -9,7 +9,7 @@
 
 See where your local coding-agent tokens went.
 
-Website: [agentic-rs.github.io/llm-tokei](https://agentic-rs.github.io/llm-tokei/)
+Website: [agentic.tokn-ai.dev/llm-tokei](https://agentic.tokn-ai.dev/llm-tokei/)
 
 `llm-tokei` scans the session files already on your machine and turns them into
 fast, grouped usage reports: input, output, reasoning, cache tokens, sessions,
