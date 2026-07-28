@@ -18,6 +18,7 @@ import {
   type ModelsDevDocument
 } from "./models-dev.js";
 import type {
+  ChangeHistoryCheckpoint,
   DailyPriceSnapshot,
   DailySnapshotOptions,
   PriceChange,
@@ -60,9 +61,16 @@ export async function* iteratePriceChanges(options: RepositoryOptions): AsyncGen
   }
 }
 
-export async function* iterateDailyPriceSnapshots(
-  options: DailySnapshotOptions
-): AsyncGenerator<DailyPriceSnapshot> {
+export async function* iteratePriceChangesSince(
+  options: RepositoryOptions,
+  checkpoint: ChangeHistoryCheckpoint
+): AsyncGenerator<PriceChange> {
+  for (const frame of iterateFrames(options, checkpoint)) {
+    for (const change of frame.changes) yield change;
+  }
+}
+
+export async function* iterateDailyPriceSnapshots(options: DailySnapshotOptions): AsyncGenerator<DailyPriceSnapshot> {
   const today = utcDate(options.now ?? new Date());
   const yesterday = addDays(today, -1);
   let hasSeenPrice = false;
@@ -124,7 +132,7 @@ export async function getLatestPriceSnapshot(options: RepositoryOptions): Promis
   };
 }
 
-function* iterateFrames(options: RepositoryOptions): Generator<CommitFrame> {
+function* iterateFrames(options: RepositoryOptions, checkpoint?: ChangeHistoryCheckpoint): Generator<CommitFrame> {
   const commitSha = resolveHistoryCommit(options);
   const commits = listFirstParentCommits(options.repository_path, commitSha);
   if (commits.length === 0) {
@@ -132,9 +140,23 @@ function* iterateFrames(options: RepositoryOptions): Generator<CommitFrame> {
   }
 
   let state: ScannerState | undefined;
-  let sequence = 0;
+  let sequence = checkpoint?.sequence ?? 0;
+  let startIndex = 0;
 
-  for (const commit of commits) {
+  if (checkpoint) {
+    if (!Number.isSafeInteger(checkpoint.sequence) || checkpoint.sequence < 0) {
+      throw new Error(`price history checkpoint has invalid sequence ${checkpoint.sequence}`);
+    }
+    const checkpointCommitSha = resolveCommit(options.repository_path, checkpoint.commit_sha);
+    const checkpointIndex = commits.findIndex((commit) => commit.commit_sha === checkpointCommitSha);
+    if (checkpointIndex === -1) {
+      throw new Error(`checkpoint commit ${checkpointCommitSha} is not on the first-parent history of ${commitSha}`);
+    }
+    state = initializeState(options.repository_path, commits[checkpointIndex]!).state;
+    startIndex = checkpointIndex + 1;
+  }
+
+  for (const commit of commits.slice(startIndex)) {
     let pending: PendingChange[];
     if (!state) {
       const initialized = initializeState(options.repository_path, commit);
@@ -199,10 +221,14 @@ function applyCommit(repositoryPath: string, state: ScannerState, commit: GitCom
     if (identity) affected.add(endpointKey(identity));
   }
 
-  const writePaths = [...new Set(changes
-    .filter((change) => change.op === "write")
-    .map((change) => change.path)
-    .sort(compareText))];
+  const writePaths = [
+    ...new Set(
+      changes
+        .filter((change) => change.op === "write")
+        .map((change) => change.path)
+        .sort(compareText)
+    )
+  ];
   const modes = new Map(
     listTreeEntries(repositoryPath, commit.commit_sha, writePaths).map((entry) => [entry.path, entry.mode])
   );
@@ -315,7 +341,12 @@ function upsert(price: PriceRecord, origin: PriceProvenance): PendingChange {
 }
 
 function remove(price: PriceRecord, origin: PriceProvenance): PendingChange {
-  return { provider: price.provider, model: price.model, ...origin, op: "delete" };
+  return {
+    provider: price.provider,
+    model: price.model,
+    ...origin,
+    op: "delete"
+  };
 }
 
 function addReverseDependencies(

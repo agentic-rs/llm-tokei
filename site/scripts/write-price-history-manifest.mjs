@@ -6,18 +6,25 @@ import path from "node:path";
 
 const options = parseOptions(process.argv.slice(2));
 const csvPath = path.resolve(requiredOption(options, "csv"));
+const generatorRevision = requiredOption(options, "generator_revision");
 const sourceRepository = requiredOption(options, "source_repository");
 const sourceRef = requiredOption(options, "source_ref");
 const match = path.basename(csvPath).match(/^changes\.([0-9a-f]{40,64})\.csv$/);
 
 if (!match) {
-  throw new Error(`CSV filename does not contain a full source commit: ${csvPath}`);
+  throw new Error(
+    `CSV filename does not contain a full source commit: ${csvPath}`,
+  );
+}
+if (!/^[0-9a-f]{40,64}$/.test(generatorRevision)) {
+  throw new Error(`--generator-revision must be a full Git object ID`);
 }
 
 const bytes = await readFile(csvPath);
 const csvStat = await stat(csvPath);
 const manifest = {
   schema_version: 1,
+  generator_revision: generatorRevision,
   generated_at: new Date().toISOString(),
   source_repository: sourceRepository,
   source_ref: sourceRef,
@@ -25,8 +32,8 @@ const manifest = {
   csv: {
     path: path.basename(csvPath),
     bytes: csvStat.size,
-    sha256: createHash("sha256").update(bytes).digest("hex")
-  }
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  },
 };
 const manifestPath = path.join(path.dirname(csvPath), "manifest.json");
 

@@ -26,17 +26,41 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ASTRO_TELEMETRY_DISABLED: "1"
+      PRICE_HISTORY_MANIFEST_URL: https://agentic.tokn-ai.dev/llm-tokei/price-history/manifest.json
     defaults:
       run:
         working-directory: site
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/checkout@v6
+      - name: Select models.dev cache generation
+        id: models_dev_cache_key
+        working-directory: .
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Restore models.dev Git objects
+        uses: actions/cache@v4
         with:
-          repository: anomalyco/models.dev
-          ref: dev
-          fetch-depth: 0
-          path: .cache/models.dev
+          path: .cache/models.dev.git
+          key: models-dev-git-${{ runner.os }}-${{ steps.models_dev_cache_key.outputs.week }}
+          restore-keys: |
+            models-dev-git-${{ runner.os }}-
+      - name: Update models.dev repository
+        working-directory: .
+        run: |
+          repository_path=".cache/models.dev.git"
+          repository_url="https://github.com/anomalyco/models.dev.git"
+          mkdir -p .cache
+          if git -C "$repository_path" rev-parse --git-dir >/dev/null 2>&1; then
+            git -C "$repository_path" remote set-url origin "$repository_url"
+            if ! git -C "$repository_path" fetch --prune origin \
+              "+refs/heads/dev:refs/heads/dev"; then
+              rm -rf "$repository_path"
+            fi
+          fi
+          if ! git -C "$repository_path" rev-parse --git-dir >/dev/null 2>&1; then
+            git clone --bare --branch dev --single-branch \
+              "$repository_url" "$repository_path"
+          fi
+          test "$(git -C "$repository_path" rev-parse --is-shallow-repository)" = "false"
       - uses: pnpm/action-setup@v6
         with:
           version: 10.30.3
@@ -53,18 +77,49 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install site dependencies
         run: pnpm install --frozen-lockfile
+      - name: Resolve price history generator revision
+        id: price_history_generator
+        working-directory: .
+        run: echo "revision=$(git rev-parse HEAD:npm/model-price-history)" >> "$GITHUB_OUTPUT"
+      - name: Restore deployed price history
+        id: price_history_base
+        working-directory: .
+        env:
+          GENERATOR_REVISION: ${{ steps.price_history_generator.outputs.revision }}
+        run: |
+          node site/scripts/restore-price-history-base.mjs \
+            --manifest-url "$PRICE_HISTORY_MANIFEST_URL" \
+            --generator-revision "$GENERATOR_REVISION" \
+            --source-repository "https://github.com/anomalyco/models.dev" \
+            --source-ref dev \
+            --output-directory ".cache/price-history-base"
       - name: Generate price history artifact
         working-directory: .
+        env:
+          BASE_AVAILABLE: ${{ steps.price_history_base.outputs.available }}
+          BASE_COMMIT_SHA: ${{ steps.price_history_base.outputs.base_commit_sha }}
+          BASE_CSV_PATH: ${{ steps.price_history_base.outputs.base_csv_path }}
+          GENERATOR_REVISION: ${{ steps.price_history_generator.outputs.revision }}
         run: |
           pnpm --dir npm/model-price-history build
+          base_arguments=()
+          if [[ "$BASE_AVAILABLE" == "true" ]]; then
+            base_arguments+=(
+              --base-csv "$BASE_CSV_PATH"
+              --base-commit "$BASE_COMMIT_SHA"
+            )
+          fi
           price_csv=$(node npm/model-price-history/dist/cli.js changes \
-            --repo .cache/models.dev \
-            --ref HEAD \
-            --out-dir site/public/price-history)
+            --repo .cache/models.dev.git \
+            --ref dev \
+            --out-dir site/public/price-history \
+            "${base_arguments[@]}")
           node site/scripts/write-price-history-manifest.mjs \
             --csv "$price_csv" \
+            --generator-revision "$GENERATOR_REVISION" \
             --source-repository "https://github.com/anomalyco/models.dev" \
             --source-ref dev
+      - run: pnpm test
       - run: pnpm check
       - run: pnpm build
       - name: Prepare custom-domain artifact
