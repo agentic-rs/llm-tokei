@@ -45,6 +45,16 @@ export type RepositoryOptions = {
   ref?: string;
 };
 
+export type ChangeHistoryCheckpoint = {
+  commit_sha: string;
+  sequence: number;
+};
+
+export type IncrementalChangesOptions = RepositoryOptions & {
+  base_commit_sha: string;
+  base_csv_path: string;
+};
+
 export type DailySnapshotOptions = RepositoryOptions & {
   now?: Date;
 };
