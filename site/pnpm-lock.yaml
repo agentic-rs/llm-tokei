@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      uplot:
+        specifier: ^1.6.32
+        version: 1.6.32
     devDependencies:
       '@astrojs/check':
         specifier: ^0.9.4
@@ -1577,6 +1581,9 @@ packages:
         optional: true
       uploadthing:
         optional: true
+
+  uplot@1.6.32:
+    resolution: {integrity: sha512-KIMVnG68zvu5XXUbC4LQEPnhwOxBuLyW1AHtpm6IKTXImkbLgkMy+jabjLgSLMasNuGGzQm/ep3tOkyTxpiQIw==}
 
   vfile-location@5.0.3:
     resolution: {integrity: sha512-5yXvWDEgqeiYiBe1lbxYF7UMAIm/IcopxMHrMQDq3nvKcjPKIhZklUKL+AE7J7uApI4kwe2snsK+eI6UTj9EHg==}
@@ -3553,6 +3560,8 @@ snapshots:
       node-fetch-native: 1.6.7
       ofetch: 1.5.1
       ufo: 1.6.4
+
+  uplot@1.6.32: {}
 
   vfile-location@5.0.3:
     dependencies:
