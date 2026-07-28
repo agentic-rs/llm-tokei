@@ -1,7 +1,7 @@
 {
   "name": "@tokn-ai/model-price-history",
   "version": "0.1.0",
-  "description": "Generate historical LLM provider price CSVs from a models.dev Git repository",
+  "description": "Generate historical LLM provider price and model-family CSVs from models.dev",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -26,11 +26,13 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "prebuild": "pnpm --dir ../model-catalog build",
     "prepack": "npm run build",
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "packageManager": "pnpm@10.30.3",
   "dependencies": {
+    "@tokn-ai/model-catalog": "workspace:*",
     "smol-toml": "^1.7.0"
   },
   "devDependencies": {

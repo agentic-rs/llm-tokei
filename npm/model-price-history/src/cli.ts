@@ -4,10 +4,11 @@ import {
   writeChangesCsv,
   writeDailySnapshotCsvs,
   writeIncrementalChangesCsv,
-  writeLatestSnapshotCsv
+  writeLatestSnapshotCsv,
+  writeModelFamiliesCsv
 } from "./index.js";
 
-type Command = "changes" | "daily" | "latest";
+type Command = "changes" | "daily" | "families" | "latest";
 
 export async function run(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
   const [command, ...rest] = argv;
@@ -68,13 +69,17 @@ export async function run(argv: readonly string[] = process.argv.slice(2)): Prom
     }
     return;
   }
-
+  if (command === "families") {
+    const result = await writeModelFamiliesCsv(input, options.output_directory);
+    process.stdout.write(`${result.path}\n`);
+    return;
+  }
   const result = await writeLatestSnapshotCsv(input, options.output_directory);
   process.stdout.write(`${result.path}\n`);
 }
 
 function isCommand(value: string): value is Command {
-  return value === "changes" || value === "daily" || value === "latest";
+  return value === "changes" || value === "daily" || value === "families" || value === "latest";
 }
 
 function parseOptions(argv: readonly string[]): {
@@ -119,7 +124,7 @@ function requiredOptionValue(option: string, value: string | undefined): string 
 
 function printUsage(): void {
   process.stdout.write(
-    `Usage:\n\n  model-price-history changes --repo <models.dev> --out-dir <directory> [--ref <ref>] [--base-csv <csv> --base-commit <sha>]\n  model-price-history daily --repo <models.dev> --out-dir <directory> [--ref <ref>]\n  model-price-history latest --repo <models.dev> --out-dir <directory> [--ref <ref>]\n`
+    `Usage:\n\n  model-price-history changes --repo <models.dev> --out-dir <directory> [--ref <ref>] [--base-csv <csv> --base-commit <sha>]\n  model-price-history daily --repo <models.dev> --out-dir <directory> [--ref <ref>]\n  model-price-history families --repo <models.dev> --out-dir <directory> [--ref <ref>]\n  model-price-history latest --repo <models.dev> --out-dir <directory> [--ref <ref>]\n`
   );
 }
 

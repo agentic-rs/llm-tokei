@@ -14,6 +14,7 @@ import {
   ModelsDevResolver,
   parseModelsDevDocument,
   priceFromResolvedDocument,
+  releaseDateFromResolvedDocument,
   type EndpointIdentity,
   type ModelsDevDocument
 } from "./models-dev.js";
@@ -33,6 +34,7 @@ type EndpointState = {
   identity: EndpointIdentity;
   path: string;
   price: PriceRecord | undefined;
+  release_date?: string;
 };
 
 type ScannerState = {
@@ -45,9 +47,23 @@ type ScannerState = {
 type PendingChange = Omit<PriceChange, "sequence">;
 
 type CommitFrame = {
+  affected_endpoint_keys: string[];
   changes: PriceChange[];
   commit: GitCommit;
   state: ScannerState;
+};
+
+type ScanMode = "metadata" | "prices";
+
+export type HistoricalModelRoute = {
+  provider: string;
+  model: string;
+  release_date?: string;
+};
+
+export type HistoricalModelRouteSnapshot = {
+  commit_sha: string;
+  routes: HistoricalModelRoute[];
 };
 
 export function resolveHistoryCommit(options: RepositoryOptions): string {
@@ -132,7 +148,37 @@ export async function getLatestPriceSnapshot(options: RepositoryOptions): Promis
   };
 }
 
-function* iterateFrames(options: RepositoryOptions, checkpoint?: ChangeHistoryCheckpoint): Generator<CommitFrame> {
+export function getHistoricalModelRouteSnapshot(options: RepositoryOptions): HistoricalModelRouteSnapshot {
+  const routes = new Map<string, HistoricalModelRoute>();
+  let commitSha: string | undefined;
+
+  for (const frame of iterateFrames(options, undefined, "metadata")) {
+    commitSha = frame.commit.commit_sha;
+    for (const key of frame.affected_endpoint_keys) {
+      const endpoint = frame.state.endpoints.get(key);
+      if (!endpoint) continue;
+      routes.set(key, {
+        provider: endpoint.identity.provider,
+        model: endpoint.identity.model,
+        ...(endpoint.release_date ? { release_date: endpoint.release_date } : {})
+      });
+    }
+  }
+
+  if (!commitSha) {
+    throw new Error(`models.dev repository ${JSON.stringify(options.repository_path)} has no commits`);
+  }
+  return {
+    commit_sha: commitSha,
+    routes: [...routes.values()].sort(compareIdentity)
+  };
+}
+
+function* iterateFrames(
+  options: RepositoryOptions,
+  checkpoint?: ChangeHistoryCheckpoint,
+  mode: ScanMode = "prices"
+): Generator<CommitFrame> {
   const commitSha = resolveHistoryCommit(options);
   const commits = listFirstParentCommits(options.repository_path, commitSha);
   if (commits.length === 0) {
@@ -152,27 +198,35 @@ function* iterateFrames(options: RepositoryOptions, checkpoint?: ChangeHistoryCh
     if (checkpointIndex === -1) {
       throw new Error(`checkpoint commit ${checkpointCommitSha} is not on the first-parent history of ${commitSha}`);
     }
-    state = initializeState(options.repository_path, commits[checkpointIndex]!).state;
+    state = initializeState(options.repository_path, commits[checkpointIndex]!, mode).state;
     startIndex = checkpointIndex + 1;
   }
 
   for (const commit of commits.slice(startIndex)) {
     let pending: PendingChange[];
+    let affectedEndpointKeys: string[];
     if (!state) {
-      const initialized = initializeState(options.repository_path, commit);
+      const initialized = initializeState(options.repository_path, commit, mode);
       state = initialized.state;
       pending = initialized.changes;
+      affectedEndpointKeys = [...state.endpoints.keys()].sort(compareText);
     } else {
-      pending = applyCommit(options.repository_path, state, commit);
+      const applied = applyCommit(options.repository_path, state, commit, mode);
+      pending = applied.changes;
+      affectedEndpointKeys = applied.affected_endpoint_keys;
     }
     const changes = pending
       .sort(comparePendingChanges)
       .map((change) => ({ ...change, sequence: (sequence += 1) }) as PriceChange);
-    yield { changes, commit, state };
+    yield { affected_endpoint_keys: affectedEndpointKeys, changes, commit, state };
   }
 }
 
-function initializeState(repositoryPath: string, commit: GitCommit): { changes: PendingChange[]; state: ScannerState } {
+function initializeState(
+  repositoryPath: string,
+  commit: GitCommit,
+  mode: ScanMode = "prices"
+): { changes: PendingChange[]; state: ScannerState } {
   const entries = listTreeEntries(repositoryPath, commit.commit_sha)
     .filter((entry) => isModelsDevDocumentPath(entry.path))
     .sort((left, right) => compareText(left.path, right.path));
@@ -196,7 +250,7 @@ function initializeState(repositoryPath: string, commit: GitCommit): { changes: 
   for (const path of paths) {
     const identity = endpointIdentity(path);
     if (!identity) continue;
-    const endpoint = resolveEndpoint(identity, path, resolver, commit);
+    const endpoint = resolveEndpoint(identity, path, resolver, commit, mode);
     state.endpoints.set(endpointKey(identity), endpoint);
     state.endpoint_paths.set(endpointKey(identity), path);
     addReverseDependencies(state.reverse_dependencies, endpointKey(identity), endpoint.dependencies);
@@ -208,11 +262,16 @@ function initializeState(repositoryPath: string, commit: GitCommit): { changes: 
   return { changes, state };
 }
 
-function applyCommit(repositoryPath: string, state: ScannerState, commit: GitCommit): PendingChange[] {
+function applyCommit(
+  repositoryPath: string,
+  state: ScannerState,
+  commit: GitCommit,
+  mode: ScanMode
+): { affected_endpoint_keys: string[]; changes: PendingChange[] } {
   const changes = listChangedPaths(repositoryPath, commit.parent_commit_sha!, commit.commit_sha).filter(({ path }) =>
     isModelsDevDocumentPath(path)
   );
-  if (changes.length === 0) return [];
+  if (changes.length === 0) return { affected_endpoint_keys: [], changes: [] };
 
   const affected = new Set<string>();
   for (const { path } of changes) {
@@ -276,7 +335,7 @@ function applyCommit(repositoryPath: string, state: ScannerState, commit: GitCom
     if (!identity) {
       throw new Error(`models.dev endpoint path ${path} became invalid in commit ${commit.commit_sha}`);
     }
-    const endpoint = resolveEndpoint(identity, path, resolver, commit);
+    const endpoint = resolveEndpoint(identity, path, resolver, commit, mode);
     removeReverseDependencies(state.reverse_dependencies, key, previous?.dependencies ?? new Set());
     addReverseDependencies(state.reverse_dependencies, key, endpoint.dependencies);
 
@@ -290,21 +349,30 @@ function applyCommit(repositoryPath: string, state: ScannerState, commit: GitCom
     state.endpoints.set(key, endpoint);
   }
 
-  return pending;
+  return {
+    affected_endpoint_keys: [...affected].sort(compareText),
+    changes: pending
+  };
 }
 
 function resolveEndpoint(
   identity: EndpointIdentity,
   path: string,
   resolver: ModelsDevResolver,
-  commit: GitCommit
+  commit: GitCommit,
+  mode: ScanMode
 ): EndpointState {
   const resolved = resolver.resolve(path);
   return {
     dependencies: new Set([path, ...resolved.dependencies]),
     identity,
     path,
-    price: priceFromResolvedDocument(identity, resolved.value, path, commit.commit_sha)
+    price: mode === "prices" ? priceFromResolvedDocument(identity, resolved.value, path, commit.commit_sha) : undefined,
+    ...(!resolved.missing
+      ? {
+          release_date: releaseDateFromResolvedDocument(resolved.value)
+        }
+      : {})
   };
 }
 

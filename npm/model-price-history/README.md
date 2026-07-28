@@ -3,10 +3,11 @@
 Generate reproducible provider-route price history from a local
 [models.dev](https://github.com/anomalyco/models.dev) Git repository.
 
-The package keys a price by the serving `provider` and raw `model` ID. It does
-not depend on `@tokn-ai/model-catalog`: a canonical model name is not a billing
-SKU, and the same underlying model may have a different price on another
-provider route.
+The package keys a price by the serving `provider` and raw `model` ID. A
+canonical model name is not a billing SKU, and the same underlying model may
+have a different price on another provider route. Price extraction therefore
+does not use canonical identity. The separate family mapping comes directly
+from `@tokn-ai/model-catalog`.
 
 All price fields are USD per million tokens. Blank CSV cells mean the source did
 not specify that price dimension; `0` is preserved as an explicit price.
@@ -34,6 +35,7 @@ model-price-history changes \
   --out-dir ./prices \
   --base-csv ./previous/changes.<commit>.csv \
   --base-commit <commit>
+model-price-history families --repo ../models.dev --ref dev --out-dir ./prices
 model-price-history daily --repo ../models.dev --ref dev --out-dir ./prices/daily
 model-price-history latest --repo ../models.dev --ref dev --out-dir ./prices
 ```
@@ -64,6 +66,31 @@ If the checkpoint CSV is invalid or its commit is not on the target's
 first-parent history, the CLI reports the reason and performs a complete
 rebuild. Library callers can use `writeIncrementalChangesCsv` when they prefer
 to handle checkpoint failures themselves.
+
+### Model family mapping
+
+`families` writes one deterministic mapping containing every provider route
+observed on the resolved first-parent models.dev history:
+
+```text
+families.<resolved_commit_sha>.csv
+```
+
+```csv
+provider,model,canonical_name,family,release_date
+anthropic,claude-3-5-haiku-20241022,claude-3.5-haiku,claude-haiku,2024-10-22
+```
+
+The mapping is deduplicated and sorted by `provider,model`. It includes routes
+that have been removed from models.dev. `canonical_name` and `family` come
+exclusively from the current `@tokn-ai/model-catalog`; both are blank when the
+catalog cannot safely resolve the route. Family metadata from models.dev is
+ignored.
+
+`release_date` is the latest resolved models.dev value while a route exists,
+including values inherited through `base_model`, legacy `extends`, or a Git
+symlink. Removed routes retain their last value. It is blank when unavailable
+or invalid and preserves models.dev's `YYYY-MM` or `YYYY-MM-DD` precision.
 
 ### Daily snapshots
 
@@ -100,7 +127,12 @@ Its rows use the same `ts` column, sourced from the resolved tip commit.
 ## Library
 
 ```ts
-import { getLatestPriceSnapshot, iteratePriceChanges, writeDailySnapshotCsvs } from "@tokn-ai/model-price-history";
+import {
+  getLatestPriceSnapshot,
+  getModelFamilySnapshot,
+  iteratePriceChanges,
+  writeDailySnapshotCsvs
+} from "@tokn-ai/model-price-history";
 
 for await (const change of iteratePriceChanges({
   repository_path: "../models.dev",
@@ -110,6 +142,11 @@ for await (const change of iteratePriceChanges({
 }
 
 const latest = await getLatestPriceSnapshot({
+  repository_path: "../models.dev",
+  ref: "dev"
+});
+
+const families = getModelFamilySnapshot({
   repository_path: "../models.dev",
   ref: "dev"
 });

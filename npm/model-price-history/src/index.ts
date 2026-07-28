@@ -5,20 +5,25 @@ export {
   iteratePriceChangesSince,
   resolveHistoryCommit
 } from "./history.js";
+export { getModelFamilySnapshot } from "./families.js";
 export {
   changesFilename,
   dailySnapshotFilename,
   latestSnapshotFilename,
+  modelFamiliesFilename,
   writeChangesCsv,
   writeDailySnapshotCsvs,
   writeIncrementalChangesCsv,
-  writeLatestSnapshotCsv
+  writeLatestSnapshotCsv,
+  writeModelFamiliesCsv
 } from "./write.js";
 export type {
   ChangeHistoryCheckpoint,
   DailyPriceSnapshot,
   DailySnapshotOptions,
   IncrementalChangesOptions,
+  ModelFamilyMapping,
+  ModelFamilySnapshot,
   PriceChange,
   PriceField,
   PriceProvenance,
@@ -27,5 +32,6 @@ export type {
   RepositoryOptions,
   WrittenChanges,
   WrittenDailySnapshot,
+  WrittenModelFamilies,
   WrittenSnapshot
 } from "./types.js";

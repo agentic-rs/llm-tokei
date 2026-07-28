@@ -250,6 +250,11 @@ export function priceFromResolvedDocument(
   });
 }
 
+export function releaseDateFromResolvedDocument(value: TomlDocument): string | undefined {
+  const releaseDate = value.release_date;
+  return typeof releaseDate === "string" && validReleaseDate(releaseDate) ? releaseDate : undefined;
+}
+
 function baseModelPath(value: TomlValue, path: string, commitSha: string): string {
   if (typeof value !== "string" || !validModelReference(value)) {
     throw new Error(`models.dev ${path} has an invalid base_model in commit ${commitSha}`);
@@ -356,6 +361,19 @@ function compactPrice(value: PriceRecord): PriceRecord {
 
 function validModelReference(value: string): boolean {
   return !value.startsWith("/") && !value.endsWith("/") && !value.split("/").some((part) => !part || part === "." || part === "..");
+}
+
+function validReleaseDate(value: string): boolean {
+  const match = value.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return false;
+  if (match[3] === undefined) return true;
+
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 function symlinkTarget(pathname: string, source: string): string {
