@@ -330,8 +330,12 @@ function versionSeparatorCandidates(value: string): string[] {
 }
 
 function inferFamily(canonicalName: string): string {
-  const claude = canonicalName.match(/^(claude-(?:haiku|sonnet|opus))(?:-|$)/);
-  if (claude) return claude[1];
+  const claudeRoleFirst = canonicalName.match(/^claude-(haiku|sonnet|opus|fable)(?:-|$)/);
+  if (claudeRoleFirst) return `claude-${claudeRoleFirst[1]}`;
+  const claudeVersionFirst = canonicalName.match(
+    /^claude-\d+(?:\.\d+)?-(haiku|sonnet|opus|fable)(?:-|$)/
+  );
+  if (claudeVersionFirst) return `claude-${claudeVersionFirst[1]}`;
   const gemini = canonicalName.match(/^(gemini-[\d.]+-(?:flash(?:-lite)?|pro))(?:-|$)/);
   if (gemini) return gemini[1];
   const gpt = canonicalName.match(/^(gpt-\d+(?:\.\d+)?)(?:-|$)/);
@@ -342,8 +346,12 @@ function inferFamily(canonicalName: string): string {
 }
 
 function inferSeries(canonicalName: string): string {
-  const claude = canonicalName.match(/^claude-(?:haiku|sonnet|opus)-(\d+(?:\.\d+)?)/);
-  if (claude) return `claude-${claude[1]}`;
+  const claudeRoleFirst = canonicalName.match(/^claude-(?:haiku|sonnet|opus|fable)-(\d+(?:\.\d+)?)/);
+  if (claudeRoleFirst) return `claude-${claudeRoleFirst[1]}`;
+  const claudeVersionFirst = canonicalName.match(
+    /^claude-(\d+(?:\.\d+)?)-(?:haiku|sonnet|opus|fable)(?:-|$)/
+  );
+  if (claudeVersionFirst) return `claude-${claudeVersionFirst[1]}`;
   const gpt = canonicalName.match(/^(gpt-\d+(?:\.\d+)?)/);
   if (gpt) return gpt[1];
   const gemini = canonicalName.match(/^(gemini-\d+(?:\.\d+)?)/);

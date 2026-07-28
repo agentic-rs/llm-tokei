@@ -1,0 +1,6 @@
+packages:
+  - "npm/model-catalog"
+  - "npm/model-price-history"
+  - "site"
+
+sharedWorkspaceLockfile: false

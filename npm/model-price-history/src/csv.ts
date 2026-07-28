@@ -1,4 +1,4 @@
-import type { PriceChange, PriceRecord, PriceSnapshot } from "./types.js";
+import type { ModelFamilyMapping, PriceChange, PriceRecord, PriceSnapshot } from "./types.js";
 
 const PRICE_COLUMNS = [
   "provider",
@@ -13,6 +13,7 @@ const PRICE_COLUMNS = [
 ] as const;
 
 const CHANGE_COLUMNS = ["op", "ts", "commit_sha", "sequence", ...PRICE_COLUMNS] as const;
+const MODEL_FAMILY_COLUMNS = ["provider", "model", "canonical_name", "family", "release_date"] as const;
 const SNAPSHOT_COLUMNS = ["ts", ...PRICE_COLUMNS] as const;
 
 export function changeCsvHeader(): string {
@@ -46,6 +47,19 @@ export function changeCsvLastSequence(source: string): number {
 
 export function snapshotCsvHeader(): string {
   return csvLine(SNAPSHOT_COLUMNS);
+}
+
+export function* modelFamilyCsvLines(mappings: readonly ModelFamilyMapping[]): Generator<string> {
+  yield csvLine(MODEL_FAMILY_COLUMNS);
+  for (const mapping of mappings) {
+    yield csvLine([
+      mapping.provider,
+      mapping.model,
+      mapping.canonical_name,
+      mapping.family,
+      mapping.release_date
+    ]);
+  }
 }
 
 export function changeCsvLine(change: PriceChange): string {

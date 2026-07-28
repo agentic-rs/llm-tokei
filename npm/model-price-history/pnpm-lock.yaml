@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@tokn-ai/model-catalog':
+        specifier: workspace:*
+        version: link:../model-catalog
       smol-toml:
         specifier: ^1.7.0
         version: 1.7.0

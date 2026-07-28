@@ -1,5 +1,6 @@
 target/
 Cargo.lock
+node_modules/
 .cache/
 site/public/price-history/
 

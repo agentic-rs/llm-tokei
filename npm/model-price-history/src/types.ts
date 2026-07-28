@@ -63,6 +63,19 @@ export type PriceSnapshot = PriceProvenance & {
   prices: PriceRecord[];
 };
 
+export type ModelFamilyMapping = {
+  provider: string;
+  model: string;
+  canonical_name?: string;
+  family?: string;
+  release_date?: string;
+};
+
+export type ModelFamilySnapshot = {
+  commit_sha: string;
+  mappings: ModelFamilyMapping[];
+};
+
 export type DailyPriceSnapshot = PriceSnapshot & {
   date: string;
 };
@@ -73,6 +86,11 @@ export type WrittenChanges = {
 };
 
 export type WrittenSnapshot = PriceSnapshot & {
+  path: string;
+};
+
+export type WrittenModelFamilies = {
+  commit_sha: string;
   path: string;
 };
 

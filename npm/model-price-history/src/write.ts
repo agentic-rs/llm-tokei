@@ -4,7 +4,13 @@ import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { finished } from "node:stream/promises";
 
-import { changeCsvHeader, changeCsvLastSequence, changeCsvLine, snapshotCsvLines } from "./csv.js";
+import {
+  changeCsvHeader,
+  changeCsvLastSequence,
+  changeCsvLine,
+  modelFamilyCsvLines,
+  snapshotCsvLines
+} from "./csv.js";
 import {
   getLatestPriceSnapshot,
   iterateDailyPriceSnapshots,
@@ -12,12 +18,14 @@ import {
   iteratePriceChangesSince,
   resolveHistoryCommit
 } from "./history.js";
+import { getModelFamilySnapshot } from "./families.js";
 import type {
   DailySnapshotOptions,
   IncrementalChangesOptions,
   RepositoryOptions,
   WrittenChanges,
   WrittenDailySnapshot,
+  WrittenModelFamilies,
   WrittenSnapshot
 } from "./types.js";
 
@@ -90,6 +98,18 @@ export async function writeLatestSnapshotCsv(
   return { ...snapshot, path };
 }
 
+export async function writeModelFamiliesCsv(
+  options: RepositoryOptions,
+  outputDirectory: string
+): Promise<WrittenModelFamilies> {
+  const commitSha = resolveHistoryCommit(options);
+  const snapshot = getModelFamilySnapshot({ ...options, ref: commitSha });
+  const path = pathJoin(outputDirectory, modelFamiliesFilename(snapshot.commit_sha));
+  await mkdir(outputDirectory, { recursive: true });
+  await writeAtomically(path, modelFamilyCsvLines(snapshot.mappings));
+  return { commit_sha: snapshot.commit_sha, path };
+}
+
 export function changesFilename(commitSha: string): string {
   return `changes.${commitSha}.csv`;
 }
@@ -100,6 +120,10 @@ export function dailySnapshotFilename(date: string, commitSha: string): string {
 
 export function latestSnapshotFilename(commitSha: string): string {
   return `latest.${commitSha}.csv`;
+}
+
+export function modelFamiliesFilename(commitSha: string): string {
+  return `families.${commitSha}.csv`;
 }
 
 async function* changeLines(options: RepositoryOptions): AsyncGenerator<string> {

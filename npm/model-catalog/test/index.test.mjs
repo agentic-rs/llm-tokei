@@ -127,6 +127,22 @@ test("marks normalized model names as heuristic", () => {
   assert.equal(model.series, "claude-4.5");
 });
 
+test("groups Claude models consistently across canonical naming conventions", () => {
+  for (const [canonicalName, family, series] of [
+    ["claude-3-haiku", "claude-haiku", "claude-3"],
+    ["claude-3-opus", "claude-opus", "claude-3"],
+    ["claude-3.5-haiku", "claude-haiku", "claude-3.5"],
+    ["claude-3.7-sonnet", "claude-sonnet", "claude-3.7"],
+    ["claude-haiku-4.5", "claude-haiku", "claude-4.5"],
+    ["claude-opus-4.5", "claude-opus", "claude-4.5"],
+    ["claude-fable-5", "claude-fable", "claude-5"]
+  ]) {
+    const model = getModel(canonicalName);
+    assert.equal(model?.family, family, canonicalName);
+    assert.equal(model?.series, series, canonicalName);
+  }
+});
+
 test("does not make unknown names priceable", () => {
   assert.deepEqual(resolveModel({ model: "future-model-xyz" }), {
     canonical_name: null,
