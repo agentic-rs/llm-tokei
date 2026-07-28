@@ -18,6 +18,7 @@ type NumericPriceValues = Partial<Record<PriceField, number | null>>;
 type MarkerKind = "change" | "remove" | "start";
 
 type CatalogRoute = {
+  event_count: number;
   fields: PriceField[];
   is_active: boolean;
   last_ts: number;
@@ -123,6 +124,10 @@ const resetModelsButton = requiredElement<HTMLButtonElement>(
   app,
   "[data-reset-models]",
 );
+const eventfulModelsButton = requiredElement<HTMLButtonElement>(
+  app,
+  "[data-eventful-models]",
+);
 const fieldSet = requiredElement<HTMLFieldSetElement>(app, "[data-fields]");
 const chartShell = requiredElement<HTMLElement>(app, "[data-chart-shell]");
 const chartsContainer = requiredElement<HTMLElement>(app, "[data-charts]");
@@ -142,6 +147,7 @@ const emptyDetail = requiredElement<HTMLElement>(app, "[data-empty-detail]");
 
 let asOfTs = 0;
 let catalog: CatalogRoute[] = [];
+let eventfulModelsOnly = false;
 let latestRequestId = 0;
 let manifest: PriceManifest | undefined;
 let renderedCharts: RenderedChart[] = [];
@@ -170,8 +176,15 @@ providerSelect.addEventListener("change", () => {
   requestSeries();
 });
 modelFilter.addEventListener("input", renderModelLegend);
+eventfulModelsButton.addEventListener("click", () => {
+  eventfulModelsOnly = !eventfulModelsOnly;
+  eventfulModelsButton.setAttribute("aria-pressed", String(eventfulModelsOnly));
+  renderModelLegend();
+});
 resetModelsButton.addEventListener("click", () => {
   modelFilter.value = "";
+  eventfulModelsOnly = false;
+  eventfulModelsButton.setAttribute("aria-pressed", "false");
   selectRecentModels();
   renderModelLegend();
   updateAvailableFields();
@@ -273,6 +286,8 @@ function selectProvider(provider: string): void {
         left.model.localeCompare(right.model),
     );
   modelFilter.value = "";
+  eventfulModelsOnly = false;
+  eventfulModelsButton.setAttribute("aria-pressed", "false");
   selectRecentModels();
   renderModelLegend();
   updateAvailableFields();
@@ -303,19 +318,28 @@ function toggleModel(model: string): void {
 
 function renderModelLegend(): void {
   const query = modelFilter.value.trim().toLocaleLowerCase("en-US");
-  const filteredRoutes = query
-    ? visibleRoutes.filter((route) =>
-        route.model.toLocaleLowerCase("en-US").includes(query),
-      )
-    : visibleRoutes;
+  const filteredRoutes = visibleRoutes.filter(
+    (route) =>
+      (!eventfulModelsOnly || route.event_count > 1) &&
+      (!query || route.model.toLocaleLowerCase("en-US").includes(query)),
+  );
+  const listing =
+    filteredRoutes.length === visibleRoutes.length
+      ? `${visibleRoutes.length} total`
+      : `${filteredRoutes.length} listed / ${visibleRoutes.length} total`;
   modelSummary.textContent =
-    `${selectedModels.length} shown · ${visibleRoutes.length} total · ` +
+    `${selectedModels.length} plotted · ${listing} · ` +
     "active models first, then newest updates";
 
   if (filteredRoutes.length === 0) {
     const message = document.createElement("span");
     message.className = "model-options__empty";
-    message.textContent = "No model names match this filter.";
+    message.textContent =
+      query && eventfulModelsOnly
+        ? "No models match both filters."
+        : query
+          ? "No model names match this filter."
+          : "No models have more than one history event.";
     modelOptions.replaceChildren(message);
     return;
   }
@@ -331,10 +355,13 @@ function renderModelLegend(): void {
       button.setAttribute("aria-pressed", String(selected));
       button.setAttribute(
         "aria-label",
-        `${selected ? "Hide" : "Show"} ${route.model}`,
+        `${selected ? "Hide" : "Show"} ${route.model}, ` +
+          `${formatCount(route.event_count)} history ` +
+          pluralize("event", route.event_count),
       );
       button.title =
         `${route.model} · ${route.is_active ? "active" : "removed"} · ` +
+        `${formatCount(route.event_count)} ${pluralize("event", route.event_count)} · ` +
         `updated ${formatDate(route.last_ts)}`;
 
       const swatch = document.createElement("span");
@@ -342,12 +369,17 @@ function renderModelLegend(): void {
       const name = document.createElement("span");
       name.className = "model-option__name";
       name.textContent = route.model;
+      const events = document.createElement("span");
+      events.className = "model-option__events";
+      events.textContent =
+        `${formatCount(route.event_count)} ` +
+        pluralize("event", route.event_count);
       const state = document.createElement("span");
       state.className = "model-option__state";
       state.textContent = route.is_active
         ? formatShortDate(route.last_ts)
         : "removed";
-      button.append(swatch, name, state);
+      button.append(swatch, name, events, state);
       button.addEventListener("click", () => toggleModel(route.model));
       return button;
     }),

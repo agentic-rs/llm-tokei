@@ -68,6 +68,15 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
                 placeholder="Filter model names"
               />
             </label>
+            <button
+              class="model-legend__filter"
+              data-eventful-models
+              type="button"
+              aria-pressed="false"
+              aria-label="Show only models with more than one history event"
+            >
+              Events &gt; 1
+            </button>
             <button data-reset-models type="button">Show recent 5</button>
           </div>
         </div>
@@ -370,6 +379,18 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
       background: var(--green-deep);
     }
 
+    .model-legend__actions .model-legend__filter {
+      color: var(--ink);
+      background: var(--panel);
+    }
+
+    .model-legend__actions .model-legend__filter:hover,
+    .model-legend__actions .model-legend__filter[aria-pressed="true"] {
+      border-color: var(--green-deep);
+      color: var(--panel);
+      background: var(--green-deep);
+    }
+
     .model-options {
       display: flex;
       max-height: 12rem;
@@ -435,6 +456,15 @@ const dataBaseUrl = `${import.meta.env.BASE_URL}price-history/`;
     :global(.model-option__state) {
       flex: 0 0 auto;
       color: var(--ink-muted);
+      font-size: 0.62rem;
+    }
+
+    :global(.model-option__events) {
+      flex: 0 0 auto;
+      padding: 0.08rem 0.3rem;
+      border-radius: 999px;
+      color: var(--ink-soft);
+      background: var(--paper-deep);
       font-size: 0.62rem;
     }
 
