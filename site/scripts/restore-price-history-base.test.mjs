@@ -56,8 +56,9 @@ test("rejects a change stream with the wrong checksum", async (t) => {
   t.after(() => rmSync(outputDirectory, { force: true, recursive: true }));
   const manifest = {
     ...createManifest(),
-    csv: {
-      ...createManifest().csv,
+    prices: {
+      ...createManifest().prices,
+      path: `changes.${"d".repeat(64)}.csv`,
       sha256: "d".repeat(64),
     },
   };
@@ -74,20 +75,22 @@ test("rejects a change stream with the wrong checksum", async (t) => {
 
 function createManifest() {
   return {
-    schema_version: 1,
+    schema_version: 2,
     catalog_revision: "c".repeat(40),
     generator_revision: GENERATOR_REVISION,
     generated_at: "2026-07-28T00:00:00.000Z",
     source_repository: "https://github.com/anomalyco/models.dev",
     source_ref: "dev",
     source_commit_sha: COMMIT_SHA,
-    csv: {
-      path: `changes.${COMMIT_SHA}.csv`,
+    prices: {
+      path: `changes.${createHash("sha256").update(CSV).digest("hex")}.csv`,
+      latest_path: "changes.csv",
       bytes: CSV.length,
       sha256: createHash("sha256").update(CSV).digest("hex"),
     },
     families: {
-      path: `families.${COMMIT_SHA}.csv`,
+      path: `families.${createHash("sha256").update("").digest("hex")}.csv`,
+      latest_path: "families.csv",
       bytes: 0,
       sha256: createHash("sha256").update("").digest("hex"),
     },
@@ -98,7 +101,7 @@ function createOptions(outputDirectory) {
   return {
     generator_revision: GENERATOR_REVISION,
     manifest_url:
-      "https://agentic.tokn-ai.dev/llm-tokei/price-history/manifest.json",
+      "https://agentic.tokn-ai.dev/llm-tokei/models/manifest.json",
     output_directory: outputDirectory,
     source_ref: "dev",
     source_repository: "https://github.com/anomalyco/models.dev",

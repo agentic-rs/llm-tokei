@@ -2,6 +2,7 @@ target/
 Cargo.lock
 node_modules/
 .cache/
+site/public/models/
 site/public/price-history/
 
 .DS_Store

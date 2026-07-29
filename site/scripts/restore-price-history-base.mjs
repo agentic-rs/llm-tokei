@@ -24,7 +24,7 @@ export async function restorePriceHistoryBase(
 
     const manifest = await manifestResponse.json();
     validateManifest(manifest, options);
-    const csvUrl = new URL(manifest.csv.path, manifestUrl);
+    const csvUrl = new URL(manifest.prices.path, manifestUrl);
     if (csvUrl.origin !== manifestUrl.origin) {
       throw new Error("manifest CSV must use the manifest origin");
     }
@@ -41,18 +41,18 @@ export async function restorePriceHistoryBase(
     }
 
     const bytes = Buffer.from(await csvResponse.arrayBuffer());
-    if (bytes.length !== manifest.csv.bytes) {
+    if (bytes.length !== manifest.prices.bytes) {
       throw new Error(
-        `CSV size mismatch: expected ${manifest.csv.bytes}, received ${bytes.length}`,
+        `CSV size mismatch: expected ${manifest.prices.bytes}, received ${bytes.length}`,
       );
     }
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    if (sha256 !== manifest.csv.sha256) {
+    if (sha256 !== manifest.prices.sha256) {
       throw new Error("CSV checksum mismatch");
     }
 
     const outputDirectory = path.resolve(options.output_directory);
-    const csvPath = path.join(outputDirectory, manifest.csv.path);
+    const csvPath = path.join(outputDirectory, manifest.prices.path);
     await mkdir(outputDirectory, { recursive: true });
     await writeFile(csvPath, bytes);
     return {
@@ -71,7 +71,7 @@ export async function restorePriceHistoryBase(
 
 function validateManifest(manifest, options) {
   if (!isObject(manifest)) throw new Error("manifest is not an object");
-  if (manifest.schema_version !== 1) {
+  if (manifest.schema_version !== 2) {
     throw new Error(`unsupported manifest schema ${manifest.schema_version}`);
   }
   if (manifest.generator_revision !== options.generator_revision) {
@@ -89,25 +89,24 @@ function validateManifest(manifest, options) {
   ) {
     throw new Error("manifest source commit is invalid");
   }
-  if (!isObject(manifest.csv))
+  if (!isObject(manifest.prices))
     throw new Error("manifest CSV metadata is missing");
 
-  const expectedFilename = `changes.${manifest.source_commit_sha}.csv`;
-  if (manifest.csv.path !== expectedFilename) {
-    throw new Error("manifest CSV path does not match its source commit");
-  }
   if (
-    !Number.isSafeInteger(manifest.csv.bytes) ||
-    manifest.csv.bytes < 0 ||
-    manifest.csv.bytes > MAX_CSV_BYTES
+    !Number.isSafeInteger(manifest.prices.bytes) ||
+    manifest.prices.bytes < 0 ||
+    manifest.prices.bytes > MAX_CSV_BYTES
   ) {
     throw new Error("manifest CSV size is invalid");
   }
   if (
-    typeof manifest.csv.sha256 !== "string" ||
-    !/^[0-9a-f]{64}$/.test(manifest.csv.sha256)
+    typeof manifest.prices.sha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(manifest.prices.sha256)
   ) {
     throw new Error("manifest CSV checksum is invalid");
+  }
+  if (manifest.prices.path !== `changes.${manifest.prices.sha256}.csv`) {
+    throw new Error("manifest CSV path does not match its checksum");
   }
 }
 

@@ -1,0 +1,435 @@
+---
+import ModelsNav from "../../components/ModelsNav.astro";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+const pageTitle = "Model families | llm-tokei";
+const pageDescription =
+  "Search provider model routes for canonical names, families, and release dates.";
+const dataBaseUrl = `${import.meta.env.BASE_URL}models/`;
+---
+
+<BaseLayout title={pageTitle} description={pageDescription}>
+  <div class="container families-page" data-family-app data-data-base-url={dataBaseUrl}>
+    <ModelsNav current="families" />
+
+    <header class="families-hero">
+      <div>
+        <span class="eyebrow">Model families</span>
+        <h1>One catalog for many route names.</h1>
+      </div>
+      <div class="families-hero__copy">
+        <p>
+          Match provider-specific model IDs to llm-tokei’s canonical names and
+          families. Removed models remain in the mapping.
+        </p>
+        <p class="families-hero__note">
+          Family analysis comes from llm-tokei’s model catalog, not upstream
+          family labels.
+        </p>
+      </div>
+    </header>
+
+    <section class="family-explorer panel" aria-labelledby="family-table-title">
+      <div class="explorer-header">
+        <div>
+          <span class="eyebrow">Mapping</span>
+          <h2 id="family-table-title">Provider model routes</h2>
+        </div>
+        <p class="status" data-status aria-live="polite">Loading model families…</p>
+      </div>
+
+      <div class="controls" data-controls hidden>
+        <label class="search-control">
+          <span>Search</span>
+          <input
+            data-query
+            type="search"
+            autocomplete="off"
+            placeholder="Model, canonical name, or family"
+          />
+        </label>
+        <label>
+          <span>Provider</span>
+          <select data-provider>
+            <option value="">All providers</option>
+          </select>
+        </label>
+        <label>
+          <span>Family</span>
+          <select data-family>
+            <option value="">All families</option>
+          </select>
+        </label>
+        <label class="resolved-control">
+          <input data-resolved type="checkbox" />
+          <span>Resolved only</span>
+        </label>
+      </div>
+
+      <div class="table-shell" data-table-shell hidden>
+        <table>
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Provider model</th>
+              <th>Canonical name</th>
+              <th>Family</th>
+              <th>Released</th>
+            </tr>
+          </thead>
+          <tbody data-rows></tbody>
+        </table>
+      </div>
+
+      <div class="table-footer" data-table-footer hidden>
+        <p data-summary></p>
+        <div class="pagination" aria-label="Table pagination">
+          <button data-previous type="button">Previous</button>
+          <span data-page></span>
+          <button data-next type="button">Next</button>
+        </div>
+      </div>
+
+      <div class="empty-state" data-empty hidden>
+        <strong>Model family data could not be loaded.</strong>
+        <span data-empty-detail>Reload the page to try again.</span>
+      </div>
+    </section>
+
+    <section class="provenance" aria-labelledby="family-provenance-title">
+      <div>
+        <span class="eyebrow">Provenance</span>
+        <h2 id="family-provenance-title">Download the mapping.</h2>
+      </div>
+      <dl class="provenance__facts panel">
+        <div>
+          <dt>Source commit</dt>
+          <dd><a data-source-commit href="https://github.com/anomalyco/models.dev">—</a></dd>
+        </div>
+        <div>
+          <dt>Routes</dt>
+          <dd data-route-count>—</dd>
+        </div>
+        <div>
+          <dt>Generated</dt>
+          <dd data-generated>—</dd>
+        </div>
+        <div>
+          <dt>Download</dt>
+          <dd>
+            <a data-download href={dataBaseUrl} download>
+              Model families <span data-download-size>—</span>
+            </a>
+          </dd>
+        </div>
+      </dl>
+    </section>
+  </div>
+
+  <style>
+    [hidden] {
+      display: none !important;
+    }
+
+    .families-page {
+      display: grid;
+      gap: clamp(3rem, 7vw, 5rem);
+    }
+
+    .families-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(22rem, 0.7fr);
+      gap: clamp(2rem, 6vw, 5rem);
+      align-items: end;
+      padding-top: clamp(0.5rem, 3vw, 2rem);
+    }
+
+    .families-hero > div:first-child {
+      display: grid;
+      gap: 1.2rem;
+    }
+
+    .families-hero h1 {
+      max-width: 11ch;
+      margin: 0;
+      font-size: clamp(3.2rem, 8vw, 6.7rem);
+      line-height: 0.9;
+      letter-spacing: -0.05em;
+    }
+
+    .families-hero__copy {
+      display: grid;
+      gap: 1rem;
+      padding-bottom: 0.4rem;
+    }
+
+    .families-hero__copy p {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 1.05rem;
+    }
+
+    .families-hero__note {
+      padding-left: 1rem;
+      border-left: 3px solid var(--amber);
+      font-size: 0.92rem !important;
+    }
+
+    .family-explorer {
+      min-width: 0;
+      overflow: hidden;
+      background: rgba(255, 250, 240, 0.94);
+      box-shadow: 10px 10px 0 var(--paper-deep);
+    }
+
+    .explorer-header,
+    .table-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-end;
+      padding: 1.4rem clamp(1rem, 3vw, 1.75rem);
+    }
+
+    .explorer-header {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .explorer-header h2 {
+      margin: 0.45rem 0 0;
+      font-size: clamp(1.5rem, 3vw, 2.2rem);
+    }
+
+    .status,
+    .table-footer p {
+      margin: 0;
+      color: var(--ink-muted);
+      font: 0.82rem var(--font-mono);
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: minmax(14rem, 1.5fr) repeat(2, minmax(10rem, 0.7fr)) auto;
+      gap: 1rem;
+      align-items: end;
+      padding: 1.2rem clamp(1rem, 3vw, 1.75rem);
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-cool);
+    }
+
+    .controls label:not(.resolved-control) {
+      display: grid;
+      gap: 0.4rem;
+    }
+
+    .controls label > span {
+      color: var(--ink-soft);
+      font: 700 0.76rem var(--font-mono);
+    }
+
+    .controls input[type="search"],
+    .controls select {
+      width: 100%;
+      min-height: 2.6rem;
+      padding: 0.55rem 0.7rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      color: var(--ink);
+      background: var(--panel);
+      font: inherit;
+    }
+
+    .resolved-control {
+      display: flex;
+      min-height: 2.6rem;
+      gap: 0.55rem;
+      align-items: center;
+      padding: 0.55rem 0.75rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      background: var(--panel);
+      white-space: nowrap;
+    }
+
+    .table-shell {
+      max-height: 42rem;
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    th,
+    td {
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      color: var(--ink-soft);
+      background: var(--paper-deep);
+      font: 700 0.74rem var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    td {
+      font-family: var(--font-mono);
+      overflow-wrap: anywhere;
+    }
+
+    tbody tr:hover {
+      background: var(--panel-cool);
+    }
+
+    td a {
+      color: var(--green-deep);
+      font-weight: 700;
+      text-decoration: underline;
+      text-underline-offset: 0.18em;
+    }
+
+    :global(.muted-cell) {
+      color: var(--ink-muted);
+    }
+
+    .table-footer {
+      align-items: center;
+      border-top: 1px solid var(--line);
+    }
+
+    .pagination {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      font: 0.78rem var(--font-mono);
+    }
+
+    button {
+      min-height: 2.4rem;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      color: var(--ink);
+      background: var(--panel);
+      font: 700 0.78rem var(--font-mono);
+      cursor: pointer;
+    }
+
+    button:hover:not(:disabled) {
+      color: var(--panel);
+      background: var(--green-deep);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .empty-state {
+      display: grid;
+      gap: 0.35rem;
+      padding: 2rem;
+      color: var(--ink-soft);
+    }
+
+    .provenance {
+      display: grid;
+      grid-template-columns: minmax(12rem, 0.45fr) minmax(0, 1fr);
+      gap: clamp(2rem, 6vw, 5rem);
+      align-items: start;
+    }
+
+    .provenance h2 {
+      max-width: 10ch;
+      margin: 0.8rem 0 0;
+      font-size: clamp(2rem, 4vw, 3.5rem);
+      line-height: 0.96;
+    }
+
+    .provenance__facts {
+      margin: 0;
+      overflow: hidden;
+    }
+
+    .provenance__facts div {
+      display: grid;
+      grid-template-columns: minmax(9rem, 0.35fr) minmax(0, 1fr);
+      gap: 1rem;
+      padding: 1rem 1.2rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .provenance__facts div:last-child {
+      border-bottom: 0;
+    }
+
+    .provenance__facts dt {
+      color: var(--ink-muted);
+      font: 0.76rem var(--font-mono);
+      text-transform: uppercase;
+    }
+
+    .provenance__facts dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .provenance__facts a {
+      color: var(--green-deep);
+      text-decoration: underline;
+      text-underline-offset: 0.18em;
+    }
+
+    @media (max-width: 860px) {
+      .families-hero,
+      .provenance {
+        grid-template-columns: 1fr;
+      }
+
+      .controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .search-control {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 580px) {
+      .controls {
+        grid-template-columns: 1fr;
+      }
+
+      .search-control {
+        grid-column: auto;
+      }
+
+      .explorer-header,
+      .table-footer {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .table-shell {
+        max-height: 36rem;
+      }
+
+      table {
+        min-width: 56rem;
+      }
+    }
+  </style>
+
+  <script>
+    import "../../scripts/model-families";
+  </script>
+</BaseLayout>
