@@ -125,30 +125,28 @@ pub struct PricingTable {
   historical_prices: HistoricalPrices,
 }
 
-const BUNDLED: &str = include_str!(concat!(env!("OUT_DIR"), "/prices.json"));
+const BUNDLED_MODELS: &str = include_str!("../data/models.json");
+const BUNDLED_PROVIDERS: &str = include_str!("../data/providers.json");
 const CACHE_PRICE_FILE: &str = "llm-tokei.price.json";
 
 impl PricingTable {
+  #[cfg(test)]
   pub fn load_bundled() -> Self {
-    let mut t = Self::default();
-    if let Ok(file) = serde_json::from_str::<PricingFile>(BUNDLED) {
-      t.merge(file);
-    }
-    t
+    Self::load_bundled_result().expect("embedded model data must be valid")
   }
 
   pub fn load_default() -> Result<Self> {
-    let mut bundled = Self::load_bundled();
     if let Some(model_data) = CachedModelData::load_default()? {
-      bundled.merge_model_data(model_data);
-      return Ok(bundled);
+      let mut table = Self::load_static_config()?;
+      table.merge_model_data(model_data);
+      return Ok(table);
     }
     if let Some(path) = cached_price_path() {
       if path.exists() {
         return Self::load_file(&path);
       }
     }
-    Ok(bundled)
+    Self::load_bundled_result()
   }
 
   pub fn load_file(path: &Path) -> Result<Self> {
@@ -163,6 +161,24 @@ impl PricingTable {
       serde_json::from_str(&s).with_context(|| format!("parsing pricing file {}", path.display()))?;
     self.merge(file);
     Ok(())
+  }
+
+  fn load_bundled_result() -> Result<Self> {
+    let mut table = Self::load_static_config()?;
+    table.merge_model_data(CachedModelData::load_bundled()?);
+    Ok(table)
+  }
+
+  fn load_static_config() -> Result<Self> {
+    let models = serde_json::from_str(BUNDLED_MODELS).context("parsing bundled model metadata")?;
+    let providers = serde_json::from_str(BUNDLED_PROVIDERS).context("parsing bundled provider metadata")?;
+    let mut table = Self::default();
+    table.merge(PricingFile {
+      providers,
+      models,
+      prices: Vec::new(),
+    });
+    Ok(table)
   }
 
   fn merge(&mut self, file: PricingFile) {
@@ -273,13 +289,25 @@ impl PricingTable {
     if canonical == "-" {
       return None;
     }
-    if let Some(provider) = provider {
+    if let (Some(provider), Some(model)) = (provider, model) {
+      if let Some(price) = self.lookup_historical(provider, model, &canonical, chrono::DateTime::<chrono::Utc>::MAX_UTC)
+      {
+        return Some(price);
+      }
       let key = (norm(provider), canonical.clone());
       if let Some(price) = self.prices.get(&key) {
         return Some(price);
       }
     }
     if let Some(info) = self.models.get(&canonical) {
+      if let Some(price) = self.lookup_historical(
+        &info.provider,
+        &canonical,
+        &canonical,
+        chrono::DateTime::<chrono::Utc>::MAX_UTC,
+      ) {
+        return Some(price);
+      }
       let key = (norm(&info.provider), canonical.clone());
       if let Some(price) = self.prices.get(&key) {
         return Some(price);
@@ -294,6 +322,14 @@ impl PricingTable {
       return None;
     }
     let info = self.models.get(&canonical)?;
+    if let Some(price) = self.lookup_historical(
+      &info.provider,
+      &canonical,
+      &canonical,
+      chrono::DateTime::<chrono::Utc>::MAX_UTC,
+    ) {
+      return Some(price);
+    }
     self.prices.get(&(norm(&info.provider), canonical))
   }
 
@@ -323,10 +359,17 @@ impl PricingTable {
   }
 
   fn lookup_base_at(&self, r: &UsageRecord) -> Option<&Price> {
-    if let (Some(provider), Some(model)) = (r.provider.as_deref(), r.model.as_deref()) {
-      let canonical = self.canonical_model(Some(provider), Some(model));
-      if let Some(price) = self.lookup_historical(provider, model, &canonical, r.ts) {
-        return Some(price);
+    if let Some(model) = r.model.as_deref() {
+      let canonical = self.canonical_model(r.provider.as_deref(), Some(model));
+      if let Some(provider) = r.provider.as_deref() {
+        if let Some(price) = self.lookup_historical(provider, model, &canonical, r.ts) {
+          return Some(price);
+        }
+      }
+      if let Some(info) = self.models.get(&canonical) {
+        if let Some(price) = self.lookup_historical(&info.provider, &canonical, &canonical, r.ts) {
+          return Some(price);
+        }
       }
     }
     self.lookup_base(r.provider.as_deref(), r.model.as_deref())
@@ -382,12 +425,15 @@ impl PricingTable {
   }
 
   pub fn cost_breakdown_for(&self, r: &UsageRecord, mode: CostMode) -> Option<CostBreakdown> {
-    let provider_base = self.lookup_base_at(r).map(|p| token_cost_breakdown(r, p));
+    let provider_price = self.lookup_base_at(r);
+    let provider_base = provider_price.map(|p| token_cost_breakdown(r, p));
     let official_base = self.lookup_official_base_at(r).map(|p| token_cost_breakdown(r, p));
+    let included =
+      self.lookup_included(r.provider.as_deref(), r.model.as_deref()) || provider_price.is_some_and(price_is_zero);
 
     match mode {
       CostMode::Actual => {
-        if self.lookup_included(r.provider.as_deref(), r.model.as_deref()) {
+        if included {
           Some(CostBreakdown::default())
         } else {
           provider_base
@@ -395,7 +441,7 @@ impl PricingTable {
         }
       }
       CostMode::Mixed => {
-        if self.lookup_included(r.provider.as_deref(), r.model.as_deref()) {
+        if included {
           official_base
         } else {
           provider_base
@@ -404,6 +450,14 @@ impl PricingTable {
       CostMode::Official => official_base,
     }
   }
+}
+
+fn price_is_zero(price: &Price) -> bool {
+  price.input == 0.0
+    && price.output == 0.0
+    && price.reasoning.unwrap_or(0.0) == 0.0
+    && price.cache_read == 0.0
+    && price.cache_write.unwrap_or(0.0) == 0.0
 }
 
 pub fn cached_price_path() -> Option<PathBuf> {
@@ -536,6 +590,63 @@ upsert,2025-08-01T00:00:00Z,cccccccccccccccccccccccccccccccccccccccc,3,test-prov
       table.cost_breakdown_for(&reappeared, CostMode::Actual).unwrap().total(),
       3.0
     );
+  }
+
+  #[test]
+  fn zero_history_price_is_included_for_actual_and_mixed_costs() {
+    let history = HistoricalPrices::from_csv(
+      b"op,ts,commit_sha,sequence,provider,model,input,output,reasoning,cache_read,cache_write,input_audio,output_audio\n\
+upsert,2025-01-01T00:00:00Z,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,1,free-provider,free-route,0,0,,0,,,\n\
+upsert,2025-01-01T00:00:00Z,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,2,openai,gpt-5,2,10,,0.2,,,\n",
+    )
+    .unwrap();
+    let mut table = table();
+    table.merge_model_data(CachedModelData {
+      families: vec![
+        FamilyRoute {
+          canonical_name: "gpt-5".into(),
+          model: "free-route".into(),
+          provider: "free-provider".into(),
+        },
+        FamilyRoute {
+          canonical_name: "gpt-5".into(),
+          model: "gpt-5".into(),
+          provider: "openai".into(),
+        },
+      ],
+      prices: history,
+    });
+    let usage = usage_record(
+      Utc.with_ymd_and_hms(2025, 2, 1, 0, 0, 0).unwrap(),
+      "free-provider",
+      "free-route",
+    );
+
+    assert_eq!(table.cost_breakdown_for(&usage, CostMode::Actual).unwrap().total(), 0.0);
+    assert_eq!(table.cost_breakdown_for(&usage, CostMode::Mixed).unwrap().total(), 2.0);
+  }
+
+  #[test]
+  fn history_without_reported_provider_uses_official_route_at_record_time() {
+    let history = HistoricalPrices::from_csv(
+      b"op,ts,commit_sha,sequence,provider,model,input,output,reasoning,cache_read,cache_write,input_audio,output_audio\n\
+upsert,2025-01-01T00:00:00Z,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,1,openai,gpt-5,1,10,,0.1,,,\n\
+upsert,2025-03-01T00:00:00Z,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,2,openai,gpt-5,3,30,,0.3,,,\n",
+    )
+    .unwrap();
+    let mut table = table();
+    table.merge_model_data(CachedModelData {
+      families: vec![FamilyRoute {
+        canonical_name: "gpt-5".into(),
+        model: "gpt-5".into(),
+        provider: "openai".into(),
+      }],
+      prices: history,
+    });
+    let mut usage = usage_record(Utc.with_ymd_and_hms(2025, 2, 1, 0, 0, 0).unwrap(), "unused", "gpt-5");
+    usage.provider = None;
+
+    assert_eq!(table.cost_breakdown_for(&usage, CostMode::Actual).unwrap().total(), 1.0);
   }
 
   #[test]

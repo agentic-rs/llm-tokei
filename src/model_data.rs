@@ -1,8 +1,10 @@
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::model_name::norm;
@@ -13,6 +15,9 @@ const CACHE_DIRECTORY: &str = "llm-tokei.models";
 const CACHE_MANIFEST: &str = "manifest.json";
 const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 const MAX_ARTIFACT_BYTES: usize = 512 * 1024 * 1024;
+const BUNDLED_MANIFEST: &[u8] = include_bytes!("../data/model-data/manifest.json");
+const BUNDLED_PRICES_GZIP: &[u8] = include_bytes!("../data/model-data/changes.csv.gz");
+const BUNDLED_FAMILIES_GZIP: &[u8] = include_bytes!("../data/model-data/families.csv.gz");
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct ModelsManifest {
@@ -79,6 +84,13 @@ pub struct CachedModelData {
 }
 
 impl CachedModelData {
+  pub fn load_bundled() -> Result<Self> {
+    let manifest = parse_manifest(BUNDLED_MANIFEST, "bundled model data manifest")?;
+    let prices = decompress_artifact(BUNDLED_PRICES_GZIP, &manifest.prices)?;
+    let families = decompress_artifact(BUNDLED_FAMILIES_GZIP, &manifest.families)?;
+    Self::from_artifacts(&manifest, &prices, &families)
+  }
+
   pub fn load_default() -> Result<Option<Self>> {
     let Some(directory) = cached_model_data_path() else {
       return Ok(None);
@@ -89,16 +101,20 @@ impl CachedModelData {
     }
     let manifest_bytes =
       std::fs::read(&manifest_path).with_context(|| format!("reading {}", manifest_path.display()))?;
-    let manifest: ModelsManifest =
-      serde_json::from_slice(&manifest_bytes).with_context(|| format!("parsing {}", manifest_path.display()))?;
-    validate_manifest(&manifest)?;
+    let manifest = parse_manifest(&manifest_bytes, &manifest_path.display().to_string())?;
 
-    let prices = read_verified_artifact(&directory, &manifest.prices)?;
-    let families = read_verified_artifact(&directory, &manifest.families)?;
-    Ok(Some(Self {
-      prices: HistoricalPrices::from_csv(&prices)?,
-      families: parse_families(&families)?,
-    }))
+    let prices = read_artifact(&directory, &manifest.prices)?;
+    let families = read_artifact(&directory, &manifest.families)?;
+    Ok(Some(Self::from_artifacts(&manifest, &prices, &families)?))
+  }
+
+  fn from_artifacts(manifest: &ModelsManifest, prices: &[u8], families: &[u8]) -> Result<Self> {
+    verify_artifact(&manifest.prices, prices)?;
+    verify_artifact(&manifest.families, families)?;
+    Ok(Self {
+      prices: HistoricalPrices::from_csv(prices)?,
+      families: parse_families(families)?,
+    })
   }
 }
 
@@ -157,8 +173,7 @@ pub fn update_cached_model_data() -> Result<PathBuf> {
   let directory = cached_model_data_path().context("cannot determine cache directory")?;
   let agent = http_agent();
   let manifest_bytes = fetch(&agent, MANIFEST_URL, MAX_MANIFEST_BYTES).context("requesting model data manifest")?;
-  let manifest: ModelsManifest = serde_json::from_slice(&manifest_bytes).context("parsing model data manifest")?;
-  validate_manifest(&manifest)?;
+  let manifest = parse_manifest(&manifest_bytes, "model data manifest")?;
 
   let base_url = MANIFEST_URL
     .strip_suffix(CACHE_MANIFEST)
@@ -166,8 +181,7 @@ pub fn update_cached_model_data() -> Result<PathBuf> {
   let prices = fetch_artifact(&agent, base_url, &manifest.prices)?;
   let families = fetch_artifact(&agent, base_url, &manifest.families)?;
 
-  HistoricalPrices::from_csv(&prices)?;
-  parse_families(&families)?;
+  CachedModelData::from_artifacts(&manifest, &prices, &families)?;
 
   std::fs::create_dir_all(&directory).with_context(|| format!("creating {}", directory.display()))?;
   write_artifact(&directory, &manifest.prices.path, &prices)?;
@@ -193,6 +207,22 @@ fn parse_families(bytes: &[u8]) -> Result<Vec<FamilyRoute>> {
     });
   }
   Ok(families)
+}
+
+fn parse_manifest(bytes: &[u8], description: &str) -> Result<ModelsManifest> {
+  let manifest = serde_json::from_slice(bytes).with_context(|| format!("parsing {description}"))?;
+  validate_manifest(&manifest)?;
+  Ok(manifest)
+}
+
+fn decompress_artifact(bytes: &[u8], artifact: &CsvArtifact) -> Result<Vec<u8>> {
+  let limit = artifact.bytes.saturating_add(1) as u64;
+  let mut decoder = GzDecoder::new(bytes).take(limit);
+  let mut decompressed = Vec::with_capacity(artifact.bytes);
+  decoder
+    .read_to_end(&mut decompressed)
+    .with_context(|| format!("decompressing {}", artifact.latest_path))?;
+  Ok(decompressed)
 }
 
 fn validate_manifest(manifest: &ModelsManifest) -> Result<()> {
@@ -229,19 +259,14 @@ fn validate_artifact(name: &str, artifact: &CsvArtifact) -> Result<()> {
   Ok(())
 }
 
-fn read_verified_artifact(directory: &Path, artifact: &CsvArtifact) -> Result<Vec<u8>> {
+fn read_artifact(directory: &Path, artifact: &CsvArtifact) -> Result<Vec<u8>> {
   let path = directory.join(&artifact.path);
-  let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-  verify_artifact(artifact, &bytes)?;
-  Ok(bytes)
+  std::fs::read(&path).with_context(|| format!("reading {}", path.display()))
 }
 
 fn fetch_artifact(agent: &ureq::Agent, base_url: &str, artifact: &CsvArtifact) -> Result<Vec<u8>> {
   let url = format!("{base_url}{}", artifact.path);
-  let bytes =
-    fetch(agent, &url, artifact.bytes.saturating_add(1)).with_context(|| format!("requesting {}", artifact.path))?;
-  verify_artifact(artifact, &bytes)?;
-  Ok(bytes)
+  fetch(agent, &url, artifact.bytes.saturating_add(1)).with_context(|| format!("requesting {}", artifact.path))
 }
 
 fn fetch(agent: &ureq::Agent, url: &str, limit: usize) -> Result<Vec<u8>> {
@@ -330,6 +355,17 @@ upsert,2025-06-01T00:00:00Z,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,1,openai,gp
 delete,2025-07-01T00:00:00Z,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,2,openai,gpt-test,,,,,,,,
 upsert,2025-08-01T00:00:00Z,cccccccccccccccccccccccccccccccccccccccc,3,openai,gpt-test,3,4,,0.3,,,
 ";
+
+  #[test]
+  fn bundled_artifacts_match_their_manifest_and_parse() {
+    let data = CachedModelData::load_bundled().unwrap();
+    assert!(data.prices.routes.len() > 1_000);
+    assert!(data.families.len() > 1_000);
+    assert!(data
+      .families
+      .iter()
+      .any(|route| route.provider == "openai" && route.canonical_name == "gpt-5"));
+  }
 
   #[test]
   fn historical_lookup_uses_first_price_before_history() {

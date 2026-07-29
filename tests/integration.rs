@@ -424,11 +424,12 @@ fn codex_fixture_parses_last_total() {
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["model"], "gpt-5");
   assert_eq!(row["keys"]["source"], "codex");
-  // gpt-5 base price: input 1.25 + output 10 + cache_read 0.125 (per 1M).
+  // The fixture predates gpt-5's first history event, whose known rates are
+  // input 1.25 and output 10; cache-read was not recorded yet.
   // Billing uses prompt = 300, completion = 170, reasoning = 50, cache_read = 200.
-  // 300*1.25 + 170*10 + 50*10 + 200*0.125 = 375 + 1700 + 500 + 25 = 2600 → / 1e6 = 0.002600
+  // 300*1.25 + 170*10 + 50*10 = 375 + 1700 + 500 = 2575 → / 1e6 = 0.002575
   let cost = row["cost"].as_f64().unwrap();
-  assert!((cost - 0.002600).abs() < 1e-9, "got {cost}");
+  assert!((cost - 0.002575).abs() < 1e-9, "got {cost}");
 }
 
 #[test]

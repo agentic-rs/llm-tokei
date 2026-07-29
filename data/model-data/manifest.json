@@ -1,0 +1,21 @@
+{
+  "schema_version": 2,
+  "catalog_revision": "0c23f3759ecd32f037d5337bc4b7ee20d1815584",
+  "generator_revision": "e890e45dc4aae7989ae8c61cba6e7fd9cdfe9141",
+  "generated_at": "2026-07-29T09:55:18.059Z",
+  "source_repository": "https://github.com/anomalyco/models.dev",
+  "source_ref": "dev",
+  "source_commit_sha": "52d5045ee7c89127a3f8966b48599b9dec8afed6",
+  "prices": {
+    "path": "changes.3a17dc67a1534c146745aa5f1de883265c4cf564378d785f33de1f77cb4acfa0.csv",
+    "latest_path": "changes.csv",
+    "bytes": 1569206,
+    "sha256": "3a17dc67a1534c146745aa5f1de883265c4cf564378d785f33de1f77cb4acfa0"
+  },
+  "families": {
+    "path": "families.8d68f9e30aca4f69c85345643649312eef2bc672c429eec404edaefd5daa214c.csv",
+    "latest_path": "families.csv",
+    "bytes": 463401,
+    "sha256": "8d68f9e30aca4f69c85345643649312eef2bc672c429eec404edaefd5daa214c"
+  }
+}
