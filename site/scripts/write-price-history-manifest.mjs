@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,24 +21,28 @@ export async function writePriceHistoryManifest(options, now = new Date()) {
     throw new Error("manifest generation date is invalid");
   }
 
-  const [csv, families] = await Promise.all([
-    artifactMetadata(csvPath, "changes"),
-    artifactMetadata(familiesCsvPath, "families"),
+  const [pricesSource, familiesSource] = await Promise.all([
+    inspectArtifact(csvPath, "changes"),
+    inspectArtifact(familiesCsvPath, "families"),
   ]);
-  if (csv.source_commit_sha !== families.source_commit_sha) {
+  if (pricesSource.source_commit_sha !== familiesSource.source_commit_sha) {
     throw new Error("price and family CSVs must use the same source commit");
   }
+  const [prices, families] = await Promise.all([
+    publishArtifact(pricesSource, "changes"),
+    publishArtifact(familiesSource, "families"),
+  ]);
 
   const manifest = {
-    schema_version: 1,
+    schema_version: 2,
     catalog_revision: options.catalog_revision,
     generator_revision: options.generator_revision,
     generated_at: now.toISOString(),
     source_repository: options.source_repository,
     source_ref: options.source_ref,
-    source_commit_sha: csv.source_commit_sha,
-    csv: csv.metadata,
-    families: families.metadata,
+    source_commit_sha: pricesSource.source_commit_sha,
+    prices,
+    families,
   };
   const manifestPath = path.join(path.dirname(csvPath), "manifest.json");
   await writeFile(
@@ -49,7 +53,7 @@ export async function writePriceHistoryManifest(options, now = new Date()) {
   return { manifest, path: manifestPath };
 }
 
-async function artifactMetadata(filePath, name) {
+async function inspectArtifact(filePath, name) {
   const match = path
     .basename(filePath)
     .match(new RegExp(`^${name}\\.([0-9a-f]{40,64})\\.csv$`));
@@ -58,14 +62,29 @@ async function artifactMetadata(filePath, name) {
       `${name} CSV filename does not contain a full source commit: ${filePath}`,
     );
   }
-  const [bytes, csvStat] = await Promise.all([readFile(filePath), stat(filePath)]);
+  const bytes = await readFile(filePath);
   return {
+    bytes,
+    file_path: filePath,
     source_commit_sha: match[1],
-    metadata: {
-      path: path.basename(filePath),
-      bytes: csvStat.size,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-    },
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+async function publishArtifact(source, name) {
+  const directory = path.dirname(source.file_path);
+  const immutableName = `${name}.${source.sha256}.csv`;
+  const latestName = `${name}.csv`;
+  await Promise.all([
+    writeFile(path.join(directory, immutableName), source.bytes),
+    writeFile(path.join(directory, latestName), source.bytes),
+  ]);
+  await rm(source.file_path);
+  return {
+    path: immutableName,
+    latest_path: latestName,
+    bytes: source.bytes.length,
+    sha256: source.sha256,
   };
 }
 

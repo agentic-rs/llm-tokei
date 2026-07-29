@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -44,20 +45,22 @@ test("writes checksummed price and family artifacts for one source commit", asyn
   );
 
   const expected = {
-    schema_version: 1,
+    schema_version: 2,
     catalog_revision: CATALOG_REVISION,
     generator_revision: GENERATOR_REVISION,
     generated_at: "2026-07-29T00:00:00.000Z",
     source_repository: "https://github.com/anomalyco/models.dev",
     source_ref: "dev",
     source_commit_sha: COMMIT_SHA,
-    csv: {
-      path: path.basename(csvPath),
+    prices: {
+      path: `changes.${sha256(PRICE_CSV)}.csv`,
+      latest_path: "changes.csv",
       bytes: PRICE_CSV.length,
       sha256: sha256(PRICE_CSV),
     },
     families: {
-      path: path.basename(familiesCsvPath),
+      path: `families.${sha256(FAMILIES_CSV)}.csv`,
+      latest_path: "families.csv",
       bytes: FAMILIES_CSV.length,
       sha256: sha256(FAMILIES_CSV),
     },
@@ -67,6 +70,24 @@ test("writes checksummed price and family artifacts for one source commit", asyn
     readFileSync(result.path, "utf8"),
     `${JSON.stringify(expected, null, 2)}\n`,
   );
+  assert.deepEqual(
+    readFileSync(path.join(directory, expected.prices.path)),
+    PRICE_CSV,
+  );
+  assert.deepEqual(
+    readFileSync(path.join(directory, expected.prices.latest_path)),
+    PRICE_CSV,
+  );
+  assert.deepEqual(
+    readFileSync(path.join(directory, expected.families.path)),
+    FAMILIES_CSV,
+  );
+  assert.deepEqual(
+    readFileSync(path.join(directory, expected.families.latest_path)),
+    FAMILIES_CSV,
+  );
+  assert.equal(existsSync(csvPath), false);
+  assert.equal(existsSync(familiesCsvPath), false);
 });
 
 test("rejects artifacts generated from different source commits", async (t) => {

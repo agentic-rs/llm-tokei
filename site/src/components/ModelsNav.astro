@@ -1,0 +1,53 @@
+---
+interface Props {
+  current: "families" | "overview" | "prices";
+}
+
+const { current } = Astro.props;
+const modelsUrl = `${import.meta.env.BASE_URL}models/`;
+const items = [
+  { id: "overview", label: "Overview", href: modelsUrl },
+  { id: "prices", label: "Price history", href: `${modelsUrl}prices/` },
+  { id: "families", label: "Model families", href: `${modelsUrl}families/` }
+] as const;
+---
+
+<nav class="models-nav" aria-label="Model data">
+  {items.map((item) => (
+    <a
+      href={item.href}
+      aria-current={current === item.id ? "page" : undefined}
+    >
+      {item.label}
+    </a>
+  ))}
+</nav>
+
+<style>
+  .models-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.35rem;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    box-shadow: 5px 5px 0 var(--paper-deep);
+  }
+
+  .models-nav a {
+    padding: 0.65rem 0.85rem;
+    color: var(--ink-soft);
+    font: 700 0.82rem var(--font-mono);
+    text-decoration: none;
+  }
+
+  .models-nav a:hover {
+    color: var(--green-deep);
+    background: var(--panel-cool);
+  }
+
+  .models-nav a[aria-current="page"] {
+    color: var(--panel);
+    background: var(--green-deep);
+  }
+</style>

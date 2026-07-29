@@ -12,7 +12,7 @@ const {
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const ogImage = new URL(`${import.meta.env.BASE_URL}showcase.svg`, Astro.site);
 const homeUrl = import.meta.env.BASE_URL;
-const pricesUrl = `${import.meta.env.BASE_URL}prices/`;
+const modelsUrl = `${import.meta.env.BASE_URL}models/`;
 ---
 
 <!doctype html>
@@ -341,7 +341,7 @@ const pricesUrl = `${import.meta.env.BASE_URL}prices/`;
           <a href={`${homeUrl}#why`}>Why</a>
           <a href={`${homeUrl}#sources`}>Sources</a>
           <a href={`${homeUrl}#recipes`}>Recipes</a>
-          <a href={pricesUrl}>Price history</a>
+          <a href={modelsUrl}>Models</a>
           <a href="https://github.com/agentic-rs/llm-tokei">GitHub</a>
           <a href="https://docs.rs/llm-tokei">docs.rs</a>
         </nav>
@@ -358,7 +358,7 @@ const pricesUrl = `${import.meta.env.BASE_URL}prices/`;
         <nav class="site-nav" aria-label="Footer">
           <a href="https://tokn-ai.dev/">tokn-ai.dev</a>
           <a href="https://crates.io/crates/llm-tokei">crates.io</a>
-          <a href={pricesUrl}>Price history</a>
+          <a href={modelsUrl}>Models</a>
           <a href="https://github.com/agentic-rs/llm-tokei/blob/main/docs/usage.md">Usage</a>
           <a href="https://github.com/agentic-rs/llm-tokei">Source</a>
         </nav>

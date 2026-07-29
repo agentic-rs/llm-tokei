@@ -28,16 +28,17 @@ type CatalogRoute = {
 
 type CsvArtifact = {
   bytes: number;
+  latest_path: string;
   path: string;
   sha256: string;
 };
 
 type PriceManifest = {
   catalog_revision: string;
-  csv: CsvArtifact;
-  families?: CsvArtifact;
+  families: CsvArtifact;
   generator_revision: string;
   generated_at: string;
+  prices: CsvArtifact;
   schema_version: number;
   source_commit_sha: string;
   source_ref: string;
@@ -111,6 +112,9 @@ const FIELD_LABELS: Record<PriceField, string> = {
 };
 
 const app = requiredElement<HTMLElement>(document, "[data-price-app]");
+const initialSearch = new URLSearchParams(window.location.search);
+const requestedModel = initialSearch.get("model")?.trim();
+const requestedProvider = initialSearch.get("provider")?.trim();
 
 const status = requiredElement<HTMLElement>(app, "[data-status]");
 const controls = requiredElement<HTMLElement>(app, "[data-controls]");
@@ -236,7 +240,7 @@ async function loadPriceHistory(): Promise<void> {
     if (!response.ok)
       throw new Error(`manifest request failed with HTTP ${response.status}`);
     manifest = (await response.json()) as PriceManifest;
-    if (manifest.schema_version !== 1) {
+    if (manifest.schema_version !== 2) {
       throw new Error(
         `unsupported price history schema ${manifest.schema_version}`,
       );
@@ -258,7 +262,7 @@ async function loadPriceHistory(): Promise<void> {
     worker.addEventListener("message", handleWorkerMessage);
     worker.addEventListener("error", (event) => showFailure(event.message));
     worker.postMessage({
-      csv_url: new URL(manifest.csv.path, manifestUrl).toString(),
+      csv_url: new URL(manifest.prices.path, manifestUrl).toString(),
       type: "load",
     });
   } catch (error) {
@@ -296,10 +300,21 @@ function populateProviders(): void {
   providerSelect.replaceChildren(
     ...providers.map((provider) => new Option(provider, provider)),
   );
-  providerSelect.value = providers.includes("openai")
-    ? "openai"
-    : (providers[0] ?? "");
+  providerSelect.value =
+    requestedProvider && providers.includes(requestedProvider)
+      ? requestedProvider
+      : providers.includes("openai")
+        ? "openai"
+        : (providers[0] ?? "");
   selectProvider(providerSelect.value);
+  if (!requestedModel) return;
+
+  modelFilter.value = requestedModel;
+  selectedModels = visibleRoutes.some((route) => route.model === requestedModel)
+    ? [requestedModel]
+    : [];
+  renderModelLegend();
+  updateAvailableFields();
 }
 
 function selectProvider(provider: string): void {
@@ -832,18 +847,17 @@ function setProvenance(
 ): void {
   sourceCommit.textContent = priceManifest.source_commit_sha.slice(0, 12);
   sourceCommit.href = `${priceManifest.source_repository}/commit/${priceManifest.source_commit_sha}`;
-  downloadSize.textContent = formatBytes(priceManifest.csv.bytes);
-  priceDownload.href = new URL(priceManifest.csv.path, manifestUrl).toString();
-  if (priceManifest.families) {
-    familyDownload.href = new URL(
-      priceManifest.families.path,
-      manifestUrl,
-    ).toString();
-    familyDownloadSize.textContent = formatBytes(priceManifest.families.bytes);
-    familyDownload.hidden = false;
-  } else {
-    familyDownload.hidden = true;
-  }
+  downloadSize.textContent = formatBytes(priceManifest.prices.bytes);
+  priceDownload.href = new URL(
+    priceManifest.prices.path,
+    manifestUrl,
+  ).toString();
+  familyDownload.href = new URL(
+    priceManifest.families.path,
+    manifestUrl,
+  ).toString();
+  familyDownloadSize.textContent = formatBytes(priceManifest.families.bytes);
+  familyDownload.hidden = false;
 }
 
 function showFailure(message: string): void {

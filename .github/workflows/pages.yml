@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ASTRO_TELEMETRY_DISABLED: "1"
-      PRICE_HISTORY_MANIFEST_URL: https://agentic.tokn-ai.dev/llm-tokei/price-history/manifest.json
+      PRICE_HISTORY_MANIFEST_URL: https://agentic.tokn-ai.dev/llm-tokei/models/manifest.json
     defaults:
       run:
         working-directory: site
@@ -117,12 +117,12 @@ jobs:
           price_csv=$(node npm/model-price-history/dist/cli.js changes \
             --repo .cache/models.dev.git \
             --ref "$source_commit" \
-            --out-dir site/public/price-history \
+            --out-dir site/public/models \
             "${base_arguments[@]}")
           families_csv=$(node npm/model-price-history/dist/cli.js families \
             --repo .cache/models.dev.git \
             --ref "$source_commit" \
-            --out-dir site/public/price-history)
+            --out-dir site/public/models)
           node site/scripts/write-price-history-manifest.mjs \
             --csv "$price_csv" \
             --families-csv "$families_csv" \
