@@ -333,7 +333,7 @@ pub enum Cmd {
     cmd: CacheCmd,
   },
 
-  /// Fetch current models.dev prices into the runtime price cache.
+  /// Fetch historical prices and model mappings into the runtime cache.
   Update {
     /// Print help.
     #[arg(long, action = clap::ArgAction::HelpLong, help_heading = "Diagnostics")]

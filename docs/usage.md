@@ -310,8 +310,9 @@ Subcommand-specific options are not read from config.
 
 ## Pricing
 
-Bundled prices are generated from [models.dev](https://models.dev) plus local
-metadata under `data/`.
+Bundled current prices are generated from [models.dev](https://models.dev) plus
+local metadata under `data/`. They keep cost reporting available offline
+without any setup.
 
 One cost column is reported:
 
@@ -339,9 +340,27 @@ llm-tokei --cost official --group-by model --sort cost
 extra table columns. Table headers use the split value directly and truncate it
 to 10 characters. JSON output includes a `cost_per` object with full keys.
 
-Runtime pricing overrides are complete JSON pricing files. Exactly one pricing
-file is active: explicit `--pricing`, otherwise the update cache when present,
-otherwise bundled prices.
+Run `llm-tokei update` to cache the published price history and model-family
+mapping:
+
+```sh
+llm-tokei update
+```
+
+Normal reports never access the network. When the cache is present, each usage
+record uses the latest provider-route price recorded at or before its timestamp.
+Usage before the first recorded price uses the first known price, because the
+catalog may have learned about a route after it became available. A deletion
+does not create a zero-cost gap: the last known price continues until a later
+upsert replaces it.
+
+Price-history timestamps indicate when models.dev recorded a change and may
+differ from a provider's actual effective date. The update command downloads
+the immutable CSV artifacts referenced by the published manifest and verifies
+their sizes and SHA-256 checksums before activating them.
+
+Runtime pricing overrides are complete JSON pricing files. Explicit
+`--pricing` replaces both the historical cache and bundled pricing:
 
 ```sh
 llm-tokei --pricing ./pricing.json
@@ -375,10 +394,10 @@ Example override:
 }
 ```
 
-Pricing lookup uses canonical model aliases before grouping and costing.
-Provider-specific lookup tries the exact `(provider, model)` row. Official lookup
-uses the model's official provider mapping. Multipliers and included status can
-be set per provider and overridden per model.
+Pricing lookup checks the exact historical `(provider, model)` route first.
+The family mapping then supplies canonical aliases for grouping and official
+provider lookup. Multipliers and included status can be set per provider and
+overridden per model.
 
 ## Sources
 
