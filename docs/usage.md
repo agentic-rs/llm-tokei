@@ -310,8 +310,10 @@ Subcommand-specific options are not read from config.
 
 ## Pricing
 
-Bundled prices are generated from [models.dev](https://models.dev) plus local
-metadata under `data/`.
+The binary embeds a compressed price-history and model-family snapshot plus
+local policy metadata under `data/`. Bundled and updated model data use the same
+manifest validation, CSV parsing, route mapping, and timestamp lookup, so cost
+reporting works offline without any setup.
 
 One cost column is reported:
 
@@ -339,9 +341,27 @@ llm-tokei --cost official --group-by model --sort cost
 extra table columns. Table headers use the split value directly and truncate it
 to 10 characters. JSON output includes a `cost_per` object with full keys.
 
-Runtime pricing overrides are complete JSON pricing files. Exactly one pricing
-file is active: explicit `--pricing`, otherwise the update cache when present,
-otherwise bundled prices.
+Run `llm-tokei update` to replace the bundled snapshot with the latest published
+price history and model-family mapping:
+
+```sh
+llm-tokei update
+```
+
+Normal reports never access the network. When the cache is present, each usage
+record uses the latest provider-route price recorded at or before its timestamp.
+Usage before the first recorded price uses the first known price, because the
+catalog may have learned about a route after it became available. A deletion
+does not create a zero-cost gap: the last known price continues until a later
+upsert replaces it.
+
+Price-history timestamps indicate when the source catalog recorded a change and
+may differ from a provider's actual effective date. Both the embedded snapshot
+and update command verify the immutable CSV artifacts against their manifest
+sizes and SHA-256 checksums before parsing them.
+
+Runtime pricing overrides are complete JSON pricing files. Explicit
+`--pricing` replaces both the historical cache and bundled pricing:
 
 ```sh
 llm-tokei --pricing ./pricing.json
@@ -375,10 +395,10 @@ Example override:
 }
 ```
 
-Pricing lookup uses canonical model aliases before grouping and costing.
-Provider-specific lookup tries the exact `(provider, model)` row. Official lookup
-uses the model's official provider mapping. Multipliers and included status can
-be set per provider and overridden per model.
+Pricing lookup checks the exact historical `(provider, model)` route first.
+The family mapping then supplies canonical aliases for grouping and official
+provider lookup. Multipliers and included status can be set per provider and
+overridden per model.
 
 ## Sources
 
@@ -556,11 +576,13 @@ session.
 
 ## Maintenance Notes
 
-Bundled pricing data is generated during build.
+Bundled model data is a gzip-compressed copy of the artifacts produced by the
+Pages data pipeline:
 
 ```sh
-cargo run --example fetch_prices
-cargo build --release
+cp site/public/models/manifest.json data/model-data/manifest.json
+gzip -n -9 -c site/public/models/changes.csv > data/model-data/changes.csv.gz
+gzip -n -9 -c site/public/models/families.csv > data/model-data/families.csv.gz
 ```
 
 Generate the README showcase SVG from live CLI output:
@@ -570,14 +592,15 @@ cargo run --example gen-showcase -- --args "--24h --group-by source,model" --out
 cargo run --example gen-showcase -- --args "--cost-per provider --cost official --month -h" --out docs/assets/showcase.svg
 ```
 
-Hand-curated pricing inputs:
+Bundled pricing inputs:
 
 | File | Purpose |
 | --- | --- |
 | `data/models.json` | Canonical model names, official providers, aliases |
 | `data/providers.json` | Provider/model included and multiplier metadata |
-| `data/prices.override.csv` | Rate overrides and additions |
+| `data/model-data/manifest.json` | Provenance and checksums for bundled CSV artifacts |
+| `data/model-data/changes.csv.gz` | Bundled timestamped price changes |
+| `data/model-data/families.csv.gz` | Bundled provider routes and canonical names |
 
-If models.dev reports all token cost fields as `0` for a provider/model, the
-generator treats that row as included and omits it from base prices so cost can
-fall back to the model's official provider rate.
+A zero-price route is treated as included: `actual` cost is zero and `mixed`
+cost falls back to the canonical model's official provider rate.

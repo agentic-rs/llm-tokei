@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use sha2::{Digest, Sha256};
+
 fn temp_file_path(name: &str) -> std::path::PathBuf {
   let nanos = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
@@ -21,6 +23,40 @@ fn isolated_cmd(name: &str) -> (Command, std::path::PathBuf) {
   let mut cmd = Command::new(bin());
   cmd.env("XDG_CACHE_HOME", &cache_home);
   (cmd, cache_home)
+}
+
+fn write_model_data_cache(cache_home: &std::path::Path, changes: &str, families: &str) {
+  let directory = cache_home.join("llm-tokei.models");
+  std::fs::create_dir_all(&directory).expect("create model data cache");
+  let changes_sha = format!("{:x}", Sha256::digest(changes.as_bytes()));
+  let families_sha = format!("{:x}", Sha256::digest(families.as_bytes()));
+  let changes_path = format!("changes.{changes_sha}.csv");
+  let families_path = format!("families.{families_sha}.csv");
+  std::fs::write(directory.join(&changes_path), changes).expect("write cached price history");
+  std::fs::write(directory.join(&families_path), families).expect("write cached model families");
+  let manifest = serde_json::json!({
+    "schema_version": 2,
+    "source_repository": "https://github.com/anomalyco/models.dev",
+    "source_ref": "dev",
+    "source_commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "prices": {
+      "path": changes_path,
+      "latest_path": "changes.csv",
+      "bytes": changes.len(),
+      "sha256": changes_sha
+    },
+    "families": {
+      "path": families_path,
+      "latest_path": "families.csv",
+      "bytes": families.len(),
+      "sha256": families_sha
+    }
+  });
+  std::fs::write(
+    directory.join("manifest.json"),
+    serde_json::to_vec(&manifest).expect("serialize model data manifest"),
+  )
+  .expect("write model data manifest");
 }
 
 fn temp_config_file(name: &str, contents: &str) -> (std::path::PathBuf, std::path::PathBuf) {
@@ -388,11 +424,53 @@ fn codex_fixture_parses_last_total() {
   assert_eq!(row["sessions"], 1);
   assert_eq!(row["keys"]["model"], "gpt-5");
   assert_eq!(row["keys"]["source"], "codex");
-  // gpt-5 base price: input 1.25 + output 10 + cache_read 0.125 (per 1M).
+  // The fixture predates gpt-5's first history event, whose known rates are
+  // input 1.25 and output 10; cache-read was not recorded yet.
   // Billing uses prompt = 300, completion = 170, reasoning = 50, cache_read = 200.
-  // 300*1.25 + 170*10 + 50*10 + 200*0.125 = 375 + 1700 + 500 + 25 = 2600 → / 1e6 = 0.002600
+  // 300*1.25 + 170*10 + 50*10 = 375 + 1700 + 500 = 2575 → / 1e6 = 0.002575
   let cost = row["cost"].as_f64().unwrap();
-  assert!((cost - 0.002600).abs() < 1e-9, "got {cost}");
+  assert!((cost - 0.002575).abs() < 1e-9, "got {cost}");
+}
+
+#[test]
+fn cached_history_prices_records_by_timestamp() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("historical-pricing");
+  write_model_data_cache(
+    &cache_home,
+    "\
+op,ts,commit_sha,sequence,provider,model,input,output,reasoning,cache_read,cache_write,input_audio,output_audio
+upsert,2025-08-01T00:00:00Z,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,1,openai,gpt-5,2,20,,0.2,,,
+delete,2025-09-01T00:00:00Z,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,2,openai,gpt-5,,,,,,,,
+",
+    "\
+provider,model,canonical_name,family,release_date
+openai,gpt-5,gpt-5,gpt-5,2025-08-07
+",
+  );
+  let out = cmd
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+      "--format",
+      "json",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run historical pricing");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let rows: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid JSON");
+  let cost = rows.as_array().unwrap()[0]["cost"].as_f64().unwrap();
+  // Fixture usage predates the first known price, so the first future price is
+  // used: prompt 300*2 + completion 170*20 + reasoning 50*20 +
+  // cache-read 200*0.2 = 5040 / 1M.
+  assert!((cost - 0.005040).abs() < 1e-9, "got {cost}");
 }
 
 #[test]

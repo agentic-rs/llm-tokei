@@ -27,7 +27,7 @@ llm-tokei --cost-per provider --cost official --month -h
 - **Useful default table**: grouped by source and model, with cost columns included.
 - **Time windows that match how people ask**: `--24h`, `--7d`, `--1m`, `--today`, `--week`, `--month`.
 - **Activity at a glance**: hourly and daily plots for short windows, plus GitHub-style heatmaps for longer ones.
-- **Cost visibility**: bundled prices from models.dev plus local overrides for subscriptions, multipliers, and custom rates.
+- **Cost visibility**: bundled timestamp-aware price history works offline; `llm-tokei update` refreshes it.
 - **Table and automation output**: readable terminal tables or stable JSON for scripts.
 - **Replayable transcripts**: dump Codex and Copilot sessions into JSONL message streams.
 - **Safe local reads**: parses local files and opens OpenCode's SQLite database read-only.

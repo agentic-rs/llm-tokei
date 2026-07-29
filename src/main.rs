@@ -5,6 +5,7 @@ mod cli;
 mod config;
 mod format;
 mod model;
+mod model_data;
 mod model_name;
 mod pricing;
 mod sources;
@@ -59,6 +60,7 @@ fn main() -> Result<()> {
   if graph_opts.is_some() && args.format == Format::Json {
     anyhow::bail!("graph: --format json is not supported; use table or svg");
   }
+  let filters = build_filters(&args)?;
 
   let use_color = !args.no_color && std::env::var_os("NO_COLOR").is_none();
   let mut cache = if args.no_cache {
@@ -283,45 +285,6 @@ fn main() -> Result<()> {
       }
     }
   }
-
-  // Filters.
-  let period_since = period_since(&args).transpose().context("parsing --period")?;
-
-  let since = args
-    .since
-    .as_deref()
-    .map(time::parse_when)
-    .transpose()
-    .context("parsing --since")?
-    .or(period_since);
-  let until = args
-    .until
-    .as_deref()
-    .map(time::parse_until)
-    .transpose()
-    .context("parsing --until")?;
-  let filters = Filters {
-    since,
-    until,
-    model_glob: args
-      .model
-      .as_deref()
-      .map(glob::Pattern::new)
-      .transpose()
-      .context("parsing --model glob")?,
-    provider_glob: args
-      .provider
-      .as_deref()
-      .map(glob::Pattern::new)
-      .transpose()
-      .context("parsing --provider glob")?,
-    cwd_glob: args
-      .cwd
-      .as_deref()
-      .map(glob::Pattern::new)
-      .transpose()
-      .context("parsing --cwd glob")?,
-  };
 
   // Pricing.
   let pricing = if let Some(p) = &args.pricing {
@@ -792,6 +755,45 @@ fn period_since(args: &Args) -> Option<anyhow::Result<chrono::DateTime<chrono::U
   period.map(time::parse_period)
 }
 
+fn build_filters(args: &Args) -> Result<Filters> {
+  let period_since = period_since(args).transpose().context("parsing --period")?;
+  let since = args
+    .since
+    .as_deref()
+    .map(time::parse_when)
+    .transpose()
+    .context("parsing --since")?
+    .or(period_since);
+  let until = args
+    .until
+    .as_deref()
+    .map(time::parse_until)
+    .transpose()
+    .context("parsing --until")?;
+  Ok(Filters {
+    since,
+    until,
+    model_glob: args
+      .model
+      .as_deref()
+      .map(glob::Pattern::new)
+      .transpose()
+      .context("parsing --model glob")?,
+    provider_glob: args
+      .provider
+      .as_deref()
+      .map(glob::Pattern::new)
+      .transpose()
+      .context("parsing --provider glob")?,
+    cwd_glob: args
+      .cwd
+      .as_deref()
+      .map(glob::Pattern::new)
+      .transpose()
+      .context("parsing --cwd glob")?,
+  })
+}
+
 fn collect_opencode_with_cache(
   cache: &mut CacheDb,
   src: &OpenCodeSource,
@@ -954,7 +956,7 @@ fn run_cache(cmd: &CacheCmd) -> Result<()> {
 
 fn run_update() -> Result<()> {
   let path = update_cached_prices()?;
-  eprintln!("updated pricing cache: {}", path.display());
+  eprintln!("updated model data cache: {}", path.display());
   Ok(())
 }
 
