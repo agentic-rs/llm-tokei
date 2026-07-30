@@ -349,11 +349,16 @@ llm-tokei update
 ```
 
 Normal reports never access the network. When the cache is present, each usage
-record uses the latest provider-route price recorded at or before its timestamp.
-Usage before the first recorded price uses the first known price, because the
-catalog may have learned about a route after it became available. A deletion
-does not create a zero-cost gap: the last known price continues until a later
-upsert replaces it.
+record uses cached data only when its manifest `generated_at` is newer than the
+bundled manifest. This prevents an older cache from overriding fresher data
+shipped with a new llm-tokei release. If both manifests reference identical
+price and family artifacts, the bundled copy is preferred.
+
+Each usage record uses the latest provider-route price recorded at or before its
+timestamp. Usage before the first recorded price uses the first known price,
+because the catalog may have learned about a route after it became available. A
+deletion does not create a zero-cost gap: the last known price continues until a
+later upsert replaces it.
 
 Price-history timestamps indicate when the source catalog recorded a change and
 may differ from a provider's actual effective date. Both the embedded snapshot
