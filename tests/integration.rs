@@ -25,7 +25,7 @@ fn isolated_cmd(name: &str) -> (Command, std::path::PathBuf) {
   (cmd, cache_home)
 }
 
-fn write_model_data_cache(cache_home: &std::path::Path, changes: &str, families: &str) {
+fn write_model_data_cache(cache_home: &std::path::Path, generated_at: &str, changes: &str, families: &str) {
   let directory = cache_home.join("llm-tokei.models");
   std::fs::create_dir_all(&directory).expect("create model data cache");
   let changes_sha = format!("{:x}", Sha256::digest(changes.as_bytes()));
@@ -36,6 +36,7 @@ fn write_model_data_cache(cache_home: &std::path::Path, changes: &str, families:
   std::fs::write(directory.join(&families_path), families).expect("write cached model families");
   let manifest = serde_json::json!({
     "schema_version": 2,
+    "generated_at": generated_at,
     "source_repository": "https://github.com/anomalyco/models.dev",
     "source_ref": "dev",
     "source_commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -438,6 +439,7 @@ fn cached_history_prices_records_by_timestamp() {
   let (mut cmd, cache_home) = isolated_cmd("historical-pricing");
   write_model_data_cache(
     &cache_home,
+    "2030-01-01T00:00:00Z",
     "\
 op,ts,commit_sha,sequence,provider,model,input,output,reasoning,cache_read,cache_write,input_audio,output_audio
 upsert,2025-08-01T00:00:00Z,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,1,openai,gpt-5,2,20,,0.2,,,
@@ -471,6 +473,44 @@ openai,gpt-5,gpt-5,gpt-5,2025-08-07
   // used: prompt 300*2 + completion 170*20 + reasoning 50*20 +
   // cache-read 200*0.2 = 5040 / 1M.
   assert!((cost - 0.005040).abs() < 1e-9, "got {cost}");
+}
+
+#[test]
+fn older_cached_history_does_not_override_bundled_history() {
+  let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
+  let (mut cmd, cache_home) = isolated_cmd("older-historical-pricing");
+  write_model_data_cache(
+    &cache_home,
+    "2020-01-01T00:00:00Z",
+    "\
+op,ts,commit_sha,sequence,provider,model,input,output,reasoning,cache_read,cache_write,input_audio,output_audio
+upsert,2020-01-01T00:00:00Z,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,1,openai,gpt-5,99,99,,99,,,
+",
+    "\
+provider,model,canonical_name,family,release_date
+openai,gpt-5,gpt-5,gpt-5,2025-08-07
+",
+  );
+  let out = cmd
+    .args([
+      "--source",
+      "codex",
+      "--codex-dir",
+      fixtures.to_str().unwrap(),
+      "--opencode-db",
+      "/nonexistent/opencode.db",
+      "--format",
+      "json",
+      "--no-cache",
+    ])
+    .output()
+    .expect("run with older historical pricing cache");
+  let _ = std::fs::remove_dir_all(cache_home);
+
+  assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+  let rows: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid JSON");
+  let cost = rows.as_array().unwrap()[0]["cost"].as_f64().unwrap();
+  assert!((cost - 0.002575).abs() < 1e-9, "got {cost}");
 }
 
 #[test]

@@ -127,8 +127,6 @@ pub struct PricingTable {
 
 const BUNDLED_MODELS: &str = include_str!("../data/models.json");
 const BUNDLED_PROVIDERS: &str = include_str!("../data/providers.json");
-const CACHE_PRICE_FILE: &str = "llm-tokei.price.json";
-
 impl PricingTable {
   #[cfg(test)]
   pub fn load_bundled() -> Self {
@@ -136,17 +134,9 @@ impl PricingTable {
   }
 
   pub fn load_default() -> Result<Self> {
-    if let Some(model_data) = CachedModelData::load_default()? {
-      let mut table = Self::load_static_config()?;
-      table.merge_model_data(model_data);
-      return Ok(table);
-    }
-    if let Some(path) = cached_price_path() {
-      if path.exists() {
-        return Self::load_file(&path);
-      }
-    }
-    Self::load_bundled_result()
+    let mut table = Self::load_static_config()?;
+    table.merge_model_data(CachedModelData::load_freshest()?);
+    Ok(table)
   }
 
   pub fn load_file(path: &Path) -> Result<Self> {
@@ -163,6 +153,7 @@ impl PricingTable {
     Ok(())
   }
 
+  #[cfg(test)]
   fn load_bundled_result() -> Result<Self> {
     let mut table = Self::load_static_config()?;
     table.merge_model_data(CachedModelData::load_bundled()?);
@@ -458,13 +449,6 @@ fn price_is_zero(price: &Price) -> bool {
     && price.reasoning.unwrap_or(0.0) == 0.0
     && price.cache_read == 0.0
     && price.cache_write.unwrap_or(0.0) == 0.0
-}
-
-pub fn cached_price_path() -> Option<PathBuf> {
-  std::env::var_os("XDG_CACHE_HOME")
-    .map(PathBuf::from)
-    .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|p| p.join(".cache")))
-    .map(|base| base.join(CACHE_PRICE_FILE))
 }
 
 pub fn update_cached_prices() -> Result<PathBuf> {

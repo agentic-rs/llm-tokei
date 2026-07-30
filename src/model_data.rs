@@ -22,6 +22,7 @@ const BUNDLED_FAMILIES_GZIP: &[u8] = include_bytes!("../data/model-data/families
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct ModelsManifest {
   schema_version: u32,
+  generated_at: DateTime<Utc>,
   source_repository: String,
   source_ref: String,
   source_commit_sha: String,
@@ -84,14 +85,31 @@ pub struct CachedModelData {
 }
 
 impl CachedModelData {
+  #[cfg(test)]
   pub fn load_bundled() -> Result<Self> {
     let manifest = parse_manifest(BUNDLED_MANIFEST, "bundled model data manifest")?;
-    let prices = decompress_artifact(BUNDLED_PRICES_GZIP, &manifest.prices)?;
-    let families = decompress_artifact(BUNDLED_FAMILIES_GZIP, &manifest.families)?;
-    Self::from_artifacts(&manifest, &prices, &families)
+    Self::load_bundled_from_manifest(&manifest)
   }
 
-  pub fn load_default() -> Result<Option<Self>> {
+  pub fn load_freshest() -> Result<Self> {
+    let bundled_manifest = parse_manifest(BUNDLED_MANIFEST, "bundled model data manifest")?;
+    match Self::load_cached_if_newer(&bundled_manifest) {
+      Ok(Some(cached)) => Ok(cached),
+      Ok(None) => Self::load_bundled_from_manifest(&bundled_manifest),
+      Err(error) => {
+        tracing::warn!(%error, "ignoring invalid model data cache");
+        Self::load_bundled_from_manifest(&bundled_manifest)
+      }
+    }
+  }
+
+  fn load_bundled_from_manifest(manifest: &ModelsManifest) -> Result<Self> {
+    let prices = decompress_artifact(BUNDLED_PRICES_GZIP, &manifest.prices)?;
+    let families = decompress_artifact(BUNDLED_FAMILIES_GZIP, &manifest.families)?;
+    Self::from_artifacts(manifest, &prices, &families)
+  }
+
+  fn load_cached_if_newer(bundled_manifest: &ModelsManifest) -> Result<Option<Self>> {
     let Some(directory) = cached_model_data_path() else {
       return Ok(None);
     };
@@ -102,6 +120,9 @@ impl CachedModelData {
     let manifest_bytes =
       std::fs::read(&manifest_path).with_context(|| format!("reading {}", manifest_path.display()))?;
     let manifest = parse_manifest(&manifest_bytes, &manifest_path.display().to_string())?;
+    if !should_use_cached(&manifest, bundled_manifest) {
+      return Ok(None);
+    }
 
     let prices = read_artifact(&directory, &manifest.prices)?;
     let families = read_artifact(&directory, &manifest.families)?;
@@ -243,6 +264,12 @@ fn validate_manifest(manifest: &ModelsManifest) -> Result<()> {
   Ok(())
 }
 
+fn should_use_cached(candidate: &ModelsManifest, bundled: &ModelsManifest) -> bool {
+  let artifacts_match =
+    candidate.prices.sha256 == bundled.prices.sha256 && candidate.families.sha256 == bundled.families.sha256;
+  !artifacts_match && candidate.generated_at > bundled.generated_at
+}
+
 fn validate_artifact(name: &str, artifact: &CsvArtifact) -> Result<()> {
   if artifact.bytes > MAX_ARTIFACT_BYTES {
     bail!("{name} CSV exceeds the {MAX_ARTIFACT_BYTES}-byte safety limit");
@@ -365,6 +392,25 @@ upsert,2025-08-01T00:00:00Z,cccccccccccccccccccccccccccccccccccccccc,3,openai,gp
       .families
       .iter()
       .any(|route| route.provider == "openai" && route.canonical_name == "gpt-5"));
+  }
+
+  #[test]
+  fn cache_must_differ_and_be_newer_than_bundled_manifest() {
+    let bundled = parse_manifest(BUNDLED_MANIFEST, "bundled model data manifest").unwrap();
+    let mut cached = bundled.clone();
+
+    cached.generated_at = bundled.generated_at + chrono::Duration::seconds(1);
+    assert!(!should_use_cached(&cached, &bundled));
+
+    cached.prices.sha256 = "b".repeat(64);
+    cached.generated_at = bundled.generated_at - chrono::Duration::seconds(1);
+    assert!(!should_use_cached(&cached, &bundled));
+
+    cached.generated_at = bundled.generated_at;
+    assert!(!should_use_cached(&cached, &bundled));
+
+    cached.generated_at = bundled.generated_at + chrono::Duration::seconds(1);
+    assert!(should_use_cached(&cached, &bundled));
   }
 
   #[test]
