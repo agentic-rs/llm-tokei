@@ -6,6 +6,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use tokn_pi_protocol::{PiSessionItem, PiSessionLine};
 use tracing::debug;
 use walkdir::WalkDir;
 
@@ -78,33 +79,13 @@ impl UsageSource for PiAgentSource {
 }
 
 #[derive(Debug, Deserialize)]
-struct Line {
-  #[serde(default, rename = "type")]
-  kind: Option<String>,
-  #[serde(default)]
-  id: Option<String>,
-  #[serde(default, rename = "parentId")]
-  parent_id: Option<String>,
-  #[serde(default)]
-  timestamp: Option<String>,
-  #[serde(default)]
-  cwd: Option<String>,
-  #[serde(default)]
-  provider: Option<String>,
-  #[serde(default, rename = "modelId")]
-  model_id: Option<String>,
-  #[serde(default)]
-  message: Option<Message>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Message {
+struct UsageMessage {
   #[serde(default)]
   role: Option<String>,
   #[serde(default)]
   content: Option<Value>,
   #[serde(default)]
-  details: Option<Details>,
+  details: Option<Value>,
   #[serde(default)]
   provider: Option<String>,
   #[serde(default)]
@@ -220,26 +201,29 @@ fn parse_session(path: &Path) -> Result<ParsedUsageFile> {
   let mut pending: Vec<PendingTurn> = Vec::new();
   let mut plugin_turns: Vec<PluginTurn> = Vec::new();
 
-  let complete = read_jsonl_with_status::<Line, _>(path, |line, position| {
-    let ts = parse_ts(line.timestamp.as_deref());
-    match line.kind.as_deref() {
-      Some("session") => {
-        if let Some(id) = line.id {
-          session_id = id;
+  let complete = read_jsonl_with_status::<PiSessionLine, _>(path, |line, position| {
+    let ts = parse_ts(line.timestamp());
+    match line.item() {
+      PiSessionItem::Session(header) => {
+        if let Some(id) = &header.id {
+          session_id = id.clone();
         }
         if cwd.is_none() {
-          cwd = line.cwd;
+          cwd = header.cwd.clone();
         }
       }
-      Some("model_change") => {
-        current_provider = line.provider;
-        current_model = line.model_id;
+      PiSessionItem::ModelChange(change) => {
+        current_provider = change.provider.clone();
+        current_model = change.model_id.clone();
       }
-      Some("message") => {
-        let Some(message) = line.message else {
+      PiSessionItem::Message(item) => {
+        if item.message.is_none() {
+          return;
+        }
+        let Some(message) = extract_usage_message(line.native().get("message")) else {
           return;
         };
-        let event_id = line.id.as_deref().or(message.response_id.as_deref());
+        let event_id = item.id.as_deref().or(message.response_id.as_deref());
         let role = message.role.as_deref();
         if role == Some("user") {
           pending_rounds = pending_rounds.saturating_add(1);
@@ -249,7 +233,7 @@ fn parse_session(path: &Path) -> Result<ParsedUsageFile> {
         if let Some(plugin_turn) = plugin_summary_turn(
           &message,
           ts,
-          line.parent_id.as_deref(),
+          item.parent_id.as_deref(),
           origin_key(event_id, position, 1),
         ) {
           plugin_turns.push(plugin_turn);
@@ -267,7 +251,7 @@ fn parse_session(path: &Path) -> Result<ParsedUsageFile> {
           bytes: pending_bytes.take(),
           rounds: std::mem::take(&mut pending_rounds),
           mode: message.api,
-          agent: message.response_id.or(line.parent_id),
+          agent: message.response_id.or_else(|| item.parent_id.clone()),
         });
       }
       _ => {}
@@ -362,13 +346,17 @@ fn origin_key(event_id: Option<&str>, position: JsonlPosition, emitted_slot: usi
   }
 }
 
+fn extract_usage_message(value: Option<&Value>) -> Option<UsageMessage> {
+  serde_json::from_value(value?.clone()).ok()
+}
+
 fn plugin_summary_turn(
-  message: &Message,
+  message: &UsageMessage,
   ts: DateTime<Utc>,
   parent_id: Option<&str>,
   origin_key: String,
 ) -> Option<PluginTurn> {
-  let details = message.details.as_ref()?;
+  let details = serde_json::from_value::<Details>(message.details.clone()?).ok()?;
   let summary = details.summary.as_ref()?;
   if summary.fallback_used {
     return None;
@@ -550,5 +538,33 @@ mod tests {
         .map(|record| record.origin_key.clone())
         .collect::<Vec<_>>()
     );
+  }
+
+  #[test]
+  fn protocol_parser_skips_malformed_records_and_keeps_later_usage() {
+    let path = std::env::temp_dir().join(format!("llm-tokei-pi-protocol-{}.jsonl", std::process::id()));
+    std::fs::write(
+      &path,
+      concat!(
+        r#"{"type":"session","id":"pi-session","timestamp":"2026-08-01T00:00:00Z","cwd":"/tmp/project"}"#,
+        "\n",
+        r#"{"type":"model_change","id":42,"provider":"openai","modelId":"gpt-5"}"#,
+        "\n",
+        r#"{"type":"message","id":"assistant-1","timestamp":"2026-08-01T00:01:00Z","message":{"role":"assistant","provider":"openai","model":"gpt-5","content":[{"type":"text","text":"hello"}],"details":"future-extension","usage":{"input":5,"output":3,"cacheRead":1,"cacheWrite":2,"totalTokens":8}}}"#,
+        "\n"
+      ),
+    )
+    .expect("write temporary Pi session");
+
+    let parsed = parse_session(&path).expect("parse tolerant protocol session");
+    std::fs::remove_file(&path).expect("remove temporary Pi session");
+
+    assert_eq!(parsed.records.len(), 1);
+    let record = &parsed.records[0].record;
+    assert_eq!(record.session_id, "pi-session");
+    assert_eq!(record.provider.as_deref(), Some("openai"));
+    assert_eq!(record.model.as_deref(), Some("gpt-5"));
+    assert_eq!(record.prompt, 5);
+    assert_eq!(record.completion, 3);
   }
 }
