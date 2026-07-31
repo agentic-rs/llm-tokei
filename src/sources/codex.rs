@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use tokn_codex_protocol::{ResponseItem, RolloutItem, RolloutLine, SessionMetaItem, TurnContextItem};
 use tracing::debug;
 use walkdir::WalkDir;
 
@@ -98,24 +99,25 @@ impl UsageSource for CodexSource {
 
 /// Visitor over a Codex rollout JSONL file.
 ///
-/// The walker parses each JSONL line as a full `Value` and passes the full
-/// line/payload to visitors. High-level callbacks fire before low-level
-/// response-item callbacks so consumers can choose their granularity.
+/// The walker decodes each JSONL line with `tokn-codex-protocol` and passes
+/// the retained native payload to the extractor callbacks that need volatile
+/// provider data. High-level callbacks fire before low-level response-item
+/// callbacks so consumers can choose their granularity.
 trait RolloutVisitor {
   /// Called for every line with a top-level RFC3339 `timestamp` field.
   fn timestamp(&mut self, _ts: DateTime<Utc>) {}
 
-  /// Called for `line.type == "session_meta"`; receives the full JSONL line.
-  fn session_meta(&mut self, _line: &Value) {}
+  /// Called for `line.type == "session_meta"`.
+  fn session_meta(&mut self, _item: Option<&SessionMetaItem>, _native: &Value) {}
 
-  /// Called for `line.type == "turn_context"`; receives `line.payload`.
-  fn turn_context(&mut self, _payload: &Value) {}
+  /// Called for `line.type == "turn_context"`.
+  fn turn_context(&mut self, _item: Option<&TurnContextItem>, _native: &Value) {}
 
-  /// Called for `line.type == "event_msg" && line.payload.type == "token_count"`.
-  /// Receives the parsed line timestamp and the full `line.payload` object.
+  /// Called for `event_msg` records with a `token_count` payload.
+  /// Receives the parsed line timestamp and the full event payload.
   fn turn_end(&mut self, _ts: DateTime<Utc>, _payload: &Value, _position: JsonlPosition, _event_id: Option<&str>) {}
 
-  /// Called for every `line.type == "response_item"`, before low-level dispatch.
+  /// Called for every `response_item`, before low-level dispatch.
   fn response_item(&mut self, _payload: &Value) {}
 
   /// `response_item.payload.type == "message"`; full response-item payload.
@@ -138,43 +140,45 @@ trait RolloutVisitor {
 }
 
 fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<bool> {
-  read_jsonl_with_status::<Value, _>(path, |line, position| {
-    let ts = parse_rfc3339(line.get("timestamp").and_then(|v| v.as_str()));
+  read_jsonl_with_status::<RolloutLine, _>(path, |line, position| {
+    let ts = parse_rfc3339(line.timestamp());
     if let Some(ts) = ts {
       visitor.timestamp(ts);
     }
-    match line.get("type").and_then(|v| v.as_str()) {
-      Some("session_meta") => visitor.session_meta(&line),
-      Some("event_msg") => {
-        if let Some(payload) = line.get("payload") {
-          if payload.get("type").and_then(|v| v.as_str()) == Some("token_count") {
-            let ts = ts.unwrap_or_else(epoch_utc);
-            visitor.turn_end(ts, payload, position, source_event_id(&line));
-          }
-        }
+    match line.item() {
+      RolloutItem::SessionMeta(item) => visitor.session_meta(Some(item), line.native()),
+      RolloutItem::EventMessage(item) if item.event_type.as_deref() == Some("token_count") => {
+        let ts = ts.unwrap_or_else(epoch_utc);
+        visitor.turn_end(ts, &item.native, position, source_event_id(line.native()));
       }
-      Some("turn_context") => {
-        if let Some(payload) = line.get("payload") {
-          visitor.turn_context(payload);
-        }
+      RolloutItem::TurnContext(item) => visitor.turn_context(Some(item), line.native()),
+      RolloutItem::ResponseItem(item) => {
+        let Some(payload) = line.native().get("payload") else {
+          return;
+        };
+        visitor.response_item(payload);
+        dispatch_response_item(item, payload, visitor);
       }
-      Some("response_item") => {
-        if let Some(payload) = line.get("payload") {
-          visitor.response_item(payload);
-          match payload.get("type").and_then(|v| v.as_str()) {
-            Some("message") => visitor.message(payload),
-            Some("function_call") => visitor.function_call(payload),
-            Some("function_call_output") => visitor.function_call_output(payload),
-            Some("custom_tool_call") => visitor.custom_tool_call(payload),
-            Some("custom_tool_call_output") => visitor.custom_tool_call_output(payload),
-            Some("reasoning") => visitor.reasoning(payload),
-            _ => {}
-          }
-        }
-      }
+      RolloutItem::Unknown(item) => match item.native_type.as_deref() {
+        Some("session_meta") => visitor.session_meta(None, line.native()),
+        Some("turn_context") => visitor.turn_context(None, line.native()),
+        _ => {}
+      },
       _ => {}
     }
   })
+}
+
+fn dispatch_response_item<V: RolloutVisitor>(item: &ResponseItem, payload: &Value, visitor: &mut V) {
+  match item.native_type() {
+    Some("message") => visitor.message(payload),
+    Some("function_call") => visitor.function_call(payload),
+    Some("function_call_output") => visitor.function_call_output(payload),
+    Some("custom_tool_call") => visitor.custom_tool_call(payload),
+    Some("custom_tool_call_output") => visitor.custom_tool_call_output(payload),
+    Some("reasoning") => visitor.reasoning(payload),
+    _ => {}
+  }
 }
 
 fn source_event_id(line: &Value) -> Option<&str> {
@@ -216,8 +220,8 @@ struct SessionMeta {
 }
 
 impl SessionMeta {
-  fn apply(&mut self, line: &Value) {
-    if let Some(payload) = line.get("payload") {
+  fn apply(&mut self, item: Option<&SessionMetaItem>, native: &Value) {
+    if let Some(payload) = native.get("payload") {
       let meta = payload.get("meta").unwrap_or(payload);
       let str_field = |key: &str| meta.get(key).and_then(|v| v.as_str()).map(str::to_string);
       if self.session_id.is_none() {
@@ -236,17 +240,30 @@ impl SessionMeta {
         self.provider = str_field("model_provider").or_else(|| str_field("originator"));
       }
     }
+
+    if let Some(item) = item {
+      if self.session_id.is_none() {
+        self.session_id = item.id.clone();
+      }
+      if self.cwd.is_none() {
+        self.cwd = item.cwd.clone();
+      }
+      if self.provider.is_none() {
+        self.provider = item.model_provider.clone();
+      }
+    }
+
     if self.session_id.is_none() {
-      self.session_id = line.get("id").and_then(|v| v.as_str()).map(str::to_string);
+      self.session_id = native.get("id").and_then(|v| v.as_str()).map(str::to_string);
     }
     if self.cwd.is_none() {
-      self.cwd = line.get("cwd").and_then(|v| v.as_str()).map(str::to_string);
+      self.cwd = native.get("cwd").and_then(|v| v.as_str()).map(str::to_string);
     }
     if self.model.is_none() {
-      self.model = line.get("model").and_then(|v| v.as_str()).map(str::to_string);
+      self.model = native.get("model").and_then(|v| v.as_str()).map(str::to_string);
     }
     if self.provider.is_none() {
-      self.provider = line.get("originator").and_then(|v| v.as_str()).map(str::to_string);
+      self.provider = native.get("originator").and_then(|v| v.as_str()).map(str::to_string);
     }
   }
 
@@ -390,8 +407,8 @@ impl RolloutVisitor for RecordBuilder<'_> {
     self.session_ts.get_or_insert(ts);
   }
 
-  fn session_meta(&mut self, line: &Value) {
-    self.meta.apply(line);
+  fn session_meta(&mut self, item: Option<&SessionMetaItem>, native: &Value) {
+    self.meta.apply(item, native);
     self.inherited_turn = self.meta.forked_from_id.is_some();
   }
 
@@ -399,24 +416,36 @@ impl RolloutVisitor for RecordBuilder<'_> {
     self.push_turn(ts, payload, position, event_id);
   }
 
-  fn turn_context(&mut self, payload: &Value) {
-    if let Some(inherited) = is_inherited_fork_turn(&self.meta, payload) {
+  fn turn_context(&mut self, item: Option<&TurnContextItem>, native: &Value) {
+    let payload = native.get("payload");
+    let turn_id = item.and_then(|item| item.turn_id.as_deref()).or_else(|| {
+      payload
+        .and_then(|payload| payload.get("turn_id"))
+        .and_then(Value::as_str)
+    });
+    if let Some(inherited) = is_inherited_fork_turn(&self.meta, turn_id) {
       if self.inherited_turn && !inherited {
         self.pending_bytes.take();
         self.pending_rounds = 0;
       }
       self.inherited_turn = inherited;
     }
-    if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
-      self.meta.model = Some(m.to_string());
+    if let Some(model) = item
+      .and_then(|item| item.model.as_deref())
+      .or_else(|| payload.and_then(|payload| payload.get("model")).and_then(Value::as_str))
+    {
+      self.meta.model = Some(model.to_string());
     }
-    if let Some(p) = payload.get("model_provider").and_then(|v| v.as_str()) {
+    if let Some(p) = payload
+      .and_then(|payload| payload.get("model_provider"))
+      .and_then(Value::as_str)
+    {
       self.meta.provider = Some(p.to_string());
     }
     if self.inherited_turn {
       return;
     }
-    match payload.get("turn_id").and_then(Value::as_str) {
+    match turn_id {
       Some(turn_id) if self.seen_round_ids.insert(turn_id.to_string()) => self.pending_rounds += 1,
       Some(_) => {}
       None => self.pending_rounds += 1,
@@ -457,9 +486,9 @@ impl RolloutVisitor for RecordBuilder<'_> {
 /// Forked Codex rollouts begin with a replay of the parent thread. UUIDv7 turn
 /// IDs preserve creation order, so turns older than the fork's own session ID
 /// belong to that inherited replay and must not be counted again.
-fn is_inherited_fork_turn(meta: &SessionMeta, payload: &Value) -> Option<bool> {
+fn is_inherited_fork_turn(meta: &SessionMeta, turn_id: Option<&str>) -> Option<bool> {
   let session_id = meta.session_id.as_deref().filter(|_| meta.forked_from_id.is_some())?;
-  let turn_id = payload.get("turn_id").and_then(Value::as_str)?;
+  let turn_id = turn_id?;
   (is_uuid_v7(session_id) && is_uuid_v7(turn_id)).then(|| turn_id < session_id)
 }
 
@@ -503,8 +532,8 @@ impl<'a> DumpBuilder<'a> {
 }
 
 impl RolloutVisitor for DumpBuilder<'_> {
-  fn session_meta(&mut self, line: &Value) {
-    self.meta.apply(line);
+  fn session_meta(&mut self, item: Option<&SessionMetaItem>, native: &Value) {
+    self.meta.apply(item, native);
   }
 
   fn message(&mut self, payload: &Value) {
@@ -809,19 +838,38 @@ mod tests {
   }
 
   #[test]
+  fn unknown_response_items_keep_legacy_extractor_dispatch() {
+    let payload = serde_json::json!({
+      "type": "message",
+      "role": "assistant",
+      "content": "still inspectable"
+    });
+    let item: ResponseItem = serde_json::from_value(payload.clone()).expect("protocol response item should decode");
+    assert!(matches!(item, ResponseItem::Unknown(_)));
+
+    let mut visitor = MessageCounter::default();
+    dispatch_response_item(&item, &payload, &mut visitor);
+    assert_eq!(visitor.bytes.output, "still inspectable".len() as u64);
+  }
+
+  #[test]
   fn forked_rollout_ignores_parent_replay_but_keeps_new_turns() {
     let path = Path::new("forked.jsonl");
     let mut builder = RecordBuilder::new(path);
-    builder.session_meta(&serde_json::json!({
+    let session_meta = serde_json::json!({
       "payload": {
         "id": "019f57cd-7555-7292-a6cc-540fc0df1778",
         "forked_from_id": "019f4a9e-3a88-7a00-9989-2d12dda99487"
       }
-    }));
+    });
+    let session_meta_item = test_session_meta_item(&session_meta);
+    builder.session_meta(Some(&session_meta_item), &session_meta);
 
     // Older replay formats can omit turn IDs. Stay in inherited mode until a
     // UUIDv7 turn boundary proves that the fork's own activity has begun.
-    builder.turn_context(&serde_json::json!({ "model": "gpt-5.6-sol" }));
+    let missing_turn_id = serde_json::json!({ "payload": { "model": "gpt-5.6-sol" } });
+    let missing_turn_context = test_turn_context_item(&missing_turn_id);
+    builder.turn_context(Some(&missing_turn_context), &missing_turn_id);
 
     // Replayed token events may precede the first inherited turn context.
     builder.turn_end(
@@ -841,10 +889,12 @@ mod tests {
       None,
     );
 
-    builder.turn_context(&serde_json::json!({
+    let inherited_turn = serde_json::json!({ "payload": {
       "turn_id": "019f4a9e-7b5c-71c1-b7a5-7b8c6805bc6e",
       "model": "gpt-5.6-sol"
-    }));
+    } });
+    let inherited_turn_context = test_turn_context_item(&inherited_turn);
+    builder.turn_context(Some(&inherited_turn_context), &inherited_turn);
     builder.message(&serde_json::json!({
       "type": "message",
       "role": "user",
@@ -867,14 +917,13 @@ mod tests {
       None,
     );
 
-    builder.turn_context(&serde_json::json!({
+    let new_turn = serde_json::json!({ "payload": {
       "turn_id": "019f57cd-7c10-7aa1-b465-056defebbe28",
       "model": "gpt-5.6-sol"
-    }));
-    builder.turn_context(&serde_json::json!({
-      "turn_id": "019f57cd-7c10-7aa1-b465-056defebbe28",
-      "model": "gpt-5.6-sol"
-    }));
+    } });
+    let new_turn_context = test_turn_context_item(&new_turn);
+    builder.turn_context(Some(&new_turn_context), &new_turn);
+    builder.turn_context(Some(&new_turn_context), &new_turn);
     builder.message(&serde_json::json!({
       "type": "message",
       "role": "user",
@@ -910,5 +959,24 @@ mod tests {
     assert_eq!(records[0].reasoning, 1);
     assert_eq!(records[0].input_bytes, 3);
     assert_eq!(records[0].rounds, 1);
+  }
+
+  fn test_session_meta_item(native: &Value) -> SessionMetaItem {
+    serde_json::from_value(native["payload"].clone()).expect("session metadata should decode")
+  }
+
+  fn test_turn_context_item(native: &Value) -> TurnContextItem {
+    serde_json::from_value(native["payload"].clone()).expect("turn context should decode")
+  }
+
+  #[derive(Default)]
+  struct MessageCounter {
+    bytes: BytesSink,
+  }
+
+  impl RolloutVisitor for MessageCounter {
+    fn message(&mut self, payload: &Value) {
+      visit_message(payload, &mut self.bytes);
+    }
   }
 }

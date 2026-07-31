@@ -43,6 +43,9 @@ terminal_size = "0.4"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokn-codex-protocol = "0.1.0"
+tokn-opencode-protocol = "0.1.0"
+tokn-pi-protocol = "0.1.0"
 
 [[example]]
 name = "gen-showcase"

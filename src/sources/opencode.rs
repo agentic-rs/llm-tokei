@@ -5,6 +5,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use tokn_opencode_protocol::v1::MessageData;
 use tracing::debug;
 
 pub struct OpenCodeSource {
@@ -72,23 +73,35 @@ impl OpenCodeSource {
           continue;
         }
       };
-      let parsed: AssistantMessage = match serde_json::from_str(&data) {
+      let parsed: MessageData = match serde_json::from_str(&data) {
         Ok(parsed) => parsed,
         Err(_) => {
           complete = false;
           continue;
         }
       };
-      if parsed.role.as_deref() != Some("assistant") {
+      if !parsed.native().is_object() {
+        complete = false;
         continue;
       }
-      let tokens = match parsed.tokens {
-        Some(tokens) => tokens,
-        None => continue,
+      if parsed.native_role() != Some("assistant") {
+        continue;
+      }
+      // Keep the projection deliberately narrow: OpenCode can add or change
+      // unrelated fields without making an otherwise usable usage record fail.
+      let message: AssistantUsagePayload = match serde_json::from_value(parsed.into_native()) {
+        Ok(message) => message,
+        Err(_) => {
+          complete = false;
+          continue;
+        }
+      };
+      let Some(tokens) = message.tokens else {
+        continue;
       };
       let cache = tokens.cache.unwrap_or_default();
       // OpenCode uses ms epoch.
-      let ts_ms = parsed
+      let ts_ms = message
         .time
         .as_ref()
         .and_then(|time| time.completed.or(time.created))
@@ -96,13 +109,13 @@ impl OpenCodeSource {
       let ts = ms_to_dt(ts_ms);
 
       let meta = session_meta.get(&session_id).cloned().unwrap_or_default();
-      let cwd = parsed
+      let cwd = message
         .path
         .as_ref()
         .and_then(|path| path.cwd.clone())
         .or(meta.directory.clone());
 
-      let is_new_round = parsed
+      let is_new_round = message
         .parent_id
         .as_deref()
         .is_none_or(|parent_id| seen_parent_ids.insert(parent_id.to_string()));
@@ -122,8 +135,8 @@ impl OpenCodeSource {
           session_title: meta.title.clone(),
           project_cwd: cwd,
           project_name: meta.project_name.clone(),
-          provider: parsed.provider_id,
-          model: parsed.model_id,
+          provider: message.provider_id,
+          model: message.model_id,
           ts,
           // Keep `input` as uncached prompt tokens only.
           prompt: tokens.input,
@@ -143,7 +156,7 @@ impl OpenCodeSource {
           is_compaction: false,
           rounds,
           calls: 1,
-          cost_embedded: parsed.cost.filter(|cost| *cost > 0.0),
+          cost_embedded: message.cost.filter(|cost| *cost > 0.0),
         },
       });
     }
@@ -153,13 +166,11 @@ impl OpenCodeSource {
 }
 
 #[derive(Debug, Deserialize)]
-struct AssistantMessage {
-  #[serde(default)]
-  role: Option<String>,
+struct AssistantUsagePayload {
   #[serde(default, rename = "parentID")]
   parent_id: Option<String>,
   #[serde(default)]
-  tokens: Option<TokensField>,
+  tokens: Option<TokenUsagePayload>,
   #[serde(default)]
   cost: Option<f64>,
   #[serde(default, rename = "modelID")]
@@ -167,13 +178,13 @@ struct AssistantMessage {
   #[serde(default, rename = "providerID")]
   provider_id: Option<String>,
   #[serde(default)]
-  path: Option<PathField>,
+  path: Option<MessagePath>,
   #[serde(default)]
-  time: Option<TimeField>,
+  time: Option<MessageTime>,
 }
 
 #[derive(Debug, Deserialize)]
-struct TokensField {
+struct TokenUsagePayload {
   #[serde(default)]
   input: u64,
   #[serde(default)]
@@ -181,11 +192,11 @@ struct TokensField {
   #[serde(default)]
   reasoning: u64,
   #[serde(default)]
-  cache: Option<CacheField>,
+  cache: Option<CacheUsagePayload>,
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct CacheField {
+struct CacheUsagePayload {
   #[serde(default)]
   read: u64,
   #[serde(default)]
@@ -193,13 +204,13 @@ struct CacheField {
 }
 
 #[derive(Debug, Deserialize)]
-struct PathField {
+struct MessagePath {
   #[serde(default)]
   cwd: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct TimeField {
+struct MessageTime {
   #[serde(default)]
   created: Option<i64>,
   #[serde(default)]
@@ -278,7 +289,7 @@ fn load_session_meta(conn: &Connection) -> Result<HashMap<String, SessionMeta>> 
 
 #[cfg(test)]
 mod tests {
-  use super::OpenCodeSource;
+  use super::*;
   use rusqlite::{params, Connection};
   use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -330,5 +341,98 @@ mod tests {
     assert_eq!(parsed.records[1].record.rounds, 0);
 
     std::fs::remove_file(path).expect("remove sqlite fixture");
+  }
+
+  #[test]
+  fn invalid_message_payloads_keep_valid_rows_and_mark_snapshot_incomplete() {
+    let unique = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .expect("clock after epoch")
+      .as_nanos();
+    let path = std::env::temp_dir().join(format!("llm-tokei-opencode-protocol-{unique}.db"));
+
+    {
+      let conn = Connection::open(&path).expect("create sqlite fixture");
+      conn
+        .execute_batch(
+          "
+          CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, directory TEXT, title TEXT);
+          CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+          INSERT INTO session VALUES ('session-1', NULL, '/tmp/fixture', 'Fixture session');
+          ",
+        )
+        .expect("create schema");
+      let null_token = r#"{"role":"assistant","tokens":{"input":null,"output":1}}"#;
+      let invalid_shape = r#"[{"role":"assistant","tokens":{"input":1,"output":1}}]"#;
+      let valid = r#"{"role":"assistant","tokens":{"input":7,"output":11,"reasoning":3,"cache":{"read":2,"write":1}},"modelID":"model-1","providerID":"provider-1"}"#;
+      conn
+        .execute(
+          "INSERT INTO message (id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+          params!["message-null-token", "session-1", 1000_i64, null_token],
+        )
+        .expect("insert null-token message");
+      conn
+        .execute(
+          "INSERT INTO message (id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+          params!["message-invalid-shape", "session-1", 1500_i64, invalid_shape],
+        )
+        .expect("insert invalid-shape message");
+      conn
+        .execute(
+          "INSERT INTO message (id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+          params!["message-valid", "session-1", 2000_i64, valid],
+        )
+        .expect("insert valid message");
+    }
+
+    let parsed = OpenCodeSource::parse_cache_file(&path).expect("parse fixture");
+    std::fs::remove_file(path).expect("remove sqlite fixture");
+
+    assert!(!parsed.complete);
+    assert_eq!(parsed.records.len(), 1);
+    assert_eq!(parsed.records[0].origin_key, "message:message-valid");
+    let record = &parsed.records[0].record;
+    assert_eq!(record.prompt, 7);
+    assert_eq!(record.completion, 11);
+    assert_eq!(record.reasoning, 3);
+    assert_eq!(record.cache_read, 2);
+    assert_eq!(record.cache_write, 1);
+  }
+
+  #[test]
+  fn irrelevant_protocol_schema_changes_do_not_hide_usage() {
+    let unique = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .expect("clock after epoch")
+      .as_nanos();
+    let path = std::env::temp_dir().join(format!("llm-tokei-opencode-tolerant-{unique}.db"));
+
+    {
+      let conn = Connection::open(&path).expect("create sqlite fixture");
+      conn
+        .execute_batch(
+          "
+          CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, directory TEXT, title TEXT);
+          CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+          INSERT INTO session VALUES ('session-1', NULL, '/tmp/fixture', 'Fixture session');
+          ",
+        )
+        .expect("create schema");
+      let message = r#"{"role":"assistant","mode":{},"tokens":{"input":7,"output":11}}"#;
+      conn
+        .execute(
+          "INSERT INTO message (id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+          params!["message-1", "session-1", 1000_i64, message],
+        )
+        .expect("insert message");
+    }
+
+    let parsed = OpenCodeSource::parse_cache_file(&path).expect("parse fixture");
+    std::fs::remove_file(path).expect("remove sqlite fixture");
+
+    assert!(parsed.complete);
+    assert_eq!(parsed.records.len(), 1);
+    assert_eq!(parsed.records[0].record.prompt, 7);
+    assert_eq!(parsed.records[0].record.completion, 11);
   }
 }
