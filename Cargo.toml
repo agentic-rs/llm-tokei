@@ -43,10 +43,9 @@ terminal_size = "0.4"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# Experimental Git sources; replace with published versions before `cargo publish`.
-tokn-codex-protocol = { git = "https://github.com/agentic-rs/tokn-session", rev = "019660906dc18d30a5cc6a8c4e0412a217876a20" }
-tokn-opencode-protocol = { git = "https://github.com/agentic-rs/tokn-session", rev = "019660906dc18d30a5cc6a8c4e0412a217876a20" }
-tokn-pi-protocol = { git = "https://github.com/agentic-rs/tokn-session", rev = "019660906dc18d30a5cc6a8c4e0412a217876a20" }
+tokn-codex-protocol = "0.1.0"
+tokn-opencode-protocol = "0.1.0"
+tokn-pi-protocol = "0.1.0"
 
 [[example]]
 name = "gen-showcase"
