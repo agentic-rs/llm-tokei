@@ -167,7 +167,9 @@ llm-tokei --format table
 ```
 
 Interactive terminal reports end with a short rotating tip. Tips change every
-hour and are never added to redirected table output, JSON, or SVG.
+hour, mark command fragments with backticks, and skip suggestions already
+covered by the current effective CLI options. If no suggestion applies, no tip
+is added. Tips are never added to redirected table output, JSON, or SVG.
 
 Useful table flags:
 

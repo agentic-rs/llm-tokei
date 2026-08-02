@@ -14,7 +14,7 @@ mod time;
 mod tips;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::collections::HashSet;
 use std::io::IsTerminal;
@@ -344,7 +344,12 @@ fn main() -> Result<()> {
       };
       print!(
         "{}",
-        append_hourly_tip_if_interactive(rendered, args.format, std::io::stdout().is_terminal(), Utc::now())
+        append_hourly_tip_if_interactive(
+          rendered,
+          args.format,
+          std::io::stdout().is_terminal(),
+          tip_for_hour(&args, Utc::now()),
+        )
       );
     }
     Format::Json => {
@@ -398,7 +403,12 @@ fn render_activity_graph(
   )?;
   print!(
     "{}",
-    append_hourly_tip_if_interactive(rendered, args.format, std::io::stdout().is_terminal(), Utc::now())
+    append_hourly_tip_if_interactive(
+      rendered,
+      args.format,
+      std::io::stdout().is_terminal(),
+      tip_for_hour(args, Utc::now()),
+    )
   );
   Ok(())
 }
@@ -407,14 +417,14 @@ fn append_hourly_tip_if_interactive(
   rendered: String,
   format: Format,
   stdout_is_terminal: bool,
-  now: DateTime<Utc>,
+  tip: Option<&str>,
 ) -> String {
-  if format != Format::Table || !stdout_is_terminal {
+  if format != Format::Table || !stdout_is_terminal || tip.is_none() {
     return rendered;
   }
 
   let rendered = rendered.trim_end_matches('\n');
-  format!("{rendered}\n\nTip: {}\n", tip_for_hour(now))
+  format!("{rendered}\n\nTip: {}\n", tip.expect("tip checked above"))
 }
 
 fn display_command() -> String {
@@ -505,7 +515,6 @@ fn columns_env_width() -> Option<usize> {
 #[cfg(test)]
 mod output_tests {
   use super::*;
-  use chrono::TimeZone;
 
   #[test]
   fn svg_rendering_options_are_omitted_from_the_decorated_command() {
@@ -534,40 +543,38 @@ mod output_tests {
 
   #[test]
   fn tips_only_render_for_interactive_table_output() {
-    let now = Utc
-      .with_ymd_and_hms(2026, 8, 3, 12, 10, 0)
-      .single()
-      .expect("valid timestamp");
     let table = "source  total\ncodex   42\n".to_string();
-    let expected = format!("source  total\ncodex   42\n\nTip: {}\n", tip_for_hour(now));
+    let tip = "Use `--7d` to focus on the last week.";
+    let expected = format!("source  total\ncodex   42\n\nTip: {tip}\n");
 
     assert_eq!(
-      append_hourly_tip_if_interactive(table.clone(), Format::Table, true, now),
+      append_hourly_tip_if_interactive(table.clone(), Format::Table, true, Some(tip)),
       expected
     );
     assert_eq!(
-      append_hourly_tip_if_interactive(table.clone(), Format::Table, false, now),
+      append_hourly_tip_if_interactive(table.clone(), Format::Table, false, Some(tip)),
       table
     );
     assert_eq!(
-      append_hourly_tip_if_interactive(table.clone(), Format::Json, true, now),
+      append_hourly_tip_if_interactive(table.clone(), Format::Json, true, Some(tip)),
       table
     );
     assert_eq!(
-      append_hourly_tip_if_interactive(table.clone(), Format::Svg, true, now),
+      append_hourly_tip_if_interactive(table.clone(), Format::Svg, true, Some(tip)),
+      table
+    );
+    assert_eq!(
+      append_hourly_tip_if_interactive(table.clone(), Format::Table, true, None),
       table
     );
   }
 
   #[test]
   fn tips_keep_empty_terminal_output_readable() {
-    let now = Utc
-      .with_ymd_and_hms(2026, 8, 3, 12, 10, 0)
-      .single()
-      .expect("valid timestamp");
-    let rendered = append_hourly_tip_if_interactive("(no records found)\n".to_string(), Format::Table, true, now);
+    let tip = "Use `--7d` to focus on the last week.";
+    let rendered = append_hourly_tip_if_interactive("(no records found)\n".to_string(), Format::Table, true, Some(tip));
 
-    assert_eq!(rendered, format!("(no records found)\n\nTip: {}\n", tip_for_hour(now)));
+    assert_eq!(rendered, format!("(no records found)\n\nTip: {tip}\n"));
   }
 }
 
