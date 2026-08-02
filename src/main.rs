@@ -11,8 +11,10 @@ mod pricing;
 mod sources;
 mod text_count;
 mod time;
+mod tips;
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::collections::HashSet;
 use std::io::IsTerminal;
@@ -38,6 +40,7 @@ use crate::sources::{
   claude::ClaudeSource, codex::CodexSource, copilot::CopilotSource, copilot_cli::CopilotCliSource,
   opencode::OpenCodeSource, pi_agent::PiAgentSource, UsageSource,
 };
+use crate::tips::tip_for_hour;
 
 #[derive(Clone, Copy)]
 struct GraphOpts {
@@ -333,12 +336,16 @@ fn main() -> Result<()> {
 
   match args.format {
     Format::Table => {
-      if aggs.is_empty() {
-        println!("(no records found)");
+      let rendered = if aggs.is_empty() {
+        "(no records found)\n".to_string()
       } else {
         let opts = table_opts(&args, show_cost, use_color, unit, table_fit_width(&args));
-        println!("{}", render_table(&aggs, &dims, &opts));
-      }
+        format!("{}\n", render_table(&aggs, &dims, &opts))
+      };
+      print!(
+        "{}",
+        append_hourly_tip_if_interactive(rendered, args.format, std::io::stdout().is_terminal(), Utc::now())
+      );
     }
     Format::Json => {
       println!("{}", render_json(&aggs, &dims, unit));
@@ -389,8 +396,25 @@ fn render_activity_graph(
       svg_theme: args.svg_theme,
     },
   )?;
-  print!("{rendered}");
+  print!(
+    "{}",
+    append_hourly_tip_if_interactive(rendered, args.format, std::io::stdout().is_terminal(), Utc::now())
+  );
   Ok(())
+}
+
+fn append_hourly_tip_if_interactive(
+  rendered: String,
+  format: Format,
+  stdout_is_terminal: bool,
+  now: DateTime<Utc>,
+) -> String {
+  if format != Format::Table || !stdout_is_terminal {
+    return rendered;
+  }
+
+  let rendered = rendered.trim_end_matches('\n');
+  format!("{rendered}\n\nTip: {}\n", tip_for_hour(now))
 }
 
 fn display_command() -> String {
@@ -479,8 +503,9 @@ fn columns_env_width() -> Option<usize> {
 }
 
 #[cfg(test)]
-mod display_command_tests {
+mod output_tests {
   use super::*;
+  use chrono::TimeZone;
 
   #[test]
   fn svg_rendering_options_are_omitted_from_the_decorated_command() {
@@ -505,6 +530,44 @@ mod display_command_tests {
 
     assert_eq!(command, "llm-tokei graph --24h");
     assert_eq!(equals_command, "llm-tokei graph");
+  }
+
+  #[test]
+  fn tips_only_render_for_interactive_table_output() {
+    let now = Utc
+      .with_ymd_and_hms(2026, 8, 3, 12, 10, 0)
+      .single()
+      .expect("valid timestamp");
+    let table = "source  total\ncodex   42\n".to_string();
+    let expected = format!("source  total\ncodex   42\n\nTip: {}\n", tip_for_hour(now));
+
+    assert_eq!(
+      append_hourly_tip_if_interactive(table.clone(), Format::Table, true, now),
+      expected
+    );
+    assert_eq!(
+      append_hourly_tip_if_interactive(table.clone(), Format::Table, false, now),
+      table
+    );
+    assert_eq!(
+      append_hourly_tip_if_interactive(table.clone(), Format::Json, true, now),
+      table
+    );
+    assert_eq!(
+      append_hourly_tip_if_interactive(table.clone(), Format::Svg, true, now),
+      table
+    );
+  }
+
+  #[test]
+  fn tips_keep_empty_terminal_output_readable() {
+    let now = Utc
+      .with_ymd_and_hms(2026, 8, 3, 12, 10, 0)
+      .single()
+      .expect("valid timestamp");
+    let rendered = append_hourly_tip_if_interactive("(no records found)\n".to_string(), Format::Table, true, now);
+
+    assert_eq!(rendered, format!("(no records found)\n\nTip: {}\n", tip_for_hour(now)));
   }
 }
 

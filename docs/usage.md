@@ -166,6 +166,9 @@ Table output is the default.
 llm-tokei --format table
 ```
 
+Interactive terminal reports end with a short rotating tip. Tips change every
+hour and are never added to redirected table output, JSON, or SVG.
+
 Useful table flags:
 
 | Flag | Description |
