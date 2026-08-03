@@ -178,6 +178,10 @@ pub struct Args {
   #[arg(long, help_heading = "Display", global = true)]
   pub no_color: bool,
 
+  /// Disable rotating terminal tips.
+  #[arg(long, help_heading = "Display", global = true)]
+  pub no_tips: bool,
+
   /// Show human-readable usage values in table output.
   #[arg(short = 'h', long, help_heading = "Table")]
   pub human: bool,

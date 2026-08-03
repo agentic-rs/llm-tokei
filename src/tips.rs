@@ -124,6 +124,10 @@ const TIPS: &[Tip] = &[
 ];
 
 pub(crate) fn tip_for_hour(args: &Args, now: DateTime<Utc>) -> Option<&'static str> {
+  if args.no_tips {
+    return None;
+  }
+
   let hour = now.timestamp().div_euclid(60 * 60);
   let start = hour.rem_euclid(TIPS.len() as i64) as usize;
 
@@ -359,6 +363,17 @@ mod tests {
         Some("Use `--7d` to focus on the last week.")
       );
     }
+  }
+
+  #[test]
+  fn no_tips_disables_the_footer() {
+    let args = parse_args(&["--no-tips"]);
+    let now = Utc
+      .with_ymd_and_hms(2026, 8, 3, 12, 10, 0)
+      .single()
+      .expect("valid timestamp");
+
+    assert_eq!(tip_for_hour(&args, now), None);
   }
 
   #[test]

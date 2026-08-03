@@ -62,6 +62,8 @@ struct OutputConfig {
   #[serde(skip_serializing_if = "Option::is_none")]
   no_cost: Option<bool>,
   #[serde(skip_serializing_if = "Option::is_none")]
+  no_tips: Option<bool>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   cost: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   cost_per: Option<String>,
@@ -356,6 +358,7 @@ fn flat_config_from_value(value: &Value) -> Result<FlatConfig> {
       "asc" => flat.output.asc = value.as_bool(),
       "limit" => flat.output.limit = value.as_integer().and_then(|v| usize::try_from(v).ok()),
       "no-cost" => flat.output.no_cost = value.as_bool(),
+      "no-tips" => flat.output.no_tips = value.as_bool(),
       "cost" => flat.output.cost = value.as_str().map(str::to_string),
       "cost-per" => flat.output.cost_per = value.as_str().map(str::to_string),
       "period" => flat.period.period = value.as_str().map(str::to_string),
@@ -438,6 +441,7 @@ fn args_from_matches(matches: &clap::ArgMatches) -> Result<ConfigFile> {
   if cli_set(matches, "no_cost") {
     out.output.no_cost = Some(matches.get_flag("no_cost"));
   }
+  out.output.no_tips = flag_if_set(matches, "no_tips");
   if cli_set(matches, "cost") {
     out.output.cost = value_name::<CostMode>(matches, "cost");
   }
@@ -529,6 +533,7 @@ fn config_to_args(config: &ConfigFile, current: &clap::ArgMatches) -> Vec<String
   push_bool(&mut out, current, "asc", "--asc", config.output.asc);
   push_opt_display(&mut out, current, "limit", "--limit", config.output.limit);
   push_bool(&mut out, current, "no_cost", "--no-cost", config.output.no_cost);
+  push_bool(&mut out, current, "no_tips", "--no-tips", config.output.no_tips);
   push_opt(&mut out, current, "cost", "--cost", config.output.cost.as_deref());
   push_opt(
     &mut out,
