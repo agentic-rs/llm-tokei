@@ -206,7 +206,7 @@ pub struct Args {
   #[arg(long, conflicts_with = "unit", help_heading = "Display", global = true)]
   pub bytes: bool,
 
-  /// Show per-unit averages in table output: turn|round|session.
+  /// Show per-unit averages in table output: call|round|session.
   #[arg(long, value_enum, help_heading = "Table")]
   pub avg: Option<AvgBy>,
 

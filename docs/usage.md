@@ -166,8 +166,8 @@ Table output is the default.
 llm-tokei --format table
 ```
 
-Interactive terminal reports end with a short rotating tip. Tips change every
-hour, mark command fragments with backticks, and skip suggestions already
+Interactive terminal reports end with one of 100 rotating tips. Tips change
+every hour, mark command fragments with backticks, and skip suggestions already
 covered by the current effective CLI options. If no suggestion applies, no tip
 is added. Use `--no-tips` to disable the footer. Tips are never added to
 redirected table output, JSON, or SVG.
@@ -179,7 +179,7 @@ Useful table flags:
 | `-h`, `--human` | Compact usage numbers, for example `5.0M` |
 | `--bytes` | Show `input` and `output` in bytes instead of tokens |
 | `--split-input` | Show uncached input as `input_u` |
-| `--avg turn\|round\|session` | Show per-unit averages for usage columns |
+| `--avg call\|round\|session` | Show per-unit averages for usage columns |
 | `--table-width <N>` | Fit output to a fixed width |
 | `--no-fit` | Disable automatic table fitting |
 | `--no-color` | Disable ANSI colors |
