@@ -178,6 +178,10 @@ pub struct Args {
   #[arg(long, help_heading = "Display", global = true)]
   pub no_color: bool,
 
+  /// Disable rotating terminal tips.
+  #[arg(long, help_heading = "Display", global = true)]
+  pub no_tips: bool,
+
   /// Show human-readable usage values in table output.
   #[arg(short = 'h', long, help_heading = "Table")]
   pub human: bool,
@@ -202,7 +206,7 @@ pub struct Args {
   #[arg(long, conflicts_with = "unit", help_heading = "Display", global = true)]
   pub bytes: bool,
 
-  /// Show per-unit averages in table output: turn|round|session.
+  /// Show per-unit averages in table output: call|round|session.
   #[arg(long, value_enum, help_heading = "Table")]
   pub avg: Option<AvgBy>,
 

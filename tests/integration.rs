@@ -102,6 +102,8 @@ fn redirected_table_output_does_not_persist_processing_entries() {
   assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
   let stderr = String::from_utf8_lossy(&out.stderr);
   assert!(!stderr.contains("processing codex:"), "stderr: {stderr}");
+  let stdout = String::from_utf8_lossy(&out.stdout);
+  assert!(!stdout.contains("Tip:"), "stdout: {stdout}");
 }
 
 #[test]
@@ -125,6 +127,7 @@ fn json_output_hides_current_processing_entry() {
   let stderr = String::from_utf8_lossy(&out.stderr);
   assert!(!stderr.contains("processing codex:"), "stderr: {stderr}");
   let stdout = String::from_utf8_lossy(&out.stdout);
+  assert!(!stdout.contains("Tip:"), "stdout: {stdout}");
   serde_json::from_str::<serde_json::Value>(&stdout).expect("valid json");
 }
 
@@ -542,6 +545,7 @@ fn codex_fixture_renders_svg() {
   assert!(svg.contains("fill=\"#39c5cf\""), "svg: {svg}");
   assert!(svg.contains("codex"), "svg: {svg}");
   assert!(svg.contains("gpt-5"), "svg: {svg}");
+  assert!(!svg.contains("Tip:"), "svg: {svg}");
   assert!(svg.ends_with("</svg>\n"), "svg: {svg}");
 }
 
@@ -763,6 +767,7 @@ fn graph_renders_a_terminal_heatmap_for_long_ranges() {
   assert!(graph.contains("Mon"), "graph: {graph}");
   assert!(graph.contains("Less ·░▒▓█ More"), "graph: {graph}");
   assert!(graph.contains("Active 1/365 days"), "graph: {graph}");
+  assert!(!graph.contains("Tip:"), "graph: {graph}");
 }
 
 #[test]
@@ -802,6 +807,7 @@ fn graph_renders_native_svg_for_short_ranges() {
   );
   assert!(svg.contains("<title>Jan 2, 2025: 720</title>"), "svg: {svg}");
   assert!(!svg.contains("terminal-content"), "svg: {svg}");
+  assert!(!svg.contains("Tip:"), "svg: {svg}");
 }
 
 #[test]
