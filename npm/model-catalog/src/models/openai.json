@@ -127,6 +127,30 @@
       "openai-gpt-6-astra"
     ]
   },
+  "gpt-6.2-astra": {
+    "vendor": "openai",
+    "aliases": [
+      "global.openai.gpt-6.2-astra",
+      "gpt-6.2-astra@eu",
+      "openai.gpt-6.2-astra",
+      "openai/gpt-6.2-astra-pro",
+      "openai-gpt-62-astra",
+      "openai-gpt-62-astra-pro",
+      "us.openai.gpt-6.2-astra"
+    ]
+  },
+  "gpt-6.2-sol": {
+    "vendor": "openai",
+    "aliases": [
+      "global.openai.gpt-6.2-sol",
+      "gpt-6.2-sol@eu",
+      "openai.gpt-6.2-sol",
+      "openai/gpt-6.2-sol-pro",
+      "openai-gpt-62-sol",
+      "openai-gpt-62-sol-pro",
+      "us.openai.gpt-6.2-sol"
+    ]
+  },
   "gpt-image-2": {
     "vendor": "openai"
   },

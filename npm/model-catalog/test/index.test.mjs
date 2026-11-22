@@ -5,7 +5,7 @@ import { getModel, listModels, listModelsDevSources, resolveModel } from "../dis
 
 test("loads the complete vendor-split catalog", () => {
   const models = listModels();
-  assert.equal(models.length, 248);
+  assert.equal(models.length, 250);
   assert.deepEqual([...new Set(models.map((model) => model.vendor))].sort(), [
     "alibaba",
     "anthropic",
@@ -66,6 +66,27 @@ test("resolves representative first-wave vendor models", () => {
     const resolution = resolveModel({ model });
     assert.equal(resolution.canonical_name, canonicalName);
     assert.equal(resolution.confidence, "exact");
+  }
+});
+
+test("maps GPT-6.2 provider routes to Sol or Astra", () => {
+  for (const variant of ["sol", "astra"]) {
+    const canonicalName = `gpt-6.2-${variant}`;
+    const routes = [
+      ["openai", canonicalName],
+      ["openrouter", `openai/${canonicalName}-pro`],
+      ["vercel", `openai/${canonicalName}-fast`],
+      ["amazon-bedrock", `global.openai.${canonicalName}`],
+      ["requesty", `${canonicalName}@eu`],
+      ["venice", `openai-gpt-62-${variant}-pro`],
+      ["kenari", `gpt-6-2-${variant}`]
+    ];
+    for (const [provider, model] of routes) {
+      const resolution = resolveModel({ provider, model });
+      assert.equal(resolution.canonical_name, canonicalName, `${provider}/${model}`);
+      assert.equal(resolution.vendor, "openai");
+      assert.equal(resolution.family, "gpt-6.2");
+    }
   }
 });
 

@@ -1,7 +1,7 @@
 import { parse } from "smol-toml";
 import { posix as path } from "node:path";
 
-import type { PriceRecord } from "./types.js";
+import type { PriceField, PriceRecord } from "./types.js";
 
 export type TomlValue =
   | string
@@ -128,7 +128,7 @@ function removeRepeatedAssignments(source: string): string {
 }
 
 function canDiscardConflictingMetadata(table: string, key: string): boolean {
-  return table !== "cost" && table !== "extends" && key !== "base_model" && key !== "base_model_omit";
+  return table !== "cost" && !table.startsWith("cost.") && table !== "extends" && key !== "base_model" && key !== "base_model_omit";
 }
 
 /**
@@ -232,14 +232,21 @@ export function priceFromResolvedDocument(
     throw new Error(`models.dev ${path} has a non-table cost in commit ${commitSha}`);
   }
 
-  const input = requiredPrice(cost.input, "input", path, commitSha);
-  const output = requiredPrice(cost.output, "output", path, commitSha);
+  const prices = value.schema === 2 || cost.text !== undefined
+    ? tokenPricesV2(cost, path, commitSha)
+    : legacyTokenPrices(cost);
+  if (!prices) return undefined;
+
+  const input = optionalPrice(prices.input, "input", path, commitSha);
+  const output = optionalPrice(prices.output, "output", path, commitSha);
+  if (input === undefined || output === undefined) return undefined;
+
   const optional = {
-    reasoning: optionalPrice(cost.reasoning, "reasoning", path, commitSha),
-    cache_read: optionalPrice(cost.cache_read ?? cost.inputCached ?? cost.input_cached, "cache_read", path, commitSha),
-    cache_write: optionalPrice(cost.cache_write ?? cost.outputCached ?? cost.output_cached, "cache_write", path, commitSha),
-    input_audio: optionalPrice(cost.input_audio ?? cost.audio_input, "input_audio", path, commitSha),
-    output_audio: optionalPrice(cost.output_audio ?? cost.audio_output, "output_audio", path, commitSha)
+    reasoning: optionalPrice(prices.reasoning, "reasoning", path, commitSha),
+    cache_read: optionalPrice(prices.cache_read, "cache_read", path, commitSha),
+    cache_write: optionalPrice(prices.cache_write, "cache_write", path, commitSha),
+    input_audio: optionalPrice(prices.input_audio, "input_audio", path, commitSha),
+    output_audio: optionalPrice(prices.output_audio, "output_audio", path, commitSha)
   };
   return compactPrice({
     provider: identity.provider,
@@ -248,6 +255,58 @@ export function priceFromResolvedDocument(
     output,
     ...optional
   });
+}
+
+type ScalarTokenPrices = Partial<Record<PriceField, TomlValue | undefined>>;
+
+function legacyTokenPrices(cost: TomlDocument): ScalarTokenPrices {
+  return {
+    input: cost.input,
+    output: cost.output,
+    reasoning: cost.reasoning,
+    cache_read: cost.cache_read ?? cost.inputCached ?? cost.input_cached,
+    cache_write: cost.cache_write ?? cost.outputCached ?? cost.output_cached,
+    input_audio: cost.input_audio ?? cost.audio_input,
+    output_audio: cost.output_audio ?? cost.audio_output
+  };
+}
+
+function tokenPricesV2(cost: TomlDocument, path: string, commitSha: string): ScalarTokenPrices | undefined {
+  const readTable = (value: TomlValue | undefined, field: string): TomlDocument | undefined => {
+    if (value !== undefined && !isRecord(value)) {
+      throw new Error(`models.dev ${path} has a non-table ${field} in commit ${commitSha}`);
+    }
+    return value;
+  };
+  const text = readTable(cost.text, "cost.text");
+  const input = readTable(text?.input, "cost.text.input");
+  const output = readTable(text?.output, "cost.text.output");
+  if (!input || !output || !perToken(input) || !perToken(output)) return undefined;
+
+  const cache = readTable(input.cache, "cost.text.input.cache");
+  const explicit = readTable(cache?.explicit, "cost.text.input.cache.explicit");
+  const audio = readTable(cost.audio, "cost.audio");
+  const audioInput = readTable(audio?.input, "cost.audio.input");
+  const audioOutput = readTable(audio?.output, "cost.audio.output");
+
+  return {
+    input: input.price,
+    output: output.price,
+    reasoning: output.reasoning,
+    cache_read: cache?.read,
+    cache_write: firstCacheWrite(cache?.write) ?? firstCacheWrite(explicit?.write),
+    input_audio: perToken(audioInput) ? audioInput?.price : undefined,
+    output_audio: perToken(audioOutput) ? audioOutput?.price : undefined
+  };
+}
+
+function perToken(cost: TomlDocument | undefined): boolean {
+  return cost?.unit === undefined || cost.unit === "token";
+}
+
+function firstCacheWrite(write: TomlValue | undefined): TomlValue | undefined {
+  // models.dev's scalar API uses the first listed TTL as the provider default.
+  return isRecord(write) ? Object.values(write)[0] : write;
 }
 
 export function releaseDateFromResolvedDocument(value: TomlDocument): string | undefined {
@@ -320,14 +379,6 @@ function stringArray(value: TomlValue | undefined, name: string, path: string, c
     throw new Error(`models.dev ${path} has an invalid ${name} in commit ${commitSha}`);
   }
   return value.map((item) => item as string);
-}
-
-function requiredPrice(value: TomlValue | undefined, name: string, path: string, commitSha: string): string {
-  const price = optionalPrice(value, name, path, commitSha);
-  if (price === undefined) {
-    throw new Error(`models.dev ${path} has no ${name} price in commit ${commitSha}`);
-  }
-  return price;
 }
 
 function optionalPrice(value: TomlValue | undefined, name: string, path: string, commitSha: string): string | undefined {

@@ -229,6 +229,119 @@ test("normalizes historical cached price field names", async (t) => {
   assert.equal(changes[0].cache_write, "0.3");
 });
 
+test("projects schema 2 token prices through a legacy route migration", async (t) => {
+  const fixture = createFixtureRepository();
+  t.after(() => fixture.cleanup());
+  const fable = "providers/anthropic/models/claude-fable-5.toml";
+  const sol = "providers/openai/models/gpt-6.2-sol.toml";
+
+  fixture.write(fable, `[cost]\ninput = 10\noutput = 50\ncache_read = 1\ncache_write = 12.5\n`);
+  const initial = fixture.commit("add flat Claude Fable pricing", "2026-10-19T00:00:00Z");
+
+  fixture.write(fable, `schema = 2
+[cost.text.input]
+price = 10
+cache = { read = 1, explicit = { write = { "5m" = 12.5, "1h" = 20 } } }
+[cost.text.output]
+price = 50
+[[cost.multipliers]]
+when = { region = { equals = "us" } }
+factor = 1.1
+`);
+  fixture.commit("migrate Claude Fable pricing to schema 2", "2026-10-20T00:00:00Z");
+
+  fixture.write(sol, `schema = 2
+[cost.text.input]
+price = 2
+cache = { read = 0.1, write = { "30m" = 2.5, "12h" = 5 } }
+[[cost.text.input.overrides]]
+when = { context = { gt = 272_000 } }
+price = 4
+[cost.text.output]
+unit = "token"
+price = 10
+reasoning = 10
+[cost.audio.input]
+unit = "token"
+price = 20
+[cost.audio.output]
+unit = "second"
+price = 3
+`);
+  const added = fixture.commit("add nested Sol pricing", "2026-11-17T00:00:00Z");
+
+  const changes = [];
+  for await (const change of iteratePriceChanges({ repository_path: fixture.repository_path })) {
+    changes.push(change);
+  }
+
+  assert.deepEqual(changes.map((change) => change.commit_sha), [initial, added]);
+  const latest = await getLatestPriceSnapshot({ repository_path: fixture.repository_path });
+  assert.deepEqual(latest.prices[1], {
+    provider: "openai",
+    model: "gpt-6.2-sol",
+    input: "2",
+    output: "10",
+    reasoning: "10",
+    cache_read: "0.1",
+    cache_write: "2.5",
+    input_audio: "20"
+  });
+});
+
+test("leaves unsupported or incomplete routes unpriced and accepts later scalar rates", async (t) => {
+  const fixture = createFixtureRepository();
+  t.after(() => fixture.cleanup());
+  const route = "providers/test/models/text.toml";
+
+  fixture.write(route, `[cost]\ninput = 2\noutput = 10\n`);
+  const initial = fixture.commit("add scalar prices", "2026-10-19T00:00:00Z");
+
+  fixture.write(route, `schema = 2
+[cost.text.input]
+price = 2
+[[cost.text.output.overrides]]
+when = { context = { gt = 272_000 } }
+price = 15
+`);
+  fixture.write("providers/test/models/image.toml", `schema = 2\n[cost.image.output]\nprice = 0.2\n`);
+  fixture.write("providers/test/models/partial.toml", `[cost]\ninput = 2\n`);
+  const incomplete = fixture.commit("record routes without scalar text price pairs", "2026-10-20T00:00:00Z");
+
+  fixture.write(route, `schema = 2\n[cost.text.input]\nprice = 0\n[cost.text.output]\nprice = 10\n`);
+  const restored = fixture.commit("restore scalar text prices", "2026-10-21T00:00:00Z");
+
+  const changes = [];
+  for await (const change of iteratePriceChanges({ repository_path: fixture.repository_path })) {
+    changes.push(change);
+  }
+
+  assert.deepEqual(
+    changes.map((change) => [change.commit_sha, change.model, change.op, change.input]),
+    [
+      [initial, "text", "upsert", "2"],
+      [incomplete, "text", "delete", undefined],
+      [restored, "text", "upsert", "0"]
+    ]
+  );
+});
+
+test("rejects an explicitly invalid scalar price in schema 2", async (t) => {
+  const fixture = createFixtureRepository();
+  t.after(() => fixture.cleanup());
+
+  fixture.write(
+    "providers/test/models/text.toml",
+    `schema = 2\n[cost.text.input]\nprice = "invalid"\n[cost.text.output]\nprice = 1\n`
+  );
+  fixture.commit("add invalid text price", "2026-10-20T00:00:00Z");
+
+  await assert.rejects(
+    getLatestPriceSnapshot({ repository_path: fixture.repository_path }),
+    /has an invalid input price/
+  );
+});
+
 test("uses code-unit ordering for deterministic event sequences", async (t) => {
   const fixture = createFixtureRepository();
   t.after(() => fixture.cleanup());

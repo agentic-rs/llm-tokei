@@ -162,6 +162,9 @@ links, and Git symlinked model files before comparing prices. It normalizes the
 historical `inputCached` and `outputCached` names to `cache_read` and
 `cache_write`.
 
-Version 1 intentionally emits only the scalar base `[cost]` fields listed in
-the CSV headers. Context tiers and `context_over_200k` are ignored for now; a
-tier-only change does not create a price event.
+The CSV fields represent base per-token prices. For schema 2, these come from
+`cost.text` and, when billed per token, `cost.audio`. When multiple cache-write
+TTLs are listed, the first one is the provider default, matching the models.dev
+scalar API. Conditional prices, including context tiers and multipliers, are
+outside the scope of these CSVs. A route without both base text token prices
+has no scalar price record.
