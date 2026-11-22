@@ -600,6 +600,31 @@ upsert,2025-08-01T00:00:00Z,cccccccccccccccccccccccccccccccccccccccc,3,test-prov
   }
 
   #[test]
+  fn bundled_gpt_6_2_prices_cover_sol_and_astra() {
+    let table = table();
+    let ts = Utc.with_ymd_and_hms(2026, 11, 22, 0, 0, 0).unwrap();
+    for (model, input, output, cache_read, cache_write) in [
+      ("gpt-6.2-sol", 2.0, 10.0, 0.1, 2.5),
+      ("gpt-6.2-astra", 8.0, 40.0, 0.4, 10.0),
+    ] {
+      let route = format!("openai/{model}");
+      let mut usage = usage_record(ts, "openrouter", &route);
+      usage.completion = 1_000_000;
+      usage.cache_read = 1_000_000;
+      usage.cache_write = 1_000_000;
+
+      assert_eq!(table.canonical_model(Some("openrouter"), Some(&route)), model);
+      for mode in [CostMode::Actual, CostMode::Official] {
+        let costs = table.cost_breakdown_for(&usage, mode).unwrap();
+        assert_eq!(costs.prompt, input, "{model}");
+        assert_eq!(costs.completion, output, "{model}");
+        assert_eq!(costs.cache_read, cache_read, "{model}");
+        assert_eq!(costs.cache_write, cache_write, "{model}");
+      }
+    }
+  }
+
+  #[test]
   fn zero_history_price_is_included_for_actual_and_mixed_costs() {
     let history = HistoricalPrices::from_csv(
       b"op,ts,commit_sha,sequence,provider,model,input,output,reasoning,cache_read,cache_write,input_audio,output_audio\n\

@@ -1,21 +1,21 @@
 {
   "schema_version": 2,
-  "catalog_revision": "0c23f3759ecd32f037d5337bc4b7ee20d1815584",
-  "generator_revision": "e890e45dc4aae7989ae8c61cba6e7fd9cdfe9141",
-  "generated_at": "2026-09-05T03:51:21.079Z",
+  "catalog_revision": "834e48205f757a7931b160e90197309cf21670ac",
+  "generator_revision": "482773f2877fe92f891ac535b813a27aa07248f9",
+  "generated_at": "2026-11-22T04:07:32.059Z",
   "source_repository": "https://github.com/anomalyco/models.dev",
   "source_ref": "dev",
-  "source_commit_sha": "e736443eaae86bc4d0d5ed0a160e18adbf61ebf0",
+  "source_commit_sha": "adb882d15e4cca7dbff7c1179b4df64e147a8b1b",
   "prices": {
-    "path": "changes.4a76b739d4e960632f005b0209330fe286c5af7018ddd759f6be6ef0274190c7.csv",
+    "path": "changes.c1cef1825bb59108bfbe498db9e906f902b8380bac60c65710f7d29023391dc8.csv",
     "latest_path": "changes.csv",
-    "bytes": 2333723,
-    "sha256": "4a76b739d4e960632f005b0209330fe286c5af7018ddd759f6be6ef0274190c7"
+    "bytes": 6475030,
+    "sha256": "c1cef1825bb59108bfbe498db9e906f902b8380bac60c65710f7d29023391dc8"
   },
   "families": {
-    "path": "families.6dbbca818b861f1ff90adec04db671734e3361e354bcf6196f12dbb47705e7c0.csv",
+    "path": "families.a533af62ffa4daad138036ae20a57674233f5275c499eb80e099bf2415f14b2e.csv",
     "latest_path": "families.csv",
-    "bytes": 604735,
-    "sha256": "6dbbca818b861f1ff90adec04db671734e3361e354bcf6196f12dbb47705e7c0"
+    "bytes": 857431,
+    "sha256": "a533af62ffa4daad138036ae20a57674233f5275c499eb80e099bf2415f14b2e"
   }
 }

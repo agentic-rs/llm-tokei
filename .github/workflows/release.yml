@@ -149,11 +149,16 @@ jobs:
       - name: Verify published packages
         run: |
           verify_published() {
-            package_name="$1"
-            package_version="$2"
+            local package_name="$1" package_version="$2"
+            local encoded_name metadata attempt
+            encoded_name=$(jq -rn --arg name "$package_name" '$name | @uri')
             for attempt in {1..12}; do
-              if published_version=$(npm view "$package_name@$package_version" version --prefer-online 2>/dev/null) \
-                && [[ "$published_version" == "$package_version" ]]; then
+              if metadata=$(curl --fail --silent --show-error --max-time 10 \
+                -H 'Cache-Control: no-cache' \
+                "https://registry.npmjs.org/$encoded_name/$package_version") \
+                && jq -e --arg name "$package_name" --arg version "$package_version" \
+                  '.name == $name and .version == $version and (.dist.tarball | type == "string" and length > 0)' \
+                  <<< "$metadata" >/dev/null; then
                 echo "verified $package_name@$package_version"
                 return 0
               fi
