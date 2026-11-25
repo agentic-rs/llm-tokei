@@ -329,13 +329,21 @@ reporting works offline without any setup.
 | `multiplier` | Ratio of adjusted cost to base cost, shown when a service-tier rate applies |
 
 For Codex rollouts with a known Fast or Ultrafast selection, llm-tokei uses the
-rate for the priced provider, model, and date. These are API cost estimates
-based on the recorded selection. Subscription allowances and actual charges
-depend on billing and routing data outside the rollout. Unavailable tier rates
-and unknown selections use the base rates. Adjusted currency values are marked
-with `~` in tables and graphs, or `cost_estimated` in JSON. For rows combining
-tiers, the multiplier uses the total adjusted cost divided by the total base
-cost. Use `--group-by model,tier` to see the tiers separately.
+rate for the provider that supplied the token price. Bundled OpenAI pricing
+defaults to 2× for Fast and 6× for Ultrafast. A model override takes precedence
+when it applies on the usage date. A factor of 1 keeps the base rate and
+overrides the provider default. Unknown selections and tiers without an
+applicable provider or model rate use the base rate.
+
+The SQLite usage cache stores the selected tier in `records.tag`. Pricing is
+calculated when reports run, so rate changes apply to cached usage. Use
+`--group-by model,tier` to see tiers separately.
+
+These are API cost estimates based on the recorded selection. Subscription
+allowances and actual charges depend on billing and routing data outside the
+rollout. Adjusted costs are marked with `~` in tables and graphs, or
+`cost_estimated` in JSON. For rows that combine tiers, the multiplier is total
+adjusted cost divided by total base cost.
 
 Cost modes:
 
@@ -394,6 +402,14 @@ Example override:
 ```json
 {
   "providers": {
+    "openai": {
+      "service_tier_multipliers": { "fast": [{ "factor": 2 }] },
+      "models": {
+        "gpt-5": {
+          "service_tier_multipliers": { "fast": [{ "factor": 1 }] }
+        }
+      }
+    },
     "github-copilot": {
       "included": true,
       "models": {
@@ -416,6 +432,11 @@ Example override:
   ]
 }
 ```
+
+Set `service_tier_multipliers` on a provider for defaults and on its model
+entries for overrides. Each rule requires `factor` and accepts an optional
+`since` timestamp. Each level uses its latest rule in effect on the usage
+date.
 
 Pricing lookup checks the exact historical `(provider, model)` route first.
 The family mapping then supplies canonical aliases for grouping and official
@@ -649,7 +670,7 @@ Bundled pricing inputs:
 | File | Purpose |
 | --- | --- |
 | `data/models.json` | Canonical model names, official providers, aliases |
-| `data/providers.json` | Provider/model included status, multipliers, and dated service-tier rates |
+| `data/providers.json` | Included status and pricing multipliers, including provider defaults and model overrides |
 | `data/model-data/manifest.json` | Provenance and checksums for bundled CSV artifacts |
 | `data/model-data/changes.csv.gz` | Bundled timestamped price changes |
 | `data/model-data/families.csv.gz` | Bundled provider routes and canonical names |

@@ -118,6 +118,8 @@ pub struct ProviderEntry {
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub source: Option<bool>,
   #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+  pub service_tier_multipliers: BTreeMap<ServiceTier, Vec<ServiceTierRate>>,
+  #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
   pub models: BTreeMap<String, ModelOverride>,
 }
 
@@ -214,6 +216,7 @@ impl PricingTable {
       if v.source.is_some() {
         entry.source = v.source;
       }
+      entry.service_tier_multipliers.extend(v.service_tier_multipliers);
       for (model, mv) in models {
         let slot = entry.models.entry(model).or_default();
         if mv.multiplier.is_some() {
@@ -441,25 +444,34 @@ impl PricingTable {
   }
 
   fn service_tier_multiplier(&self, provider: &str, model: &str, tier: ServiceTier, ts: DateTime<Utc>) -> Option<f64> {
-    let rates = self
-      .providers
-      .get(&norm(provider))?
+    let provider = self.providers.get(&norm(provider))?;
+    provider
       .models
-      .get(model)?
-      .service_tier_multipliers
-      .get(&tier)?;
-    rates
-      .iter()
-      .filter(|rate| rate.since.is_none_or(|since| since <= ts))
-      .max_by_key(|rate| rate.since)
-      .map(|rate| rate.factor)
-      .filter(|factor| factor.is_finite() && *factor > 0.0 && *factor != 1.0)
+      .get(model)
+      .and_then(|model| model.service_tier_multipliers.get(&tier))
+      .and_then(|rates| service_tier_factor_at(rates, ts))
+      .or_else(|| {
+        provider
+          .service_tier_multipliers
+          .get(&tier)
+          .and_then(|rates| service_tier_factor_at(rates, ts))
+      })
+      .filter(|factor| *factor != 1.0)
   }
 
   #[cfg(test)]
   fn cost_breakdown_for(&self, r: &UsageRecord, mode: CostMode) -> Option<CostBreakdown> {
     self.priced_usage(r, mode).map(|usage| usage.costs)
   }
+}
+
+fn service_tier_factor_at(rates: &[ServiceTierRate], ts: DateTime<Utc>) -> Option<f64> {
+  rates
+    .iter()
+    .filter(|rate| rate.since.is_none_or(|since| since <= ts))
+    .max_by_key(|rate| rate.since)
+    .map(|rate| rate.factor)
+    .filter(|factor| factor.is_finite() && *factor > 0.0)
 }
 
 fn price_is_zero(price: &Price) -> bool {
@@ -699,9 +711,58 @@ upsert,2025-08-01T00:00:00Z,cccccccccccccccccccccccccccccccccccccccc,3,test-prov
 
     usage.model = Some("gpt-6-sol".into());
     usage.service_tier = Some(ServiceTier::Ultrafast);
-    let unavailable = table.priced_usage(&usage, CostMode::Official).unwrap();
-    assert_eq!(unavailable.service_tier_multiplier, None);
-    assert_eq!(unavailable.costs.total(), unavailable.base_cost);
+    let default_rate = table.priced_usage(&usage, CostMode::Official).unwrap();
+    assert_eq!(default_rate.service_tier_multiplier, Some(6.0));
+    assert_eq!(default_rate.costs.total(), default_rate.base_cost * 6.0);
+
+    usage.model = Some("gpt-5.5".into());
+    usage.service_tier = Some(ServiceTier::Fast);
+    let model_override = table.priced_usage(&usage, CostMode::Official).unwrap();
+    assert_eq!(model_override.service_tier_multiplier, Some(2.5));
+  }
+
+  #[test]
+  fn service_tier_defaults_allow_dated_model_overrides_and_explicit_base_rates() {
+    let mut table = PricingTable::default();
+    table.merge(
+      serde_json::from_value(serde_json::json!({
+        "providers": {
+          "example": {
+            "service_tier_multipliers": { "fast": [{ "factor": 2 }] },
+            "models": {
+              "example-model": {
+                "service_tier_multipliers": {
+                  "fast": [
+                    { "factor": 3, "since": "2026-11-25T00:00:00Z" },
+                    { "factor": 1, "since": "2026-11-26T00:00:00Z" }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "prices": [{ "provider": "example", "model": "example-model", "input": 4 }]
+      }))
+      .unwrap(),
+    );
+
+    let mut usage = usage_record(
+      Utc.with_ymd_and_hms(2026, 11, 24, 0, 0, 0).unwrap(),
+      "example",
+      "example-model",
+    );
+    usage.service_tier = Some(ServiceTier::Fast);
+    for (expected_factor, expected_cost) in [(Some(2.0), 8.0), (Some(3.0), 12.0), (None, 4.0)] {
+      let priced = table.priced_usage(&usage, CostMode::Actual).unwrap();
+      assert_eq!(priced.service_tier_multiplier, expected_factor);
+      assert_eq!(priced.costs.total(), expected_cost);
+      usage.ts += chrono::Duration::days(1);
+    }
+
+    usage.service_tier = None;
+    let untagged = table.priced_usage(&usage, CostMode::Actual).unwrap();
+    assert_eq!(untagged.service_tier_multiplier, None);
+    assert_eq!(untagged.costs.total(), 4.0);
   }
 
   #[test]

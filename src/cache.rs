@@ -7,7 +7,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-const CACHE_SCHEMA_VERSION: i64 = 10;
+const CACHE_SCHEMA_VERSION: i64 = 11;
 
 const FILES_SCHEMA: &str = "\
 CREATE TABLE IF NOT EXISTS files (
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS records (
     cost_embedded REAL,
     origin_key    TEXT,
     record_hash   BLOB,
-    service_tier  TEXT
+    tag           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_files_source_file ON files(source, file_path);
 CREATE INDEX IF NOT EXISTS idx_sessions_source_file ON sessions(source, file_path);
@@ -155,7 +155,7 @@ const EXPECTED_SESSIONS_COLUMNS: &[&str] = &[
   "session_hash",
 ];
 
-const EXPECTED_RECORDS_COLUMNS: &[&str] = &[
+const V9_RECORDS_COLUMNS: &[&str] = &[
   "id",
   "session_rowid",
   "provider",
@@ -181,7 +181,6 @@ const EXPECTED_RECORDS_COLUMNS: &[&str] = &[
   "cost_embedded",
   "origin_key",
   "record_hash",
-  "service_tier",
 ];
 
 pub struct CacheDb {
@@ -339,8 +338,8 @@ impl CacheDb {
     let mut conn = Self::open_conn(&path)?;
     if Self::can_migrate_v8(&conn)? {
       Self::migrate_v8(&mut conn)?;
-    } else if Self::can_migrate_v9(&conn)? {
-      Self::migrate_v9(&mut conn)?;
+    } else if Self::migratable_recent_version(&conn)?.is_some() {
+      Self::migrate_recent(&mut conn)?;
     } else if Self::needs_recreate(&conn)? {
       drop(conn);
       remove_cache_files(&path);
@@ -382,7 +381,7 @@ impl CacheDb {
     Ok(
       !columns_match(&table_columns(conn, "files")?, EXPECTED_FILES_COLUMNS)
         || !columns_match(&table_columns(conn, "sessions")?, EXPECTED_SESSIONS_COLUMNS)
-        || !columns_match(&table_columns(conn, "records")?, EXPECTED_RECORDS_COLUMNS),
+        || !records_columns_match(conn, &["tag"])?,
     )
   }
 
@@ -400,19 +399,17 @@ impl CacheDb {
     )
   }
 
-  fn can_migrate_v9(conn: &Connection) -> Result<bool> {
+  fn migratable_recent_version(conn: &Connection) -> Result<Option<i64>> {
     let schema_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if schema_version != 9 {
-      return Ok(false);
-    }
-    let records_columns = EXPECTED_RECORDS_COLUMNS
-      .strip_suffix(&["service_tier"])
-      .expect("service_tier was appended to the v9 records schema");
-    Ok(
-      columns_match(&table_columns(conn, "files")?, EXPECTED_FILES_COLUMNS)
-        && columns_match(&table_columns(conn, "sessions")?, EXPECTED_SESSIONS_COLUMNS)
-        && columns_match(&table_columns(conn, "records")?, records_columns),
-    )
+    let suffix: &[&str] = match schema_version {
+      9 => &[],
+      10 => &["service_tier"],
+      _ => return Ok(None),
+    };
+    let matches = columns_match(&table_columns(conn, "files")?, EXPECTED_FILES_COLUMNS)
+      && columns_match(&table_columns(conn, "sessions")?, EXPECTED_SESSIONS_COLUMNS)
+      && records_columns_match(conn, suffix)?;
+    Ok(matches.then_some(schema_version))
   }
 
   /// Make a v8 cache readable without scanning every historical record.
@@ -428,12 +425,12 @@ impl CacheDb {
        ALTER TABLE sessions ADD COLUMN session_hash BLOB;\
        ALTER TABLE records ADD COLUMN origin_key TEXT;\
        ALTER TABLE records ADD COLUMN record_hash BLOB;\
-       ALTER TABLE records ADD COLUMN service_tier TEXT;",
+       ALTER TABLE records ADD COLUMN tag TEXT;",
     )?;
     tx.execute_batch(SCHEMA)?;
     tx.execute(
       "INSERT INTO files (source, file_path, file_mtime_ns, file_size, file_aux_mtime_ns, file_aux_size) \
-       SELECT source, file_path, MAX(file_mtime) * 1000000000, 0, -1, -1 \
+       SELECT source, file_path, CASE WHEN source = 'codex' THEN -1 ELSE MAX(file_mtime) * 1000000000 END, 0, -1, -1 \
        FROM sessions \
        WHERE pruned = 0 \
        GROUP BY source, file_path",
@@ -453,16 +450,18 @@ impl CacheDb {
     Ok(())
   }
 
-  fn migrate_v9(conn: &mut Connection) -> Result<()> {
+  fn migrate_recent(conn: &mut Connection) -> Result<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     // Another report may have migrated the cache while we waited for the lock.
-    if Self::can_migrate_v9(&tx)? {
-      tx.execute_batch(
-        "ALTER TABLE records ADD COLUMN service_tier TEXT;\
+    match Self::migratable_recent_version(&tx)? {
+      Some(9) => tx.execute_batch(
+        "ALTER TABLE records ADD COLUMN tag TEXT;\
          UPDATE files SET file_mtime_ns = -1 WHERE source = 'codex';",
-      )?;
-      tx.pragma_update(None, "user_version", CACHE_SCHEMA_VERSION)?;
+      )?,
+      Some(10) => tx.execute_batch("ALTER TABLE records RENAME COLUMN service_tier TO tag;")?,
+      _ => return Ok(()),
     }
+    tx.pragma_update(None, "user_version", CACHE_SCHEMA_VERSION)?;
     tx.commit()?;
     Ok(())
   }
@@ -482,7 +481,7 @@ impl CacheDb {
               r.provider, r.model, r.ts, r.prompt, r.completion, r.input_bytes, r.output_bytes, \
               r.input_estimated, r.output_estimated, r.input_bytes_estimated, r.output_bytes_estimated, \
               r.reasoning, r.cache_read, r.cache_write, r.total, r.mode, r.agent, r.is_compaction, r.rounds, \
-              r.calls, r.cost_embedded, r.service_tier \
+              r.calls, r.cost_embedded, r.tag \
        FROM records r \
        INNER JOIN sessions s ON s.id = r.session_rowid \
        WHERE s.pruned = 0 AND s.source = ?1 AND s.file_path = ?2 \
@@ -921,7 +920,7 @@ fn insert_record(
     "INSERT INTO records (session_rowid, provider, model, ts, prompt, completion, input_bytes, output_bytes, \
                          input_estimated, output_estimated, input_bytes_estimated, output_bytes_estimated, \
                          reasoning, cache_read, cache_write, total, mode, agent, is_compaction, rounds, calls, \
-                         cost_embedded, origin_key, record_hash, service_tier) \
+                         cost_embedded, origin_key, record_hash, tag) \
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
     params![
       session_rowid,
@@ -961,7 +960,7 @@ fn update_record(tx: &Transaction<'_>, rowid: i64, parsed: &ParsedUsageRecord, f
        provider = ?1, model = ?2, ts = ?3, prompt = ?4, completion = ?5, input_bytes = ?6, output_bytes = ?7, \
        input_estimated = ?8, output_estimated = ?9, input_bytes_estimated = ?10, output_bytes_estimated = ?11, \
        reasoning = ?12, cache_read = ?13, cache_write = ?14, total = ?15, mode = ?16, agent = ?17, \
-       is_compaction = ?18, rounds = ?19, calls = ?20, cost_embedded = ?21, record_hash = ?22, service_tier = ?23 \
+       is_compaction = ?18, rounds = ?19, calls = ?20, cost_embedded = ?21, record_hash = ?22, tag = ?23 \
      WHERE id = ?24",
     params![
       record.provider.as_deref(),
@@ -1056,6 +1055,16 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
 
 fn columns_match(actual: &[String], expected: &[&str]) -> bool {
   actual.len() == expected.len() && actual.iter().zip(expected).all(|(actual, expected)| actual == expected)
+}
+
+fn records_columns_match(conn: &Connection, suffix: &[&str]) -> Result<bool> {
+  Ok(
+    table_columns(conn, "records")?
+      .split_at_checked(V9_RECORDS_COLUMNS.len())
+      .is_some_and(|(base, actual_suffix)| {
+        columns_match(base, V9_RECORDS_COLUMNS) && columns_match(actual_suffix, suffix)
+      }),
+  )
 }
 
 fn row_to_record(row: &rusqlite::Row<'_>, source_str: &str, ts_str: &str) -> UsageRecord {
@@ -1615,11 +1624,14 @@ CREATE TABLE records (
     .expect("seed Claude record");
     let codex_id = record_id(&db.conn, "codex-call");
     db.conn
-      .execute_batch("ALTER TABLE records DROP COLUMN service_tier; PRAGMA user_version = 9;")
+      .execute_batch("ALTER TABLE records DROP COLUMN tag; PRAGMA user_version = 9;")
       .expect("simulate v9 cache");
 
-    assert!(CacheDb::can_migrate_v9(&db.conn).expect("recognize v9 cache"));
-    CacheDb::migrate_v9(&mut db.conn).expect("migrate v9 cache");
+    assert_eq!(
+      CacheDb::migratable_recent_version(&db.conn).expect("recognize v9 cache"),
+      Some(9)
+    );
+    CacheDb::migrate_recent(&mut db.conn).expect("migrate v9 cache");
     assert!(!CacheDb::needs_recreate(&db.conn).expect("validate current schema"));
     assert_eq!(count(&db.conn, "records"), 2);
     assert_ne!(db.file_stamps_for("codex").unwrap().get(codex), Some(&stamp(1)));
@@ -1642,5 +1654,38 @@ CREATE TABLE records (
     assert_eq!(record_id(&db.conn, "codex-call"), codex_id);
     assert_eq!(db.file_stamps_for("codex").unwrap().get(codex), Some(&stamp(1)));
     assert_eq!(db.load_active_for_file("codex", codex).unwrap(), vec![fast, ultrafast]);
+  }
+
+  #[test]
+  fn migrates_v10_service_tier_to_tag_without_invalidating_warm_entries() {
+    let mut db = cache();
+    let codex = Path::new("/cache/rollout.jsonl");
+    let mut record = record("codex-session", 1, 10);
+    record.service_tier = Some(ServiceTier::Fast);
+    db.upsert_file(codex, stamp(1), "codex", &parsed([("codex-call", record.clone())]))
+      .expect("seed Codex record");
+    let id = record_id(&db.conn, "codex-call");
+    let hash = record_fingerprint(&record).expect("compute initial record hash");
+    db.conn
+      .execute_batch("ALTER TABLE records RENAME COLUMN tag TO service_tier; PRAGMA user_version = 10;")
+      .expect("simulate v10 cache");
+
+    assert_eq!(
+      CacheDb::migratable_recent_version(&db.conn).expect("recognize v10 cache"),
+      Some(10)
+    );
+    CacheDb::migrate_recent(&mut db.conn).expect("migrate v10 cache");
+
+    assert!(!CacheDb::needs_recreate(&db.conn).expect("validate current schema"));
+    assert_eq!(db.file_stamps_for("codex").unwrap().get(codex), Some(&stamp(1)));
+    assert_eq!(db.load_active_for_file("codex", codex).unwrap(), vec![record]);
+    let (tag, stored_hash) = db
+      .conn
+      .query_row("SELECT tag, record_hash FROM records WHERE id = ?1", [id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+      })
+      .expect("read migrated tag and hash");
+    assert_eq!(tag, "fast");
+    assert_eq!(stored_hash, hash);
   }
 }

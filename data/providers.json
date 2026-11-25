@@ -7,33 +7,19 @@
   },
   "openai": {
     "source": true,
+    "service_tier_multipliers": {
+      "fast": [{ "factor": 2 }],
+      "ultrafast": [{ "factor": 6 }]
+    },
     "models": {
-      "gpt-5.2": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
-      "gpt-5.3-codex": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
-      "gpt-5.4": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
-      "gpt-5.4-mini": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
       "gpt-5.5": { "service_tier_multipliers": { "fast": [{ "factor": 2.5 }] } },
-      "gpt-5.6-luna": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
-      "gpt-5.6-sol": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
-      "gpt-5.6-terra": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
-      "gpt-6-astra": {
-        "service_tier_multipliers": { "fast": [{ "factor": 2 }], "ultrafast": [{ "factor": 6 }] }
-      },
-      "gpt-6-luna": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
-      "gpt-6-sol": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
-      "gpt-6.1-sol": {
-        "service_tier_multipliers": { "fast": [{ "factor": 2 }], "ultrafast": [{ "factor": 6 }] }
-      },
-      "gpt-6.1-terra": { "service_tier_multipliers": { "fast": [{ "factor": 2 }] } },
       "gpt-6.2-astra": {
         "service_tier_multipliers": {
-          "fast": [{ "factor": 2 }],
           "ultrafast": [{ "factor": 3 }, { "factor": 6, "since": "2027-03-01T08:00:00Z" }]
         }
       },
       "gpt-6.2-sol": {
         "service_tier_multipliers": {
-          "fast": [{ "factor": 2 }],
           "ultrafast": [{ "factor": 3 }, { "factor": 6, "since": "2027-03-01T08:00:00Z" }]
         }
       }
