@@ -100,9 +100,7 @@ fn main() -> Result<()> {
   let mut all: Vec<UsageRecord> = Vec::new();
 
   if want.iter().any(|s| s == "codex") {
-    let path = args.codex_dir.clone().or_else(CodexSource::default_path);
-    if let Some(p) = path {
-      let src = CodexSource::new(p);
+    if let Some(src) = CodexSource::from_override(args.codex_dir.clone()) {
       let progress = ProcessingProgress::new(args.format, args.verbose);
       let result = if let Some(c) = cache.as_mut() {
         collect_one_record_source_with_cache(
@@ -774,7 +772,13 @@ where
 
     debug!(source, file = %file.display(), "processing file");
     progress.show(source, &file);
-    let parsed = parse_file(&file)?;
+    let parsed = match parse_file(&file) {
+      Ok(parsed) => parsed,
+      Err(error) => {
+        debug!(source, file = %file.display(), error = %error, "skipping unreadable source file");
+        continue;
+      }
+    };
     debug!(source, file = %file.display(), summary = %parsed_file_summary(&parsed), "file summary");
 
     let stamp_after = FileStamp::from_path(&file);
@@ -1180,11 +1184,8 @@ fn run_dump(
 
 fn discover_dump_files(source: DumpSource, args: &Args) -> Vec<PathBuf> {
   match source {
-    DumpSource::Codex => args
-      .codex_dir
-      .clone()
-      .or_else(CodexSource::default_path)
-      .map(|root| CodexSource::new(root).discover_files())
+    DumpSource::Codex => CodexSource::from_override(args.codex_dir.clone())
+      .map(|source| source.discover_files())
       .unwrap_or_default(),
     DumpSource::Copilot => {
       let roots = args.copilot_dir.clone().unwrap_or_else(CopilotSource::default_paths);

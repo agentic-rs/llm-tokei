@@ -267,7 +267,7 @@ pub struct Args {
   #[arg(long, value_delimiter = ',', help_heading = "Sources", global = true)]
   pub source: Option<Vec<String>>,
 
-  /// Override Codex sessions root (default: $CODEX_HOME/sessions or ~/.codex/sessions).
+  /// Scan only this Codex sessions directory instead of the default active and archived roots.
   #[arg(long, help_heading = "Sources", global = true)]
   pub codex_dir: Option<PathBuf>,
 

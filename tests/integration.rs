@@ -391,6 +391,142 @@ fn restricted_source_scan_preserves_unseen_cache_entries() {
   let _ = std::fs::remove_dir_all(cache_home);
 }
 
+fn write_codex_discovery_rollout(directory: &std::path::Path, session_id: &str) -> std::path::PathBuf {
+  let fixture = include_str!("fixtures/codex/sessions/2025/01/02/rollout-2025-01-02T10-00-00-test.jsonl");
+  std::fs::create_dir_all(directory).expect("create rollout directory");
+  let path = directory.join(format!("rollout-2025-01-02T10-00-00-{session_id}.jsonl"));
+  std::fs::write(&path, fixture.replace("sess-test-1", session_id)).expect("write synthetic rollout");
+  path
+}
+
+fn codex_discovery_cmd(directory: &std::path::Path) -> Command {
+  let mut cmd = Command::new(bin());
+  cmd
+    .env("CODEX_HOME", directory.join("codex"))
+    .env("XDG_CACHE_HOME", directory.join("cache"));
+  cmd
+}
+
+fn assert_codex_discovery_report(cmd: &mut Command, sessions: u64) {
+  let output = cmd
+    .args(["--source", "codex", "--format", "json"])
+    .output()
+    .expect("run Codex report");
+  assert!(
+    output.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let report: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).expect("parse Codex report");
+  assert_eq!(report.len(), 1, "report: {report:?}");
+  assert_eq!(report[0]["sessions"], sessions);
+  assert_eq!(report[0]["total"], 720 * sessions);
+}
+
+#[test]
+fn codex_default_discovery_scans_active_and_archived_rollouts() {
+  let directory = temp_cache_home("codex-discovery");
+  let active_dir = directory.join("codex/sessions");
+  let archive_dir = directory.join("codex/archived_sessions");
+  let active = write_codex_discovery_rollout(&active_dir.join("2025/01/02"), "00000000-0000-4000-8000-000000000001");
+  let archived = write_codex_discovery_rollout(&archive_dir, "00000000-0000-4000-8000-000000000002");
+
+  assert_codex_discovery_report(&mut codex_discovery_cmd(&directory), 2);
+  for scope in [&active_dir, &archive_dir] {
+    assert_codex_discovery_report(codex_discovery_cmd(&directory).arg("--codex-dir").arg(scope), 1);
+  }
+
+  let archived_copy = archive_dir.join(active.file_name().expect("rollout basename"));
+  std::fs::copy(&active, &archived_copy).expect("copy rollout to archive");
+  assert_codex_discovery_report(&mut codex_discovery_cmd(&directory), 2);
+  assert_codex_discovery_report(codex_discovery_cmd(&directory).arg("--no-cache"), 2);
+
+  let output = codex_discovery_cmd(&directory)
+    .args(["dump", "--codex"])
+    .output()
+    .expect("dump discovered Codex rollouts");
+  assert!(
+    output.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let dump = String::from_utf8(output.stdout).expect("UTF-8 session dump");
+  let headers: Vec<_> = dump.lines().filter_map(|line| line.strip_prefix("# ")).collect();
+  assert_eq!(headers.len(), 2, "dump: {dump}");
+  assert!(headers.contains(&active.to_str().expect("UTF-8 active path")));
+  assert!(headers.contains(&archived.to_str().expect("UTF-8 archived path")));
+
+  std::fs::remove_dir_all(directory).expect("remove synthetic rollouts and cache");
+}
+
+#[test]
+fn codex_archiving_and_unarchiving_preserve_cached_usage() {
+  let directory = temp_cache_home("codex-discovery-cache");
+  let active_dir = directory.join("codex/sessions");
+  let archive_dir = directory.join("codex/archived_sessions");
+  let active = write_codex_discovery_rollout(&active_dir, "00000000-0000-4000-8000-000000000003");
+  let archived = archive_dir.join(active.file_name().expect("rollout basename"));
+
+  assert_codex_discovery_report(&mut codex_discovery_cmd(&directory), 1);
+  assert!(directory.join("cache/llm-tokei.db").is_file());
+
+  std::fs::create_dir_all(&archive_dir).expect("create archive directory");
+  std::fs::rename(&active, &archived).expect("archive rollout");
+  std::fs::remove_dir(&active_dir).expect("remove empty sessions directory");
+  assert_codex_discovery_report(&mut codex_discovery_cmd(&directory), 1);
+  assert_codex_discovery_report(&mut codex_discovery_cmd(&directory), 1);
+
+  std::fs::create_dir_all(&active_dir).expect("recreate sessions directory");
+  std::fs::rename(&archived, &active).expect("unarchive rollout");
+  assert_codex_discovery_report(&mut codex_discovery_cmd(&directory), 1);
+
+  std::fs::remove_dir_all(directory).expect("remove synthetic rollout and cache");
+}
+
+#[test]
+fn codex_discovers_compressed_archives_and_deduplicates_plain_copies() {
+  let directory = temp_cache_home("codex-discovery-compressed");
+  let archive_dir = directory.join("codex/archived_sessions");
+  let plain = write_codex_discovery_rollout(&archive_dir, "00000000-0000-4000-8000-000000000004");
+  let compressed = plain.with_extension("jsonl.zst");
+  let rollout = std::fs::read(&plain).expect("read synthetic rollout");
+  let archive = zstd::stream::encode_all(rollout.as_slice(), 0).expect("compress synthetic rollout");
+  std::fs::write(&compressed, archive).expect("write compressed rollout");
+  std::fs::remove_file(&plain).expect("remove original plaintext rollout");
+  std::fs::write(archive_dir.join("a-corrupt.jsonl.zst"), b"invalid zstd data").expect("write unreadable archive");
+
+  assert_codex_discovery_report(&mut codex_discovery_cmd(&directory), 1);
+  assert_codex_discovery_report(codex_discovery_cmd(&directory).arg("--no-cache"), 1);
+
+  let output = codex_discovery_cmd(&directory)
+    .args(["dump", "--codex"])
+    .output()
+    .expect("dump compressed Codex archive");
+  assert!(
+    output.status.success(),
+    "stderr: {}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let dump = String::from_utf8(output.stdout).expect("UTF-8 session dump");
+  assert_eq!(
+    dump.lines().next(),
+    Some(format!("# {}", compressed.display()).as_str())
+  );
+  assert!(dump.contains(r#""text":"hello""#), "dump: {dump}");
+
+  std::fs::write(&plain, &rollout).expect("restore plaintext copy in archive");
+  assert_codex_discovery_report(codex_discovery_cmd(&directory).arg("--no-cache"), 1);
+
+  let active_dir = directory.join("codex/sessions/2025/01/02");
+  std::fs::create_dir_all(&active_dir).expect("create active rollout directory");
+  let active = active_dir.join(plain.file_name().expect("rollout basename"));
+  std::fs::rename(&plain, &active).expect("move plaintext copy to active root");
+  assert_codex_discovery_report(&mut codex_discovery_cmd(&directory), 1);
+  assert_codex_discovery_report(codex_discovery_cmd(&directory).arg("--no-cache"), 1);
+
+  std::fs::remove_dir_all(directory).expect("remove synthetic rollouts and cache");
+}
+
 #[test]
 fn codex_fixture_parses_last_total() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");

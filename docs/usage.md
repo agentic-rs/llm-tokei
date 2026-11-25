@@ -416,21 +416,25 @@ overridden per model.
 
 ### Codex CLI
 
-Default root:
+Default roots (with `~/.codex` used when `CODEX_HOME` is unset):
 
 ```text
 $CODEX_HOME/sessions
-~/.codex/sessions
+$CODEX_HOME/archived_sessions
 ```
 
-Override:
+Use `--codex-dir` to scan a single directory:
 
 ```sh
 llm-tokei --source codex --codex-dir /path/to/sessions
 ```
 
-Codex sessions are JSONL rollout files. Cumulative token snapshots are converted
-to per-turn deltas. Response item text is used for byte-mode input/output.
+Reports and automatic `dump --codex` discovery include active and archived
+rollouts, in both `.jsonl` and `.jsonl.zst` formats. If both locations contain
+the same Codex rollout, the active copy takes precedence. Within a directory,
+the plain copy takes precedence over its compressed sibling. Cumulative token
+snapshots are converted to per-turn deltas. Response item text is used for
+byte-mode input/output.
 
 ### OpenCode
 

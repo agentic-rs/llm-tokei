@@ -1,6 +1,6 @@
 use crate::model::{ParsedUsageFile, ParsedUsageRecord, SessionKind, Source, UsageRecord};
 use crate::sources::dump::{DumpSink, DumpedSession};
-use crate::sources::{read_jsonl_with_status, summarize_records, JsonlPosition, UsageSource};
+use crate::sources::{read_jsonl_reader_with_status, summarize_records, JsonlPosition, UsageSource};
 use crate::text_count::{
   all_strings, json_serialized_or_string, message_content, nested_fields, BytesSink, SpanSink, StatsSink, StringSink,
   TextSpan, TextStats, TokenSpan, TokenStatsSink, TokenUsageStats,
@@ -9,47 +9,69 @@ use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::fs::File;
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tokn_codex_protocol::{ResponseItem, RolloutItem, RolloutLine, SessionMetaItem, TurnContextItem};
 use tracing::debug;
 use walkdir::WalkDir;
 
 pub struct CodexSource {
-  pub root: PathBuf,
+  roots: Vec<PathBuf>,
 }
 
 impl CodexSource {
-  pub fn new(root: PathBuf) -> Self {
-    Self { root }
-  }
-
-  pub fn default_path() -> Option<PathBuf> {
+  pub fn from_override(root: Option<PathBuf>) -> Option<Self> {
+    if let Some(root) = root {
+      return Some(Self { roots: vec![root] });
+    }
     let base = std::env::var_os("CODEX_HOME")
       .map(PathBuf::from)
       .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|p| p.join(".codex")))?;
-    Some(base.join("sessions"))
+    Some(Self {
+      roots: vec![base.join("sessions"), base.join("archived_sessions")],
+    })
   }
 
   pub fn discover_files(&self) -> Vec<PathBuf> {
-    if !self.root.exists() {
-      return Vec::new();
-    }
-    WalkDir::new(&self.root)
-      .follow_links(false)
-      .into_iter()
-      .filter_map(|e| e.ok())
-      .filter(|e| e.file_type().is_file())
-      .filter_map(|entry| {
-        let path = entry.path();
-        let name = path.file_name().and_then(|n| n.to_str())?;
-        if name.ends_with(".jsonl") {
-          Some(path.to_path_buf())
-        } else {
-          None
+    let mut rollouts = HashMap::new();
+    for (root_index, root) in self.roots.iter().enumerate() {
+      for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+      {
+        if !entry.file_type().is_file() {
+          continue;
         }
-      })
-      .collect()
+        let Some((stem, compressed)) = rollout_name(entry.path()) else {
+          continue;
+        };
+
+        // Codex keeps the unique rollout basename when it moves a thread.
+        // Custom filenames can repeat in different directories.
+        let directory = if self.roots.len() > 1 && stem.starts_with("rollout-") {
+          None
+        } else {
+          entry.path().parent().map(Path::to_path_buf)
+        };
+        let key = (directory, stem.to_owned());
+        let candidate = ((root_index, compressed), entry.into_path());
+        match rollouts.entry(key) {
+          Entry::Vacant(slot) => {
+            slot.insert(candidate);
+          }
+          Entry::Occupied(mut slot) if &candidate < slot.get() => {
+            slot.insert(candidate);
+          }
+          _ => {}
+        }
+      }
+    }
+    let mut files = rollouts.into_values().map(|(_, path)| path).collect::<Vec<_>>();
+    files.sort_unstable();
+    files
   }
 
   pub fn parse_file(path: &Path) -> Result<Option<Vec<UsageRecord>>> {
@@ -140,7 +162,7 @@ trait RolloutVisitor {
 }
 
 fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<bool> {
-  read_jsonl_with_status::<RolloutLine, _>(path, |line, position| {
+  read_jsonl_reader_with_status(open_rollout(path)?, |line: RolloutLine, position| {
     let ts = parse_rfc3339(line.timestamp());
     if let Some(ts) = ts {
       visitor.timestamp(ts);
@@ -167,6 +189,24 @@ fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<bool>
       _ => {}
     }
   })
+}
+
+fn open_rollout(path: &Path) -> io::Result<Box<dyn BufRead>> {
+  let file = File::open(path)?;
+  if rollout_name(path).is_some_and(|(_, compressed)| compressed) {
+    Ok(Box::new(BufReader::new(zstd::stream::read::Decoder::new(file)?)))
+  } else {
+    Ok(Box::new(BufReader::new(file)))
+  }
+}
+
+fn rollout_name(path: &Path) -> Option<(&str, bool)> {
+  let name = path.file_name()?.to_str()?;
+  if let Some(stem) = name.strip_suffix(".jsonl.zst") {
+    Some((stem, true))
+  } else {
+    name.strip_suffix(".jsonl").map(|stem| (stem, false))
+  }
 }
 
 fn dispatch_response_item<V: RolloutVisitor>(item: &ResponseItem, payload: &Value, visitor: &mut V) {
@@ -268,7 +308,13 @@ impl SessionMeta {
   }
 
   fn resolved_session_id(&self, path: &Path) -> String {
-    self.session_id.clone().unwrap_or_else(|| file_stem_or(path, "unknown"))
+    self.session_id.clone().unwrap_or_else(|| {
+      rollout_name(path)
+        .map(|(stem, _)| stem)
+        .or_else(|| path.file_stem().and_then(|stem| stem.to_str()))
+        .unwrap_or("unknown")
+        .to_owned()
+    })
   }
 }
 
@@ -729,18 +775,22 @@ fn extract_turn_usage(payload: &Value, prev_total: &mut Option<TokenUsageStats>)
   }
 }
 
-fn file_stem_or(path: &Path, fallback: &str) -> String {
-  path
-    .file_stem()
-    .and_then(|s| s.to_str())
-    .unwrap_or(fallback)
-    .to_string()
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
   use crate::text_count::SpanStatsSink;
+
+  #[test]
+  fn plain_and_compressed_rollouts_share_a_fallback_session_id() {
+    let meta = SessionMeta::default();
+    for name in [
+      "rollout-example.jsonl",
+      "rollout-example.jsonl.zst",
+      "rollout-example.txt",
+    ] {
+      assert_eq!(meta.resolved_session_id(Path::new(name)), "rollout-example");
+    }
+  }
 
   fn test_position() -> JsonlPosition {
     JsonlPosition {
