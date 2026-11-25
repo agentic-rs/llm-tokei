@@ -119,7 +119,7 @@ llm-tokei dump --copilot --out ./sessions-jsonl
 
 | Source | Default location |
 | --- | --- |
-| Codex CLI | `$CODEX_HOME/sessions` or `~/.codex/sessions` |
+| Codex CLI | `sessions` and `archived_sessions` under `$CODEX_HOME` (default `~/.codex`) |
 | OpenCode | `$OPENCODE_DATA_DIR/opencode.db`, `$XDG_DATA_HOME/opencode/opencode.db`, or `~/.local/share/opencode/opencode.db` |
 | Claude Code | `$CLAUDE_HOME/projects` or `~/.claude/projects` |
 | GitHub Copilot Chat | VS Code, Insiders, VSCodium, and Cursor `workspaceStorage` roots |

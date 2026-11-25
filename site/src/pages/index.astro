@@ -6,7 +6,7 @@ const pageDescription =
   "A Rust CLI for local coding-agent token and cost reports.";
 
 const sourceRows = [
-  ["Codex CLI", "$CODEX_HOME/sessions", "session JSONL"],
+  ["Codex CLI", "$CODEX_HOME/{sessions,archived_sessions}", "session JSONL or Zstandard"],
   ["OpenCode", "$OPENCODE_DATA_DIR/opencode.db", "read-only SQLite"],
   ["Claude Code", "$CLAUDE_HOME/projects", "project logs"],
   ["Copilot Chat", "editor workspaceStorage", "chat sessions"],
