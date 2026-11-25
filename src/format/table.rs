@@ -1,4 +1,4 @@
-use crate::aggregate::{Aggregate, GroupDim};
+use crate::aggregate::{effective_service_tier_multiplier, Aggregate, GroupDim};
 use crate::cli::{AvgBy, Unit};
 use std::collections::BTreeMap;
 
@@ -56,6 +56,12 @@ fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) ->
     columns.push(ColumnLayout::from_stat_spec(spec));
   }
 
+  let show_multiplier = opts.show_cost && aggs.iter().any(|a| a.service_tier_multiplier().is_some());
+  if show_multiplier {
+    headers.push(Col::num("multiplier"));
+    columns.push(ColumnLayout::optional_stat("multiplier".into(), 69));
+  }
+
   let cost_per_columns = if opts.show_cost {
     top_cost_per_columns(aggs)
   } else {
@@ -76,6 +82,9 @@ fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) ->
     for spec in active_stat_specs(opts) {
       row.push(spec.row_col(a, opts, &max_units));
     }
+    if show_multiplier {
+      row.push(multiplier_col(a.service_tier_multiplier()));
+    }
     for key in &cost_per_columns {
       row.push(Col::num(&fmt_cost(*a.cost_per.get(key).unwrap_or(&0.0))));
     }
@@ -88,6 +97,13 @@ fn build_table_model(aggs: &[Aggregate], dims: &[GroupDim], opts: &TableOpts) ->
     .collect();
   for spec in active_stat_specs(opts) {
     total_row.push(spec.total_col(&totals, aggs, opts, &max_units));
+  }
+  if show_multiplier {
+    total_row.push(multiplier_col(effective_service_tier_multiplier(
+      totals.cost,
+      totals.base_cost,
+      totals.service_tier_adjusted,
+    )));
   }
   for key in &cost_per_columns {
     let total = aggs.iter().map(|a| a.cost_per.get(key).copied().unwrap_or(0.0)).sum();
@@ -261,7 +277,9 @@ impl StatColumnSpec {
       && self
         .human_unit(a, opts, den)
         .is_some_and(|unit| unit < max_units[self.id.idx()]);
-    let col = Col::num(&text).with_muted(muted);
+    let col = self
+      .cost_marked_col(text, opts, a.service_tier_adjusted)
+      .with_muted(muted);
     if self.id == StatColumnId::Sessions {
       col.with_muted_suffix(fmt_session_count(a.root_sessions, a.sub_agent_sessions).1)
     } else {
@@ -289,11 +307,22 @@ impl StatColumnSpec {
       && self
         .total_human_unit(totals, opts, den)
         .is_some_and(|unit| unit < max_units[self.id.idx()]);
-    let col = Col::num(&text).with_muted(muted);
+    let col = self
+      .cost_marked_col(text, opts, totals.service_tier_adjusted)
+      .with_muted(muted);
     if self.id == StatColumnId::Sessions {
       col.with_muted_suffix(fmt_session_count(totals.root_sessions, totals.sub_agent_sessions).1)
     } else {
       col
+    }
+  }
+
+  fn cost_marked_col(&self, text: String, opts: &TableOpts, cost_estimated: bool) -> Col {
+    let currency = self.id == StatColumnId::CostBase || (opts.unit == Unit::Cost && self.id.is_usage());
+    if cost_estimated && currency && text != "-" {
+      Col::num(&format!("~{text}"))
+    } else {
+      Col::num(&text)
     }
   }
 
@@ -331,6 +360,13 @@ impl StatColumnSpec {
 }
 
 impl StatColumnId {
+  fn is_usage(self) -> bool {
+    matches!(
+      self,
+      Self::Input | Self::Output | Self::Reasoning | Self::CacheRead | Self::CacheWrite | Self::Total
+    )
+  }
+
   fn idx(self) -> usize {
     match self {
       StatColumnId::Input => 0,
@@ -398,6 +434,8 @@ struct TableTotals {
   root_sessions: u64,
   sub_agent_sessions: u64,
   cost: f64,
+  base_cost: f64,
+  service_tier_adjusted: bool,
 }
 
 impl TableTotals {
@@ -421,6 +459,8 @@ impl TableTotals {
     self.root_sessions += a.root_sessions;
     self.sub_agent_sessions += a.sub_agent_sessions;
     self.cost += a.cost;
+    self.base_cost += a.base_cost;
+    self.service_tier_adjusted |= a.service_tier_adjusted;
   }
 
   fn shown_input(&self, opts: &TableOpts) -> f64 {
@@ -588,15 +628,7 @@ fn fmt_usage_value_avg(value: f64, estimated: bool, den: u64, opts: &TableOpts) 
 }
 
 fn usage_unit_suffix(opts: &TableOpts, id: StatColumnId) -> &'static str {
-  if !matches!(
-    id,
-    StatColumnId::Input
-      | StatColumnId::Output
-      | StatColumnId::Reasoning
-      | StatColumnId::CacheRead
-      | StatColumnId::CacheWrite
-      | StatColumnId::Total
-  ) {
+  if !id.is_usage() {
     return "";
   }
   match opts.unit {
@@ -867,6 +899,13 @@ fn fmt_cost(v: f64) -> String {
   }
 }
 
+fn multiplier_col(multiplier: Option<f64>) -> Col {
+  match multiplier {
+    Some(multiplier) => Col::num(&format!("{}x", fmt_float(multiplier))),
+    None => Col::num("-"),
+  }
+}
+
 fn top_cost_per_columns(aggs: &[Aggregate]) -> Vec<String> {
   let mut totals: BTreeMap<String, f64> = BTreeMap::new();
   for agg in aggs {
@@ -988,6 +1027,8 @@ mod tests {
       sub_agent_sessions: 56,
       cost_embedded: 0.0,
       cost: 12.3456,
+      base_cost: 12.3456,
+      service_tier_adjusted: false,
       cost_per: BTreeMap::new(),
       first_ts: None,
       last_ts: None,
@@ -1008,6 +1049,33 @@ mod tests {
 
   fn render_test_table(aggs: &[Aggregate], dims: &[GroupDim], fit_width: Option<usize>) -> String {
     render_table(aggs, dims, &opts(true, None, Unit::Tokens, false, fit_width))
+  }
+
+  #[test]
+  fn shows_service_tier_multiplier_weighted_by_base_cost() {
+    let mut fast = aggregate(&["fast"]);
+    fast.base_cost = 2.0;
+    fast.cost = 4.0;
+    fast.service_tier_adjusted = true;
+    let mut standard = aggregate(&["standard"]);
+    standard.base_cost = 6.0;
+    standard.cost = 6.0;
+    let rows = [fast, standard];
+
+    let table = render_test_table(&rows, &[GroupDim::Tier], None);
+    assert!(table.lines().next().unwrap().ends_with("multiplier"));
+    for (tier, cost, multiplier) in [
+      ("fast", "~4.0000", "2x"),
+      ("standard", "6.0000", "-"),
+      ("TOTAL", "~10.0000", "1.25x"),
+    ] {
+      let line = table.lines().find(|line| line.starts_with(tier)).unwrap();
+      let last_cols: Vec<_> = line.split_whitespace().rev().take(2).collect();
+      assert_eq!(last_cols, [multiplier, cost], "{table}");
+    }
+
+    let hidden_cost = render_table(&rows, &[GroupDim::Tier], &opts(false, None, Unit::Tokens, false, None));
+    assert!(!hidden_cost.contains("multiplier"), "{hidden_cost}");
   }
 
   #[test]

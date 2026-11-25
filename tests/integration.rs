@@ -528,6 +528,81 @@ fn codex_discovers_compressed_archives_and_deduplicates_plain_copies() {
 }
 
 #[test]
+fn codex_reports_selected_tiers_and_applies_cost_multipliers_with_cache() {
+  use serde_json::{json, Value};
+
+  let directory = temp_cache_home("codex-tier-pricing");
+  let sessions = directory.join("codex/sessions");
+  std::fs::create_dir_all(&sessions).expect("create synthetic sessions directory");
+  let path = sessions.join("rollout-2026-11-25T00-00-00-example.jsonl");
+  let line = |kind: &str, payload: Value| {
+    json!({ "timestamp": "2026-11-25T00:00:00Z", "type": kind, "payload": payload }).to_string()
+  };
+  let mut lines = vec![line(
+    "session_meta",
+    json!({ "id": "example", "model_provider": "openai" }),
+  )];
+  for (id, tier) in [("first", "default"), ("second", "priority"), ("third", "ultrafast")] {
+    lines.extend([
+      line(
+        "event_msg",
+        json!({
+          "type": "thread_settings_applied",
+          "thread_settings": { "model": "gpt-6.2-sol", "model_provider_id": "openai", "service_tier": tier }
+        }),
+      ),
+      line("turn_context", json!({ "turn_id": id, "model": "gpt-6.2-sol" })),
+      line(
+        "event_msg",
+        json!({
+          "type": "token_count",
+          "info": { "last_token_usage": { "input_tokens": 1000, "output_tokens": 1000, "total_tokens": 2000 } }
+        }),
+      ),
+      line("event_msg", json!({ "type": "task_complete", "turn_id": id })),
+    ]);
+  }
+  std::fs::write(path, lines.join("\n")).expect("write synthetic tier rollout");
+
+  let report = |group: &str, extra: &[&str]| -> Vec<Value> {
+    let output = codex_discovery_cmd(&directory)
+      .args(["--source", "codex", "--group-by", group, "--format", "json"])
+      .args(extra)
+      .output()
+      .expect("run report");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    serde_json::from_slice(&output.stdout).expect("parse report")
+  };
+  let grouped = report("tier", &["--no-cache"]);
+  assert_eq!(grouped.len(), 3);
+  for (tier, cost, multiplier) in [
+    ("standard", 0.012, None),
+    ("fast", 0.024, Some(2.0)),
+    ("ultrafast", 0.036, Some(3.0)),
+  ] {
+    let row = grouped
+      .iter()
+      .find(|row| row["keys"]["tier"] == tier)
+      .expect("tier row");
+    assert_eq!(row["calls"], 1);
+    assert!((row["cost"].as_f64().unwrap() - cost).abs() < 1e-9, "{row}");
+    if let Some(multiplier) = multiplier {
+      assert!((row["multiplier"].as_f64().unwrap() - multiplier).abs() < 1e-9, "{row}");
+    } else {
+      assert!(row.get("multiplier").is_none(), "{row}");
+    }
+  }
+  assert_eq!(report("tier", &[]), grouped);
+  assert_eq!(report("tier", &[]), grouped);
+  let mixed = report("model", &[]);
+  assert_eq!(mixed.len(), 1);
+  assert!((mixed[0]["multiplier"].as_f64().unwrap() - 2.0).abs() < 1e-9);
+  assert_eq!(mixed[0]["cost_estimated"], true);
+
+  std::fs::remove_dir_all(directory).expect("remove synthetic rollouts and cache");
+}
+
+#[test]
 fn codex_fixture_parses_last_total() {
   let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex/sessions");
   let (mut cmd, cache_home) = isolated_cmd("codex-total");

@@ -56,6 +56,7 @@ pub fn records_from_shutdown_model_metrics(args: ShutdownRecordArgs<'_>) -> Vec<
         project_name: args.project_name.clone(),
         provider: Some(provider),
         model: Some(normalized_model),
+        service_tier: None,
         ts,
         prompt: tokens.prompt,
         completion: tokens.completion,

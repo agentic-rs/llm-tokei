@@ -308,6 +308,18 @@
       "openai-gpt-6-astra"
     ]
   },
+  "gpt-6-luna": {
+    "provider": "openai"
+  },
+  "gpt-6-sol": {
+    "provider": "openai"
+  },
+  "gpt-6.1-sol": {
+    "provider": "openai"
+  },
+  "gpt-6.1-terra": {
+    "provider": "openai"
+  },
   "gpt-6.2-astra": {
     "provider": "openai",
     "aliases": [

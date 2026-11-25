@@ -250,6 +250,7 @@ fn parse_session(path: &Path) -> Result<ParsedUsageFile> {
         project_name: None,
         provider: Some("anthropic".to_string()),
         model: turn.model,
+        service_tier: None,
         ts,
         prompt,
         completion,

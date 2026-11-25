@@ -1,4 +1,4 @@
-use crate::model::{ParsedUsageFile, ParsedUsageRecord, SessionKind, Source, UsageRecord};
+use crate::model::{ParsedUsageFile, ParsedUsageRecord, ServiceTier, SessionKind, Source, UsageRecord};
 use crate::sources::dump::{DumpSink, DumpedSession};
 use crate::sources::{read_jsonl_reader_with_status, summarize_records, JsonlPosition, UsageSource};
 use crate::text_count::{
@@ -81,13 +81,13 @@ impl CodexSource {
 
   pub fn parse_cache_file(path: &Path) -> Result<ParsedUsageFile> {
     let mut builder = RecordBuilder::new(path);
-    let complete = walk_rollout(path, &mut builder)?;
+    let complete = walk_rollout(open_rollout(path)?, &mut builder)?;
     Ok(builder.into_parsed_file(complete))
   }
 
   pub fn dump_session_messages(path: &Path) -> Result<Option<DumpedSession>> {
     let mut builder = DumpBuilder::new(path);
-    let _ = walk_rollout(path, &mut builder)?;
+    let _ = walk_rollout(open_rollout(path)?, &mut builder)?;
     Ok(builder.into_session())
   }
 }
@@ -135,6 +135,12 @@ trait RolloutVisitor {
   /// Called for `line.type == "turn_context"`.
   fn turn_context(&mut self, _item: Option<&TurnContextItem>, _native: &Value) {}
 
+  fn thread_settings_applied(&mut self, _payload: &Value) {}
+
+  fn task_started(&mut self, _turn_id: &str) {}
+
+  fn task_finished(&mut self, _turn_id: Option<&str>) {}
+
   /// Called for `event_msg` records with a `token_count` payload.
   /// Receives the parsed line timestamp and the full event payload.
   fn turn_end(&mut self, _ts: DateTime<Utc>, _payload: &Value, _position: JsonlPosition, _event_id: Option<&str>) {}
@@ -161,17 +167,33 @@ trait RolloutVisitor {
   fn reasoning(&mut self, _payload: &Value) {}
 }
 
-fn walk_rollout<V: RolloutVisitor>(path: &Path, visitor: &mut V) -> Result<bool> {
-  read_jsonl_reader_with_status(open_rollout(path)?, |line: RolloutLine, position| {
+fn walk_rollout<R: BufRead, V: RolloutVisitor>(reader: R, visitor: &mut V) -> Result<bool> {
+  read_jsonl_reader_with_status(reader, |line: RolloutLine, position| {
     let ts = parse_rfc3339(line.timestamp());
     if let Some(ts) = ts {
       visitor.timestamp(ts);
     }
     match line.item() {
       RolloutItem::SessionMeta(item) => visitor.session_meta(Some(item), line.native()),
-      RolloutItem::EventMessage(item) if item.event_type.as_deref() == Some("token_count") => {
-        let ts = ts.unwrap_or_else(epoch_utc);
-        visitor.turn_end(ts, &item.native, position, source_event_id(line.native()));
+      RolloutItem::EventMessage(item) => {
+        let payload = &item.native;
+        let turn_id = payload.get("turn_id").and_then(Value::as_str);
+        match item.event_type.as_deref() {
+          Some("thread_settings_applied") => visitor.thread_settings_applied(payload),
+          Some("task_started" | "turn_started") => {
+            if let Some(turn_id) = turn_id {
+              visitor.task_started(turn_id);
+            }
+          }
+          Some("task_complete" | "turn_complete" | "turn_aborted") => visitor.task_finished(turn_id),
+          Some("token_count") => visitor.turn_end(
+            ts.unwrap_or_else(epoch_utc),
+            payload,
+            position,
+            source_event_id(line.native()),
+          ),
+          _ => {}
+        }
       }
       RolloutItem::TurnContext(item) => visitor.turn_context(Some(item), line.native()),
       RolloutItem::ResponseItem(item) => {
@@ -332,13 +354,28 @@ struct RecordBuilder<'a> {
   pending_rounds: u64,
   inherited_turn: bool,
   seen_round_ids: HashSet<String>,
+  selected_tier: Option<SelectedTier>,
+  tier_turn: Option<TierTurn>,
   calls: Vec<Turn>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct SelectedTier {
+  tier: ServiceTier,
+  model: String,
+  provider: String,
+}
+
+struct TierTurn {
+  id: String,
+  selection: Option<SelectedTier>,
 }
 
 struct Turn {
   ts: DateTime<Utc>,
   model: Option<String>,
   provider: Option<String>,
+  service_tier: Option<ServiceTier>,
   tokens: TokenUsageStats,
   bytes: BytesSink,
   rounds: u64,
@@ -357,6 +394,8 @@ impl<'a> RecordBuilder<'a> {
       pending_rounds: 0,
       inherited_turn: false,
       seen_round_ids: HashSet::new(),
+      selected_tier: None,
+      tier_turn: None,
       calls: Vec::new(),
     }
   }
@@ -390,6 +429,7 @@ impl<'a> RecordBuilder<'a> {
           project_name: None,
           provider: t.provider,
           model: t.model,
+          service_tier: t.service_tier,
           ts: t.ts,
           prompt: t.tokens.prompt,
           completion: t.tokens.completion,
@@ -439,11 +479,35 @@ impl<'a> RecordBuilder<'a> {
       ts,
       model: self.meta.model.clone(),
       provider: self.meta.provider.clone(),
+      service_tier: self.service_tier(),
       tokens,
       bytes: self.pending_bytes.take(),
       rounds: std::mem::take(&mut self.pending_rounds),
       origin_key: origin_key(event_id, position, 0),
     });
+  }
+
+  fn begin_tier_turn(&mut self, turn_id: &str) {
+    self.tier_turn = Some(TierTurn {
+      id: turn_id.to_owned(),
+      selection: self.selected_tier.clone(),
+    });
+  }
+
+  fn tier_turn_id(&self) -> Option<&str> {
+    self.tier_turn.as_ref().map(|turn| turn.id.as_str())
+  }
+
+  fn service_tier(&self) -> Option<ServiceTier> {
+    let turn = self.tier_turn.as_ref()?;
+    // Pre-turn compaction can report usage before Codex persists the new
+    // turn context. At that point `meta.model` can still refer to the old turn.
+    if !self.seen_round_ids.contains(&turn.id) {
+      return None;
+    }
+    let selection = turn.selection.as_ref()?;
+    (self.meta.model.as_deref() == Some(&selection.model) && self.meta.provider.as_deref() == Some(&selection.provider))
+      .then_some(selection.tier)
   }
 }
 
@@ -460,6 +524,50 @@ impl RolloutVisitor for RecordBuilder<'_> {
 
   fn turn_end(&mut self, ts: DateTime<Utc>, payload: &Value, position: JsonlPosition, event_id: Option<&str>) {
     self.push_turn(ts, payload, position, event_id);
+  }
+
+  fn thread_settings_applied(&mut self, payload: &Value) {
+    let owned = match payload.get("thread_id") {
+      None | Some(Value::Null) => !self.inherited_turn,
+      Some(owner) => self
+        .meta
+        .session_id
+        .as_deref()
+        .is_some_and(|id| owner.as_str() == Some(id)),
+    };
+    if !owned {
+      return;
+    }
+
+    // Each event is a full thread snapshot. Omitted or unsupported tiers end the
+    // previous selection for future turns.
+    let selection = payload.get("thread_settings").and_then(|settings| {
+      Some(SelectedTier {
+        tier: ServiceTier::from_codex(settings.get("service_tier")?.as_str()?)?,
+        model: settings.get("model")?.as_str()?.to_owned(),
+        provider: settings.get("model_provider_id")?.as_str()?.to_owned(),
+      })
+    });
+    if selection != self.selected_tier {
+      // Newer Codex versions can apply settings to later steps in an active
+      // turn. A settings event does not identify the first affected request.
+      if let Some(turn) = &mut self.tier_turn {
+        turn.selection = None;
+      }
+      self.selected_tier = selection;
+    }
+  }
+
+  fn task_started(&mut self, turn_id: &str) {
+    if self.tier_turn_id() != Some(turn_id) {
+      self.begin_tier_turn(turn_id);
+    }
+  }
+
+  fn task_finished(&mut self, turn_id: Option<&str>) {
+    if turn_id.is_none() || self.tier_turn_id() == turn_id {
+      self.tier_turn = None;
+    }
   }
 
   fn turn_context(&mut self, item: Option<&TurnContextItem>, native: &Value) {
@@ -490,6 +598,13 @@ impl RolloutVisitor for RecordBuilder<'_> {
     }
     if self.inherited_turn {
       return;
+    }
+    // Older histories can lack start events. Repeated context after compaction
+    // does not establish a new turn or resolve an ambiguous settings change.
+    match turn_id {
+      Some(id) if !self.seen_round_ids.contains(id) && self.tier_turn_id() != Some(id) => self.begin_tier_turn(id),
+      None => self.tier_turn = None,
+      _ => {}
     }
     match turn_id {
       Some(turn_id) if self.seen_round_ids.insert(turn_id.to_string()) => self.pending_rounds += 1,
@@ -803,6 +918,137 @@ mod tests {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
       .join("tests/fixtures/codex/sessions/2025/01/02/rollout-2025-01-02T10-00-00-test.jsonl");
     CodexSource::parse_file(&path).expect("parse fixture").expect("records")
+  }
+
+  fn tier_rollout(lines: &[Value]) -> Vec<Option<ServiceTier>> {
+    let jsonl = lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+    let mut builder = RecordBuilder::new(Path::new("rollout-example.jsonl"));
+    assert!(walk_rollout(std::io::Cursor::new(jsonl), &mut builder).expect("parse rollout"));
+    builder
+      .into_parsed_file(true)
+      .into_usage_records()
+      .into_iter()
+      .map(|record| record.service_tier)
+      .collect()
+  }
+
+  fn rollout_line(kind: &str, payload: Value) -> Value {
+    serde_json::json!({ "type": kind, "timestamp": "2026-11-18T01:02:03Z", "payload": payload })
+  }
+
+  fn turn_context(id: &str, model: &str) -> Value {
+    rollout_line("turn_context", serde_json::json!({ "turn_id": id, "model": model }))
+  }
+
+  fn settings(owner: Option<&str>, tier: Option<&str>) -> Value {
+    rollout_line(
+      "event_msg",
+      serde_json::json!({
+        "type": "thread_settings_applied", "thread_id": owner,
+        "thread_settings": { "model": "gpt-6.2-sol", "model_provider_id": "openai", "service_tier": tier }
+      }),
+    )
+  }
+
+  fn token_count() -> Value {
+    rollout_line(
+      "event_msg",
+      serde_json::json!({
+        "type": "token_count",
+        "info": { "last_token_usage": { "input_tokens": 10, "output_tokens": 2, "total_tokens": 12 } }
+      }),
+    )
+  }
+
+  #[test]
+  fn service_tier_tracks_turn_boundaries_and_full_settings_snapshots() {
+    let session = rollout_line(
+      "session_meta",
+      serde_json::json!({ "id": "example", "model_provider": "openai" }),
+    );
+    let model = "gpt-6.2-sol";
+    let task_event =
+      |kind: &str, id: &str| rollout_line("event_msg", serde_json::json!({ "type": kind, "turn_id": id }));
+    assert_eq!(
+      tier_rollout(&[
+        session,
+        task_event("task_started", "first"),
+        turn_context("first", model),
+        token_count(),
+        settings(None, Some("fast")),
+        token_count(),
+        task_event("task_complete", "first"),
+        task_event("turn_started", "second"),
+        token_count(),
+        turn_context("second", model),
+        token_count(),
+        settings(None, Some("ultrafast")),
+        turn_context("second", model),
+        token_count(),
+        task_event("turn_complete", "second"),
+        token_count(),
+        turn_context("third", model),
+        token_count(),
+        settings(None, None),
+        turn_context("fourth", model),
+        token_count(),
+        settings(None, Some("default")),
+        turn_context("fifth", "gpt-6.2-astra"),
+        token_count(),
+        turn_context("sixth", model),
+        token_count(),
+      ]),
+      [
+        None,
+        None,
+        None,
+        Some(ServiceTier::Fast),
+        None,
+        None,
+        Some(ServiceTier::Ultrafast),
+        None,
+        None,
+        Some(ServiceTier::Standard),
+      ]
+    );
+  }
+
+  #[test]
+  fn forked_rollouts_only_apply_owned_or_unambiguously_local_tier_settings() {
+    let parent = "00000000-0001-7000-8000-000000000001";
+    let child = "00000000-0002-7000-8000-000000000001";
+    let inherited = "00000000-0001-7000-8000-000000000002";
+    let first = "00000000-0002-7000-8000-000000000002";
+    let second = "00000000-0002-7000-8000-000000000003";
+    let third = "00000000-0002-7000-8000-000000000004";
+    let model = "gpt-6.2-sol";
+    let session = rollout_line(
+      "session_meta",
+      serde_json::json!({ "id": child, "forked_from_id": parent, "model_provider": "openai" }),
+    );
+    assert_eq!(
+      tier_rollout(&[
+        session,
+        settings(None, Some("ultrafast")),
+        turn_context(inherited, model),
+        token_count(),
+        settings(Some(child), Some("priority")),
+        settings(Some(parent), Some("ultrafast")),
+        turn_context(first, model),
+        token_count(),
+        settings(Some(parent), Some("ultrafast")),
+        turn_context(second, model),
+        token_count(),
+        settings(None, Some("default")),
+        turn_context(third, model),
+        token_count(),
+      ]),
+      [
+        Some(ServiceTier::Fast),
+        Some(ServiceTier::Fast),
+        Some(ServiceTier::Standard)
+      ]
+    );
   }
 
   #[test]

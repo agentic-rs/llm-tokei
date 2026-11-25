@@ -21,6 +21,10 @@ struct JsonRow<'a> {
   sub_agent_sessions: u64,
   cost_embedded: f64,
   cost: f64,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  multiplier: Option<f64>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  cost_estimated: Option<bool>,
   #[serde(skip_serializing_if = "BTreeMap::is_empty")]
   cost_per: &'a BTreeMap<String, f64>,
   first_ts: Option<&'a chrono::DateTime<chrono::Utc>>,
@@ -63,6 +67,8 @@ pub fn render_json(aggs: &[Aggregate], dims: &[GroupDim], unit: Unit) -> String 
         sub_agent_sessions: a.sub_agent_sessions,
         cost_embedded: a.cost_embedded,
         cost: a.cost,
+        multiplier: a.service_tier_multiplier(),
+        cost_estimated: a.service_tier_adjusted.then_some(true),
         cost_per: &a.cost_per,
         first_ts: a.first_ts.as_ref(),
         last_ts: a.last_ts.as_ref(),

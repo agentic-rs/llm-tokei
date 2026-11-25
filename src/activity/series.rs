@@ -66,9 +66,9 @@ impl ActivitySeries {
         continue;
       }
       let index = (date - start).num_days() as usize;
-      let value = record_value(record, pricing, cost_mode, unit);
+      let (value, is_estimated) = record_value(record, pricing, cost_mode, unit);
       values[index] += value;
-      estimated[index] |= value > 0.0 && record_is_estimated(record, unit);
+      estimated[index] |= value > 0.0 && is_estimated;
     }
 
     Self::from_values_with_estimates(start, values, estimated, unit)
@@ -160,9 +160,9 @@ impl HourlyActivitySeries {
       }
       let index = (record.ts - first_hour).num_hours() as usize;
       debug_assert!(index < values.len());
-      let value = record_value(record, pricing, cost_mode, unit);
+      let (value, is_estimated) = record_value(record, pricing, cost_mode, unit);
       values[index] += value;
-      estimated[index] |= value > 0.0 && record_is_estimated(record, unit);
+      estimated[index] |= value > 0.0 && is_estimated;
     }
 
     Self::from_values_with_estimates(start, end, first_hour, values, estimated, unit)
@@ -253,22 +253,23 @@ fn floor_local_hour(time: DateTime<Utc>) -> DateTime<Utc> {
   time - Duration::seconds(elapsed_seconds) - Duration::nanoseconds(i64::from(local.nanosecond()))
 }
 
-fn record_value(record: &UsageRecord, pricing: &PricingTable, cost_mode: CostMode, unit: Unit) -> f64 {
+fn record_value(record: &UsageRecord, pricing: &PricingTable, cost_mode: CostMode, unit: Unit) -> (f64, bool) {
+  let token_estimated = record.input_estimated || record.output_estimated;
   match unit {
-    Unit::Tokens => record.total() as f64,
-    Unit::Bytes => record.input_bytes.saturating_add(record.output_bytes) as f64,
+    Unit::Tokens => (record.total() as f64, token_estimated),
+    Unit::Bytes => (
+      record.input_bytes.saturating_add(record.output_bytes) as f64,
+      record.input_bytes_estimated || record.output_bytes_estimated,
+    ),
     Unit::Cost => pricing
-      .cost_breakdown_for(record, cost_mode)
-      .map(|breakdown| breakdown.total())
+      .priced_usage(record, cost_mode)
+      .map(|priced| {
+        (
+          priced.costs.total(),
+          token_estimated || (priced.service_tier_multiplier.is_some() && priced.base_cost > 0.0),
+        )
+      })
       .unwrap_or_default(),
-  }
-}
-
-fn record_is_estimated(record: &UsageRecord, unit: Unit) -> bool {
-  match unit {
-    Unit::Tokens => record.input_estimated || record.output_estimated,
-    Unit::Bytes => record.input_bytes_estimated || record.output_bytes_estimated,
-    Unit::Cost => record.input_estimated || record.output_estimated,
   }
 }
 

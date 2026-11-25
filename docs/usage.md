@@ -127,6 +127,7 @@ Available dimensions:
 | `source` | Agent/source name |
 | `model` | Canonicalized model name |
 | `provider` | Provider ID when known |
+| `tier` | Selected Codex service tier when known |
 | `project` | Project name or cwd basename |
 | `date` | Date bucket label |
 | `session` | Session ID, shortened in tables |
@@ -322,11 +323,19 @@ local policy metadata under `data/`. Bundled and updated model data use the same
 manifest validation, CSV parsing, route mapping, and timestamp lookup, so cost
 reporting works offline without any setup.
 
-One cost column is reported:
-
 | Column | Meaning |
 | --- | --- |
 | `cost($)` / `cost` | USD in the selected cost mode |
+| `multiplier` | Ratio of adjusted cost to base cost, shown when a service-tier rate applies |
+
+For Codex rollouts with a known Fast or Ultrafast selection, llm-tokei uses the
+rate for the priced provider, model, and date. These are API cost estimates
+based on the recorded selection. Subscription allowances and actual charges
+depend on billing and routing data outside the rollout. Unavailable tier rates
+and unknown selections use the base rates. Adjusted currency values are marked
+with `~` in tables and graphs, or `cost_estimated` in JSON. For rows combining
+tiers, the multiplier uses the total adjusted cost divided by the total base
+cost. Use `--group-by model,tier` to see the tiers separately.
 
 Cost modes:
 
@@ -342,6 +351,7 @@ Examples:
 llm-tokei --cost actual
 llm-tokei --cost mixed --cost-per provider
 llm-tokei --cost official --group-by model --sort cost
+llm-tokei --source codex --group-by model,tier
 ```
 
 `--cost-per <dimension>` appends the top 3 cost contributors for a dimension as
@@ -639,7 +649,7 @@ Bundled pricing inputs:
 | File | Purpose |
 | --- | --- |
 | `data/models.json` | Canonical model names, official providers, aliases |
-| `data/providers.json` | Provider/model included and multiplier metadata |
+| `data/providers.json` | Provider/model included status, multipliers, and dated service-tier rates |
 | `data/model-data/manifest.json` | Provenance and checksums for bundled CSV artifacts |
 | `data/model-data/changes.csv.gz` | Bundled timestamped price changes |
 | `data/model-data/families.csv.gz` | Bundled provider routes and canonical names |
