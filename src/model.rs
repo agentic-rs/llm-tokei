@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -49,6 +49,33 @@ impl SessionKind {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceTier {
+  Standard,
+  Fast,
+  Ultrafast,
+}
+
+impl ServiceTier {
+  pub fn from_codex(value: &str) -> Option<Self> {
+    match value.trim() {
+      "default" | "standard" => Some(Self::Standard),
+      "priority" | "fast" => Some(Self::Fast),
+      "ultrafast" => Some(Self::Ultrafast),
+      _ => None,
+    }
+  }
+
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Standard => "standard",
+      Self::Fast => "fast",
+      Self::Ultrafast => "ultrafast",
+    }
+  }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UsageRecord {
   pub source: Source,
@@ -60,6 +87,8 @@ pub struct UsageRecord {
   pub project_name: Option<String>,
   pub provider: Option<String>,
   pub model: Option<String>,
+  /// Service tier recorded by the source, when available.
+  pub service_tier: Option<ServiceTier>,
   pub ts: DateTime<Utc>,
   pub prompt: u64,
   pub completion: u64,
@@ -175,6 +204,7 @@ mod tests {
       project_name: None,
       provider: None,
       model: None,
+      service_tier: None,
       ts: Utc.timestamp_opt(0, 0).single().expect("epoch timestamp"),
       prompt: 0,
       completion: 0,

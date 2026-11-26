@@ -137,6 +137,7 @@ impl OpenCodeSource {
           project_name: meta.project_name.clone(),
           provider: message.provider_id,
           model: message.model_id,
+          service_tier: None,
           ts,
           // Keep `input` as uncached prompt tokens only.
           prompt: tokens.input,

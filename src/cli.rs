@@ -214,7 +214,7 @@ pub struct Args {
   #[arg(long, help_heading = "Cache", global = true)]
   pub no_cache: bool,
 
-  /// Grouping dimensions, comma-separated: source,model,provider,project,date,session.
+  /// Grouping dimensions, comma-separated: source,model,provider,tier,project,date,session.
   #[arg(
     long,
     value_delimiter = ',',

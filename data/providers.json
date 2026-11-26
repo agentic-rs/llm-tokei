@@ -6,7 +6,24 @@
     "source": true
   },
   "openai": {
-    "source": true
+    "source": true,
+    "service_tier_multipliers": {
+      "fast": [{ "factor": 2 }],
+      "ultrafast": [{ "factor": 6 }]
+    },
+    "models": {
+      "gpt-5.5": { "service_tier_multipliers": { "fast": [{ "factor": 2.5 }] } },
+      "gpt-6.2-astra": {
+        "service_tier_multipliers": {
+          "ultrafast": [{ "factor": 3 }, { "factor": 6, "since": "2027-03-01T08:00:00Z" }]
+        }
+      },
+      "gpt-6.2-sol": {
+        "service_tier_multipliers": {
+          "ultrafast": [{ "factor": 3 }, { "factor": 6, "since": "2027-03-01T08:00:00Z" }]
+        }
+      }
+    }
   },
   "zai": {
     "source": true

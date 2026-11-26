@@ -689,6 +689,7 @@ impl SessionVisitor for RecordBuilder<'_> {
         project_name: self.project_name.clone(),
         provider,
         model: req_model,
+        service_tier: None,
         ts: req_ts_ms.map(ms_to_dt).unwrap_or_else(|| ms_to_dt(0)),
         prompt: input_chars.div_ceil(4),
         completion: output_exact.unwrap_or_else(|| output_chars.div_ceil(4)),

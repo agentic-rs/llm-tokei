@@ -261,6 +261,7 @@ fn parse_session<R: Read>(reader: BufReader<R>, path: &Path) -> Result<ParsedUsa
           project_name: None,
           provider: sample.provider,
           model: sample.model,
+          service_tier: None,
           ts: Utc
             .timestamp_millis_opt(sample.time)
             .single()

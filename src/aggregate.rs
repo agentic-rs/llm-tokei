@@ -10,6 +10,7 @@ pub enum GroupDim {
   Source,
   Model,
   Provider,
+  Tier,
   Project,
   Date,
   Session,
@@ -21,6 +22,7 @@ impl GroupDim {
       "source" | "tool" => GroupDim::Source,
       "model" => GroupDim::Model,
       "provider" => GroupDim::Provider,
+      "tier" => GroupDim::Tier,
       "project" | "cwd" => GroupDim::Project,
       "date" | "day" => GroupDim::Date,
       "session" => GroupDim::Session,
@@ -33,6 +35,7 @@ impl GroupDim {
       GroupDim::Source => "source",
       GroupDim::Model => "model",
       GroupDim::Provider => "provider",
+      GroupDim::Tier => "tier",
       GroupDim::Project => "project",
       GroupDim::Date => "date",
       GroupDim::Session => "session",
@@ -67,9 +70,27 @@ pub struct Aggregate {
   pub sub_agent_sessions: u64,
   pub cost_embedded: f64,
   pub cost: f64,
+  #[serde(skip)]
+  pub base_cost: f64,
+  #[serde(skip)]
+  pub service_tier_adjusted: bool,
   pub cost_per: BTreeMap<String, f64>,
   pub first_ts: Option<DateTime<Utc>>,
   pub last_ts: Option<DateTime<Utc>>,
+}
+
+impl Aggregate {
+  pub fn service_tier_multiplier(&self) -> Option<f64> {
+    effective_service_tier_multiplier(self.cost, self.base_cost, self.service_tier_adjusted)
+  }
+}
+
+pub(crate) fn effective_service_tier_multiplier(cost: f64, base_cost: f64, tier_adjusted: bool) -> Option<f64> {
+  if !tier_adjusted || base_cost <= 0.0 {
+    return None;
+  }
+  let multiplier = cost / base_cost;
+  multiplier.is_finite().then_some(multiplier)
 }
 
 pub struct Filters {
@@ -119,6 +140,7 @@ pub fn key_for(r: &UsageRecord, dims: &[GroupDim], date_bucket_unit: &str, prici
       GroupDim::Source => r.source.as_str().to_string(),
       GroupDim::Model => pricing.canonical_model(r.provider.as_deref(), r.model.as_deref()),
       GroupDim::Provider => r.provider.clone().unwrap_or_else(|| "-".into()),
+      GroupDim::Tier => r.service_tier.map_or("-", |tier| tier.as_str()).into(),
       GroupDim::Project => r
         .project_name
         .clone()
@@ -190,6 +212,8 @@ pub fn aggregate(
       sub_agent_sessions: 0,
       cost_embedded: 0.0,
       cost: 0.0,
+      base_cost: 0.0,
+      service_tier_adjusted: false,
       cost_per: BTreeMap::new(),
       first_ts: None,
       last_ts: None,
@@ -222,7 +246,8 @@ pub fn aggregate(
     if let Some(c) = r.cost_embedded {
       agg.cost_embedded += c;
     }
-    if let Some(costs) = pricing.cost_breakdown_for(r, cost_mode) {
+    if let Some(priced) = pricing.priced_usage(r, cost_mode) {
+      let costs = priced.costs;
       agg.prompt_cost += costs.prompt;
       agg.completion_cost += costs.completion;
       agg.reasoning_cost += costs.reasoning;
@@ -230,6 +255,8 @@ pub fn aggregate(
       agg.cache_write_cost += costs.cache_write;
       let cost = costs.total();
       agg.cost += cost;
+      agg.base_cost += priced.base_cost;
+      agg.service_tier_adjusted |= priced.service_tier_multiplier.is_some() && priced.base_cost > 0.0;
       if let Some(dim) = cost_per {
         let split_key = key_for(r, &[dim], date_bucket_unit, pricing)
           .into_iter()

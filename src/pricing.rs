@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::model::UsageRecord;
+use crate::model::{ServiceTier, UsageRecord};
 use crate::model_data::{CachedModelData, HistoricalPrices};
 use crate::model_name::{fuzzy_resolve, norm};
 
@@ -46,6 +47,12 @@ impl CostBreakdown {
   pub fn total(self) -> f64 {
     self.prompt + self.completion + self.reasoning + self.cache_read + self.cache_write
   }
+}
+
+pub struct PricedUsage {
+  pub costs: CostBreakdown,
+  pub base_cost: f64,
+  pub service_tier_multiplier: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -91,6 +98,15 @@ pub struct ModelOverride {
   pub multiplier: Option<f64>,
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub included: Option<bool>,
+  #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+  pub service_tier_multipliers: BTreeMap<ServiceTier, Vec<ServiceTierRate>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServiceTierRate {
+  pub factor: f64,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub since: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -101,6 +117,8 @@ pub struct ProviderEntry {
   pub included: Option<bool>,
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub source: Option<bool>,
+  #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+  pub service_tier_multipliers: BTreeMap<ServiceTier, Vec<ServiceTierRate>>,
   #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
   pub models: BTreeMap<String, ModelOverride>,
 }
@@ -198,6 +216,7 @@ impl PricingTable {
       if v.source.is_some() {
         entry.source = v.source;
       }
+      entry.service_tier_multipliers.extend(v.service_tier_multipliers);
       for (model, mv) in models {
         let slot = entry.models.entry(model).or_default();
         if mv.multiplier.is_some() {
@@ -206,6 +225,7 @@ impl PricingTable {
         if mv.included.is_some() {
           slot.included = mv.included;
         }
+        slot.service_tier_multipliers.extend(mv.service_tier_multipliers);
       }
     }
 
@@ -275,53 +295,46 @@ impl PricingTable {
     model
   }
 
-  pub fn lookup_base(&self, provider: Option<&str>, model: Option<&str>) -> Option<&Price> {
-    let canonical = self.canonical_model(provider, model);
+  fn lookup_standard_at<'a>(
+    &'a self,
+    reported_provider: Option<&'a str>,
+    reported_model: &str,
+    canonical: &str,
+    ts: DateTime<Utc>,
+  ) -> Option<(&'a str, &'a Price)> {
     if canonical == "-" {
       return None;
     }
-    if let (Some(provider), Some(model)) = (provider, model) {
-      if let Some(price) = self.lookup_historical(provider, model, &canonical, chrono::DateTime::<chrono::Utc>::MAX_UTC)
-      {
-        return Some(price);
-      }
-      let key = (norm(provider), canonical.clone());
-      if let Some(price) = self.prices.get(&key) {
-        return Some(price);
-      }
-    }
-    if let Some(info) = self.models.get(&canonical) {
-      if let Some(price) = self.lookup_historical(
-        &info.provider,
-        &canonical,
-        &canonical,
-        chrono::DateTime::<chrono::Utc>::MAX_UTC,
-      ) {
-        return Some(price);
-      }
-      let key = (norm(&info.provider), canonical.clone());
-      if let Some(price) = self.prices.get(&key) {
-        return Some(price);
-      }
-    }
-    None
+    let official_provider = self.models.get(canonical).map(|info| info.provider.as_str());
+    let routes = [
+      reported_provider.map(|provider| (provider, reported_model)),
+      official_provider.map(|provider| (provider, canonical)),
+    ];
+    // As before, try historical rates on both routes before static rates.
+    routes
+      .into_iter()
+      .flatten()
+      .find_map(|(provider, model)| {
+        self
+          .lookup_historical(provider, model, canonical, ts)
+          .map(|price| (provider, price))
+      })
+      .or_else(|| {
+        routes.into_iter().flatten().find_map(|(provider, _)| {
+          self
+            .prices
+            .get(&(norm(provider), canonical.to_owned()))
+            .map(|price| (provider, price))
+        })
+      })
   }
 
-  pub fn lookup_official_base(&self, provider: Option<&str>, model: Option<&str>) -> Option<&Price> {
+  #[cfg(test)]
+  fn lookup_official_base(&self, provider: Option<&str>, model: Option<&str>) -> Option<&Price> {
     let canonical = self.canonical_model(provider, model);
-    if canonical == "-" {
-      return None;
-    }
-    let info = self.models.get(&canonical)?;
-    if let Some(price) = self.lookup_historical(
-      &info.provider,
-      &canonical,
-      &canonical,
-      chrono::DateTime::<chrono::Utc>::MAX_UTC,
-    ) {
-      return Some(price);
-    }
-    self.prices.get(&(norm(&info.provider), canonical))
+    self
+      .lookup_standard_at(None, &canonical, &canonical, DateTime::<Utc>::MAX_UTC)
+      .map(|(_, price)| price)
   }
 
   fn lookup_historical(
@@ -347,36 +360,6 @@ impl PricingTable {
           .iter()
           .find_map(|route| self.historical_prices.lookup(provider, route, ts))
       })
-  }
-
-  fn lookup_base_at(&self, r: &UsageRecord) -> Option<&Price> {
-    if let Some(model) = r.model.as_deref() {
-      let canonical = self.canonical_model(r.provider.as_deref(), Some(model));
-      if let Some(provider) = r.provider.as_deref() {
-        if let Some(price) = self.lookup_historical(provider, model, &canonical, r.ts) {
-          return Some(price);
-        }
-      }
-      if let Some(info) = self.models.get(&canonical) {
-        if let Some(price) = self.lookup_historical(&info.provider, &canonical, &canonical, r.ts) {
-          return Some(price);
-        }
-      }
-    }
-    self.lookup_base(r.provider.as_deref(), r.model.as_deref())
-  }
-
-  fn lookup_official_base_at(&self, r: &UsageRecord) -> Option<&Price> {
-    let canonical = self.canonical_model(r.provider.as_deref(), r.model.as_deref());
-    if canonical == "-" {
-      return None;
-    }
-    if let Some(info) = self.models.get(&canonical) {
-      if let Some(price) = self.lookup_historical(&info.provider, &canonical, &canonical, r.ts) {
-        return Some(price);
-      }
-    }
-    self.lookup_official_base(r.provider.as_deref(), r.model.as_deref())
   }
 
   pub fn lookup_multiplier(&self, provider: Option<&str>, model: Option<&str>) -> f64 {
@@ -415,32 +398,80 @@ impl PricingTable {
     entry.included.unwrap_or(false)
   }
 
-  pub fn cost_breakdown_for(&self, r: &UsageRecord, mode: CostMode) -> Option<CostBreakdown> {
-    let provider_price = self.lookup_base_at(r);
-    let provider_base = provider_price.map(|p| token_cost_breakdown(r, p));
-    let official_base = self.lookup_official_base_at(r).map(|p| token_cost_breakdown(r, p));
+  pub fn priced_usage(&self, r: &UsageRecord, mode: CostMode) -> Option<PricedUsage> {
+    let provider = r.provider.as_deref();
+    let model = r.model.as_deref();
+    let canonical = self.canonical_model(provider, model);
+    let provider_price = if mode == CostMode::Official {
+      None
+    } else {
+      self.lookup_standard_at(provider, model.unwrap_or(&canonical), &canonical, r.ts)
+    };
     let included =
-      self.lookup_included(r.provider.as_deref(), r.model.as_deref()) || provider_price.is_some_and(price_is_zero);
+      self.lookup_included(provider, model) || provider_price.is_some_and(|(_, price)| price_is_zero(price));
 
-    match mode {
-      CostMode::Actual => {
-        if included {
-          Some(CostBreakdown::default())
-        } else {
-          provider_base
-            .map(|base| scale_cost_breakdown(base, self.lookup_multiplier(r.provider.as_deref(), r.model.as_deref())))
-        }
-      }
-      CostMode::Mixed => {
-        if included {
-          official_base
-        } else {
-          provider_base
-        }
-      }
-      CostMode::Official => official_base,
+    if mode == CostMode::Actual && included {
+      return Some(PricedUsage {
+        costs: CostBreakdown::default(),
+        base_cost: 0.0,
+        service_tier_multiplier: None,
+      });
     }
+    let (price_provider, price) = if mode == CostMode::Official || included {
+      self.lookup_standard_at(None, &canonical, &canonical, r.ts)?
+    } else {
+      provider_price?
+    };
+    let mut costs = token_cost_breakdown(r, price);
+    if mode == CostMode::Actual {
+      costs = scale_cost_breakdown(costs, self.lookup_multiplier(provider, model));
+    }
+    let base_cost = costs.total();
+    let service_tier_multiplier = if base_cost > 0.0 {
+      r.service_tier
+        .and_then(|tier| self.service_tier_multiplier(price_provider, &canonical, tier, r.ts))
+    } else {
+      None
+    };
+    if let Some(factor) = service_tier_multiplier {
+      costs = scale_cost_breakdown(costs, factor);
+    }
+    Some(PricedUsage {
+      costs,
+      base_cost,
+      service_tier_multiplier,
+    })
   }
+
+  fn service_tier_multiplier(&self, provider: &str, model: &str, tier: ServiceTier, ts: DateTime<Utc>) -> Option<f64> {
+    let provider = self.providers.get(&norm(provider))?;
+    provider
+      .models
+      .get(model)
+      .and_then(|model| model.service_tier_multipliers.get(&tier))
+      .and_then(|rates| service_tier_factor_at(rates, ts))
+      .or_else(|| {
+        provider
+          .service_tier_multipliers
+          .get(&tier)
+          .and_then(|rates| service_tier_factor_at(rates, ts))
+      })
+      .filter(|factor| *factor != 1.0)
+  }
+
+  #[cfg(test)]
+  fn cost_breakdown_for(&self, r: &UsageRecord, mode: CostMode) -> Option<CostBreakdown> {
+    self.priced_usage(r, mode).map(|usage| usage.costs)
+  }
+}
+
+fn service_tier_factor_at(rates: &[ServiceTierRate], ts: DateTime<Utc>) -> Option<f64> {
+  rates
+    .iter()
+    .filter(|rate| rate.since.is_none_or(|since| since <= ts))
+    .max_by_key(|rate| rate.since)
+    .map(|rate| rate.factor)
+    .filter(|factor| factor.is_finite() && *factor > 0.0)
 }
 
 fn price_is_zero(price: &Price) -> bool {
@@ -501,6 +532,7 @@ mod tests {
       project_name: None,
       provider: Some(provider.into()),
       model: Some(model.into()),
+      service_tier: None,
       ts,
       prompt: 1_000_000,
       completion: 0,
@@ -622,6 +654,115 @@ upsert,2025-08-01T00:00:00Z,cccccccccccccccccccccccccccccccccccccccc,3,test-prov
         assert_eq!(costs.cache_write, cache_write, "{model}");
       }
     }
+  }
+
+  #[test]
+  fn bundled_service_tiers_apply_dated_multipliers_to_all_cost_components() {
+    let table = table();
+    let mut usage = usage_record(
+      Utc.with_ymd_and_hms(2027, 3, 1, 7, 59, 59).unwrap(),
+      "openai",
+      "gpt-6.2-sol",
+    );
+    usage.completion = 1_000_000;
+    usage.cache_read = 1_000_000;
+    usage.cache_write = 1_000_000;
+    usage.reasoning = 1_000_000;
+
+    for mode in [CostMode::Actual, CostMode::Mixed, CostMode::Official] {
+      usage.service_tier = Some(ServiceTier::Fast);
+      let priced = table.priced_usage(&usage, mode).unwrap();
+      assert_eq!(priced.service_tier_multiplier, Some(2.0));
+      assert_eq!(priced.costs.prompt, 4.0);
+      assert_eq!(priced.costs.completion, 20.0);
+      assert_eq!(priced.costs.reasoning, 20.0);
+      assert_eq!(priced.costs.cache_read, 0.2);
+      assert_eq!(priced.costs.cache_write, 5.0);
+
+      usage.service_tier = Some(ServiceTier::Ultrafast);
+      let promotional = table.priced_usage(&usage, mode).unwrap();
+      assert_eq!(promotional.service_tier_multiplier, Some(3.0));
+      usage.ts += chrono::Duration::seconds(1);
+      let list_price = table.priced_usage(&usage, mode).unwrap();
+      assert_eq!(list_price.service_tier_multiplier, Some(6.0));
+      assert_eq!(list_price.costs.total(), promotional.costs.total() * 2.0);
+      usage.ts -= chrono::Duration::seconds(1);
+    }
+  }
+
+  #[test]
+  fn service_tier_pricing_respects_provider_routes_and_included_usage() {
+    let table = table();
+    let ts = Utc.with_ymd_and_hms(2026, 11, 25, 0, 0, 0).unwrap();
+    let mut usage = usage_record(ts, "vercel", "openai/gpt-6.2-sol-fast");
+    usage.service_tier = Some(ServiceTier::Fast);
+    let routed = table.priced_usage(&usage, CostMode::Actual).unwrap();
+    assert_eq!(routed.service_tier_multiplier, None);
+    assert_eq!(routed.costs.total(), 4.0);
+
+    usage.provider = Some("github-copilot".into());
+    usage.model = Some("gpt-6.2-sol".into());
+    let included = table.priced_usage(&usage, CostMode::Actual).unwrap();
+    assert_eq!(included.service_tier_multiplier, None);
+    assert_eq!(included.costs.total(), 0.0);
+    let official_fallback = table.priced_usage(&usage, CostMode::Mixed).unwrap();
+    assert_eq!(official_fallback.service_tier_multiplier, Some(2.0));
+    assert_eq!(official_fallback.costs.total(), 4.0);
+
+    usage.model = Some("gpt-6-sol".into());
+    usage.service_tier = Some(ServiceTier::Ultrafast);
+    let default_rate = table.priced_usage(&usage, CostMode::Official).unwrap();
+    assert_eq!(default_rate.service_tier_multiplier, Some(6.0));
+    assert_eq!(default_rate.costs.total(), default_rate.base_cost * 6.0);
+
+    usage.model = Some("gpt-5.5".into());
+    usage.service_tier = Some(ServiceTier::Fast);
+    let model_override = table.priced_usage(&usage, CostMode::Official).unwrap();
+    assert_eq!(model_override.service_tier_multiplier, Some(2.5));
+  }
+
+  #[test]
+  fn service_tier_defaults_allow_dated_model_overrides_and_explicit_base_rates() {
+    let mut table = PricingTable::default();
+    table.merge(
+      serde_json::from_value(serde_json::json!({
+        "providers": {
+          "example": {
+            "service_tier_multipliers": { "fast": [{ "factor": 2 }] },
+            "models": {
+              "example-model": {
+                "service_tier_multipliers": {
+                  "fast": [
+                    { "factor": 3, "since": "2026-11-25T00:00:00Z" },
+                    { "factor": 1, "since": "2026-11-26T00:00:00Z" }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "prices": [{ "provider": "example", "model": "example-model", "input": 4 }]
+      }))
+      .unwrap(),
+    );
+
+    let mut usage = usage_record(
+      Utc.with_ymd_and_hms(2026, 11, 24, 0, 0, 0).unwrap(),
+      "example",
+      "example-model",
+    );
+    usage.service_tier = Some(ServiceTier::Fast);
+    for (expected_factor, expected_cost) in [(Some(2.0), 8.0), (Some(3.0), 12.0), (None, 4.0)] {
+      let priced = table.priced_usage(&usage, CostMode::Actual).unwrap();
+      assert_eq!(priced.service_tier_multiplier, expected_factor);
+      assert_eq!(priced.costs.total(), expected_cost);
+      usage.ts += chrono::Duration::days(1);
+    }
+
+    usage.service_tier = None;
+    let untagged = table.priced_usage(&usage, CostMode::Actual).unwrap();
+    assert_eq!(untagged.service_tier_multiplier, None);
+    assert_eq!(untagged.costs.total(), 4.0);
   }
 
   #[test]
